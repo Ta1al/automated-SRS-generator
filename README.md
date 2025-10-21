@@ -65,39 +65,6 @@ This project bridges the gap between clients and developers by acting like a jun
 - **Industrial:** Saves time, reduces cost of hiring analysts, improves project success rate
 - **Social:** Makes software development accessible for non-technical founders/startups
 
-## Project High Level Plan
-
-### Phase 1 – System Design & Setup
-- Define project architecture, data models, and development environment
-- Design initial chat interface prototype
-
-### Phase 2 – NLP & Chat Assistant Development
-- Integrate NLP/AI model for requirement understanding
-- Implement clarification dialogue and missing requirement suggestion engine
-
-### Phase 3 – Document & Diagram Generation
-- Build SRS generation module (IEEE 830 format)
-- Implement automated UML diagram generation (use case, class, sequence)
-
-### Phase 4 – Prototyping & Integration
-- Add basic UI wireframe generation
-- Integrate all modules into a unified system
-- Ensure usability, security, and performance
-
-### Phase 5 – Testing & Finalization
-- Conduct user testing with sample requirements
-- Refine AI suggestions and outputs
-- Prepare final deliverables (demo, documentation, reports)
-
-## Project Team
-
-- **Muhammad Talal Ahmed** (BSCS51F22S074) - Team Lead
-- **Muhammad Tayyab** (BSCS51F22S070) - Team Member
-- **Muhammad Ibrahim** (BSCS51F22S078) - Team Member
-
-**Project Supervisor:** Dr. Fahad Maqbool  
-**Project Coordinator:** Dr. Saad Razzaq
-
 ## Documentation
 
 For detailed project specifications, please refer to the files in the `documentation/` folder:
@@ -106,7 +73,7 @@ For detailed project specifications, please refer to the files in the `documenta
 
 ## License
 
-This project is part of a Final Year Project at the University of Sargodha.
+This project is part of a Final Year Project.
 
 ---
 
