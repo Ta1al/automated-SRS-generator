@@ -67,7 +67,6 @@ erDiagram
         datetime updated_at
     }
 
-    %% Diagrams created as part of the SRS (Mermaid / PlantUML)
     DIAGRAM {
         int diagram_id PK
         int srs_id FK
