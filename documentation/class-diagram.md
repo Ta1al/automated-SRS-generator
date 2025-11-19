@@ -143,7 +143,7 @@ classDiagram
 
 ## Class details and interactions
 
-Below are detailed descriptions of each class's attributes and methods, plus notes on how classes interact at runtime. This expands the concise mermaid model into explicit behavior and responsibilities so implementers can map to code and tests.
+Below are detailed descriptions of each class's attributes and methods, plus notes on how classes interact at runtime.
 
 ### User
 - Attributes
