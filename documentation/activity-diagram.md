@@ -6,7 +6,7 @@ Activity diagram of the Functional Requirement 4 (FR4) process.
 flowchart TD
     %% FR-4: SRS Document Generation - Activity Diagram (LLM-driven trigger)
 
-    A[Start] --> B[User provides initial project info and raw requirements]
+    A((Start)) --> B[User provides initial project info and raw requirements]
 
     B --> C[LLM evaluates information completeness]
     C --> D{Enough information collected?}
@@ -19,7 +19,7 @@ flowchart TD
     G --> H{Input valid?}
 
     H -- No --> I[Show validation errors to user]
-    I --> J[End failure]
+    I --> J((End failure))
 
     H -- Yes --> K[Analyze requirements NLP extraction and parsing]
     K --> L[Categorize requirements FR vs NFR, group NFRs by performance/security/etc.]
@@ -39,9 +39,14 @@ flowchart TD
     T --> U{Storage successful?}
 
     U -- No --> V[Show generation/storage error to user]
-    V --> W[End failure]
+    V --> W((End failure))
 
     U -- Yes --> X[Return SRS download/view link to user]
     X --> Y[User views/downloads SRS document]
-    Y --> Z[End success]
+    Y --> Z((End success))
+
+    classDef startNode fill:#000,stroke:#000,stroke-width:0,color:#fff;
+    classDef endNode fill:none,stroke:#000,stroke-width:3,color:#000;
+    class A startNode;
+    class J,Z,W endNode;
 ```
