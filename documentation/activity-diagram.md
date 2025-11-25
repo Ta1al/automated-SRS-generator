@@ -4,38 +4,44 @@ Activity diagram of the Functional Requirement 4 (FR4) process.
 
 ```mermaid
 flowchart TD
-    %% FR-4: SRS Document Generation - Activity Diagram
+    %% FR-4: SRS Document Generation - Activity Diagram (LLM-driven trigger)
 
-    A[Start] --> B[User provides project info and raw requirements]
-    B --> C[User clicks 'Generate SRS']
+    A[Start] --> B[User provides initial project info and raw requirements]
 
-    C --> D[Validate input project info and requirements]
-    D --> E{Input valid?}
+    B --> C[LLM evaluates information completeness]
+    C --> D{Enough information collected?}
 
-    E -- No --> F[Show validation errors to user]
-    F --> G[End failure]
+    D -- No --> E[LLM asks clarifying questions]
+    E --> F[User provides additional details]
+    F --> C[LLM re-evaluates information completeness]
 
-    E -- Yes --> H[Analyze requirements NLP extraction and parsing]
-    H --> I[Categorize requirements FR vs NFR, group NFRs by performance/security/etc.]
+    D -- Yes --> G[Validate input project info and requirements]
+    G --> H{Input valid?}
 
-    I --> J[Derive system structure context, use cases, flows]
-    J --> K[Generate system diagrams PlantUML / Mermaid.js]
-    K --> L{Diagrams generated?}
+    H -- No --> I[Show validation errors to user]
+    I --> J[End failure]
 
-    L -- No --> M[Log diagram generation error]
-    M --> N[Mark diagrams section as partial/empty in SRS]
-    N --> O[Compose IEEE 830-compliant SRS all required sections]
+    H -- Yes --> K[Analyze requirements NLP extraction and parsing]
+    K --> L[Categorize requirements FR vs NFR, group NFRs by performance/security/etc.]
 
-    L -- Yes --> P[Attach generated diagrams to SRS content]
-    P --> O[Compose IEEE 830-compliant SRS all required sections]
+    L --> M[Derive system structure context, use cases, flows]
+    M --> N[Generate system diagrams PlantUML / Mermaid.js]
+    N --> O{Diagrams generated?}
 
-    O --> Q[Save SRS document to storage]
-    Q --> R{Storage successful?}
+    O -- No --> P[Log diagram generation error]
+    P --> Q[Mark diagrams section as partial/empty in SRS]
+    Q --> R[Compose IEEE 830-compliant SRS all required sections]
 
-    R -- No --> S[Show generation/storage error to user]
-    S --> T[End failure]
+    O -- Yes --> S[Attach generated diagrams to SRS content]
+    S --> R[Compose IEEE 830-compliant SRS all required sections]
 
-    R -- Yes --> U[Return SRS download/view link to user]
-    U --> V[User views/downloads SRS document]
-    V --> W[End success]
+    R --> T[Save SRS document to storage]
+    T --> U{Storage successful?}
+
+    U -- No --> V[Show generation/storage error to user]
+    V --> W[End failure]
+
+    U -- Yes --> X[Return SRS download/view link to user]
+    X --> Y[User views/downloads SRS document]
+    Y --> Z[End success]
 ```
