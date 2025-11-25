@@ -27,47 +27,46 @@ sequenceDiagram
         UI-->>SRS: submitOrUpdateSRSContext(updatedProjectData, updatedRequirements)
         SRS-->>SRS: Re-evaluate information completeness
         note over SRS: Loop until enough information is collected
-    end
+    else Information enough
+        %% Once enough information is collected
+        SRS-->>SRS: Mark information as sufficient to generate SRS
 
-    %% Once enough information is collected
-    SRS-->>SRS: Mark information as sufficient to generate SRS
+        %% Validate collected info
+        SRS-->>SRS: Validate project info & requirements
+        alt Validation fails
+            SRS-->>UI: SRSGenerationResult(status=validation_error, details)
+            UI-->>User: Show validation errors
+        else Validation passes
+            %% Extract & categorize requirements (FR-5)
+            SRS->>Analyzer: analyzeRequirements(collectedRequirements)
+            activate Analyzer
+            Analyzer-->>Analyzer: NLP parsing & extraction
+            Analyzer-->>Analyzer: Classify FR vs NFR + group NFRs (performance, security, etc.)
+            Analyzer-->>SRS: categorizedRequirements
+            deactivate Analyzer
 
-    %% Validate collected info
-    SRS-->>SRS: Validate project info & requirements
-    alt Validation fails
-        SRS-->>UI: SRSGenerationResult(status=validation_error, details)
-        deactivate SRS
-        UI-->>User: Show validation errors
-    else Validation passes
-        %% Extract & categorize requirements (FR-5)
-        SRS->>Analyzer: analyzeRequirements(collectedRequirements)
-        activate Analyzer
-        Analyzer-->>Analyzer: NLP parsing & extraction
-        Analyzer-->>Analyzer: Classify FR vs NFR + group NFRs (performance, security, etc.)
-        Analyzer-->>SRS: categorizedRequirements
-        deactivate Analyzer
+            %% Generate diagrams (FR-5a)
+            SRS->>Diagrams: generateSystemDiagrams(categorizedRequirements, systemContext)
+            activate Diagrams
+            Diagrams-->>Diagrams: Derive system structure (use cases, flows, context)
+            Diagrams-->>SRS: diagramDefinitions(PlantUML/Mermaid.js)
+            deactivate Diagrams
 
-        %% Generate diagrams (FR-5a)
-        SRS->>Diagrams: generateSystemDiagrams(categorizedRequirements, systemContext)
-        activate Diagrams
-        Diagrams-->>Diagrams: Derive system structure (use cases, flows, context)
-        Diagrams-->>SRS: diagramDefinitions(PlantUML/Mermaid.js)
-        deactivate Diagrams
+            %% Assemble IEEE 830-compliant SRS (FR-4)
+            SRS->>Template: buildSRS(projectData, categorizedRequirements, diagramDefinitions)
+            activate Template
+            Template-->>Template: Populate IEEE 830 sections: Introduction, System Description, Interfaces, FRs, NFRs, Diagrams, Wireframes, References
+            Template-->>SRS: srsDocument
+            deactivate Template
 
-        %% Assemble IEEE 830-compliant SRS (FR-4)
-        SRS->>Template: buildSRS(projectData, categorizedRequirements, diagramDefinitions)
-        activate Template
-        Template-->>Template: Populate IEEE 830 sections: Introduction, System Description, Interfaces, FRs, NFRs, Diagrams, Wireframes, References
-        Template-->>SRS: srsDocument
-        deactivate Template
+            %% Store and deliver document
+            SRS->>Storage: saveSRS(srsDocument)
+            Storage-->>SRS: storageLocation / documentId
 
-        %% Store and deliver document
-        SRS->>Storage: saveSRS(srsDocument)
-        Storage-->>SRS: storageLocation / documentId
+            SRS-->>UI: SRSGenerationResult(linkToSRS, status=success)
+            deactivate SRS
 
-        SRS-->>UI: SRSGenerationResult(linkToSRS, status=success)
-        deactivate SRS
-
-        UI-->>User: Show success & SRS download/view link
+            UI-->>User: Show success & SRS download/view link
+        end
     end
 ```
