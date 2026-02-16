@@ -85,6 +85,14 @@ Preview a few normalized records:
 python scripts/preview_normalized.py --limit 5
 ```
 
+## Clarification Loop (Demo)
+
+Generate initial clarification questions from a user idea:
+
+```bash
+python scripts/clarification_demo.py --input "We want a web app that turns ideas into SRS documents"
+```
+
 ## License
 
 This project is part of a Final Year Project.
