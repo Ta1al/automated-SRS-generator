@@ -93,6 +93,27 @@ Generate initial clarification questions from a user idea:
 python scripts/clarification_demo.py --input "We want a web app that turns ideas into SRS documents"
 ```
 
+## OpenRouter Clarification App
+
+Install Python dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+Run the interactive CLI (dry run skips the API call):
+
+```bash
+python scripts/openrouter_app.py --dry-run
+```
+
+Set your OpenRouter key and run live:
+
+```bash
+$env:OPENROUTER_API_KEY="your-key-here"
+python scripts/openrouter_app.py
+```
+
 ## License
 
 This project is part of a Final Year Project.
