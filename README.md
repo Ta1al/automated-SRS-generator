@@ -113,6 +113,25 @@ Stream the LLM response:
 python scripts/openrouter_app.py --stream
 ```
 
+Use embeddings-based RAG (OpenRouter embeddings model):
+
+```bash
+$env:OPENROUTER_EMBED_MODEL="openai/text-embedding-3-small"
+python scripts/openrouter_app.py --rag embed
+```
+
+Precompute embeddings once (recommended for speed):
+
+```bash
+python scripts/build_embeddings.py
+```
+
+Then run with the precomputed index:
+
+```bash
+python scripts/openrouter_app.py --rag embed --use-precomputed
+```
+
 Set your OpenRouter key and run live:
 
 ```bash
