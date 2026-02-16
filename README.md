@@ -114,6 +114,15 @@ $env:OPENROUTER_API_KEY="your-key-here"
 python scripts/openrouter_app.py
 ```
 
+Or place the key in a root `.env` file:
+
+```bash
+OPENROUTER_API_KEY=your-key-here
+OPENROUTER_MODEL=openai/gpt-4o-mini
+OPENROUTER_HTTP_REFERER=https://your-site.example
+OPENROUTER_APP_TITLE=Your App Name
+```
+
 ## License
 
 This project is part of a Final Year Project.
