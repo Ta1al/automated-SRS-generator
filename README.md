@@ -107,6 +107,12 @@ Run the interactive CLI (dry run skips the API call):
 python scripts/openrouter_app.py --dry-run
 ```
 
+Stream the LLM response:
+
+```bash
+python scripts/openrouter_app.py --stream
+```
+
 Set your OpenRouter key and run live:
 
 ```bash

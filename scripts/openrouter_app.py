@@ -5,14 +5,13 @@ import sys
 from pathlib import Path
 from typing import Iterable
 from dotenv import load_dotenv
-
-import requests
+from openai import OpenAI
 from rank_bm25 import BM25Okapi
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parents[1] / ".env")
 sys.path.append(str(Path(__file__).resolve().parent))
 
-from clarification_loop import generate_questions, build_llm_prompt
+from clarification_loop import build_question_prompt, parse_questions
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 NORMALIZED_PATH = BASE_DIR / "data" / "normalized" / "combined.jsonl"
@@ -59,57 +58,75 @@ def ask_questions(questions: Iterable) -> dict[str, str]:
     return answers
 
 
-def call_openrouter(system_prompt: str, user_prompt: str, dry_run: bool = False) -> str:
-    if dry_run:
-        return "[DRY RUN] OpenRouter call skipped."
-
+def _create_client() -> OpenAI:
     api_key = os.getenv("OPENROUTER_API_KEY")
     if not api_key:
         raise EnvironmentError("OPENROUTER_API_KEY is not set.")
 
-    model = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini")
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
-
+    default_headers = {}
     referer = os.getenv("OPENROUTER_HTTP_REFERER")
     title = os.getenv("OPENROUTER_APP_TITLE")
     if referer:
-        headers["HTTP-Referer"] = referer
+        default_headers["HTTP-Referer"] = referer
     if title:
-        headers["X-Title"] = title
+        default_headers["X-Title"] = title
 
-    payload = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        "temperature": 0.2,
-    }
-
-    response = requests.post(
-        "https://openrouter.ai/api/v1/chat/completions",
-        headers=headers,
-        json=payload,
-        timeout=60,
+    return OpenAI(
+        api_key=api_key,
+        base_url="https://openrouter.ai/api/v1",
+        default_headers=default_headers or None,
     )
+
+
+def call_openrouter(
+    system_prompt: str,
+    user_prompt: str,
+    dry_run: bool = False,
+    stream: bool = False,
+) -> str:
+    if dry_run:
+        return "[DRY RUN] OpenRouter call skipped."
+
+    client = _create_client()
+    model = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini")
+
     try:
-        response.raise_for_status()
-    except requests.HTTPError as exc:
-        details = response.text.strip() if response.text else "No response body."
+        if stream:
+            stream_resp = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.2,
+                stream=True,
+            )
+            chunks: list[str] = []
+            for event in stream_resp:
+                delta = event.choices[0].delta.content
+                if delta:
+                    print(delta, end="", flush=True)
+                    chunks.append(delta)
+            print()
+            return "".join(chunks)
+
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.2,
+        )
+        return response.choices[0].message.content or ""
+    except Exception as exc:
+        status_code = getattr(exc, "status_code", None)
         hint = (
             "Check OPENROUTER_API_KEY, model access, and optional HTTP-Referer/X-Title."
-            if response.status_code == 403
+            if status_code == 403
             else ""
         )
-        raise RuntimeError(
-            f"OpenRouter error {response.status_code}: {details}\n{hint}"
-        ) from exc
-
-    data = response.json()
-    return data["choices"][0]["message"]["content"]
+        raise RuntimeError(f"OpenRouter request failed. {hint}") from exc
 
 
 def main() -> None:
@@ -117,21 +134,52 @@ def main() -> None:
     parser.add_argument("--idea", help="Initial user idea text.")
     parser.add_argument("--k", type=int, default=5, help="Number of context items to retrieve.")
     parser.add_argument("--max-questions", type=int, default=6, help="Max clarification questions.")
+    parser.add_argument("--rounds", type=int, default=2, help="Max clarification rounds.")
     parser.add_argument("--dry-run", action="store_true", help="Skip OpenRouter call.")
+    parser.add_argument("--stream", action="store_true", help="Stream LLM response to console.")
     args = parser.parse_args()
 
     idea = args.idea or input("Describe your product idea: ").strip()
     corpus = load_corpus(NORMALIZED_PATH)
 
-    questions = generate_questions(idea, max_questions=args.max_questions)
-    answers = ask_questions(questions)
     context = retrieve_context(corpus, idea, k=args.k)
+    answers: dict[str, str] = {}
 
-    prompts = build_llm_prompt(idea, answers, context)
-    reply = call_openrouter(prompts["system"], prompts["user"], dry_run=args.dry_run)
+    for _ in range(args.rounds):
+        prompts = build_question_prompt(
+            idea,
+            answers,
+            context,
+            max_questions=args.max_questions,
+        )
+        reply = call_openrouter(
+            prompts["system"],
+            prompts["user"],
+            dry_run=args.dry_run,
+            stream=args.stream,
+        )
 
-    print("\n--- OpenRouter Response ---")
-    print(reply)
+        if args.dry_run:
+            print("\n--- LLM Prompt (dry run) ---")
+            print(prompts["user"])
+            break
+
+        try:
+            questions = parse_questions(reply)
+        except ValueError as exc:
+            print("\n--- OpenRouter Response (raw) ---")
+            print(reply)
+            raise SystemExit(str(exc)) from exc
+
+        if not questions:
+            print("\nNo further clarification questions.")
+            break
+
+        new_answers = ask_questions(questions)
+        answers.update(new_answers)
+
+    print("\n--- Collected Answers ---")
+    print(json.dumps(answers, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":
