@@ -71,6 +71,20 @@ For detailed project specifications, please refer to the files in the `documenta
 - [FYP Proposal](documentation/FYP%20Proposal.pdf)
 - [Software Requirements Specifications](documentation/Software%20Requirements%20Specifications.pdf)
 
+## Data Normalization
+
+Normalize the sample requirements and SRS templates into JSONL for RAG:
+
+```bash
+python scripts/normalize_data.py
+```
+
+Preview a few normalized records:
+
+```bash
+python scripts/preview_normalized.py --limit 5
+```
+
 ## License
 
 This project is part of a Final Year Project.
