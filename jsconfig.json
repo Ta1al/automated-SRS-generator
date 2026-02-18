@@ -1,9 +1,0 @@
-// z:\up dated Final_year_Project\jsconfig.json
-{
-  "compilerOptions": {
-    "paths": {
-      "@/*": ["./*"]
-    }
-  }
-}
-
