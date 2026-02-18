@@ -1,0 +1,12 @@
+[2026-02-08T17:18:29.318Z] [ERROR] ❌ Database connection failed - Unknown database 'chatbot_db'
+[2026-02-08T17:20:11.716Z] [ERROR] ❌ Database connection failed - Unknown database 'chatbot_db'
+[2026-02-08T17:24:00.752Z] [INFO] ✅ MySQL Database connected successfully
+[2026-02-08T17:24:00.796Z] [INFO] 
+╔════════════════════════════════════════╗
+║  🚀 Chatbot Backend Server Running     ║
+║  📍 Port: 5000                        ║
+║  🔗 http://localhost:5000              ║
+║  🔐 Environment: development     ║
+║  📝 API Docs: /api                      ║
+╚════════════════════════════════════════╝
+      
