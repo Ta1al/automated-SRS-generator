@@ -1,0 +1,28 @@
+<<<<<<< HEAD
+# Dependencies
+/node_modules
+/backend/node_modules
+
+# Next.js
+/.next/
+/out/
+
+# Environment Variables
+.env
+.env.local
+.env.*.local
+
+# Backend Env
+/backend/.env
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+
+# OS
+.DS_Store
+=======
+.env
+__pycache__
+.venv
+>>>>>>> 3e7b6f7ed1dc662d5e4cd77396820df2d19ca48a
