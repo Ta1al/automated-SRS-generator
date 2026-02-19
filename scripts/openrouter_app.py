@@ -243,7 +243,7 @@ def call_openrouter(
         return "[DRY RUN] OpenRouter call skipped."
 
     client = _create_client(timeout=timeout)
-    model = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini")
+    model = os.getenv("OPENROUTER_MODEL")
 
     try:
         if stream:
