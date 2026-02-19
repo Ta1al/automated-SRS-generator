@@ -126,6 +126,12 @@ Precompute embeddings once (recommended for speed):
 python scripts/build_embeddings.py
 ```
 
+Use local CPU embeddings (no OpenRouter required):
+
+```bash
+python scripts/build_embeddings.py --model sentence-transformers/all-MiniLM-L6-v2 --device cpu
+```
+
 Then run with the precomputed index:
 
 ```bash
