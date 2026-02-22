@@ -3,7 +3,6 @@ import hashlib
 import json
 import math
 import os
-import sys
 from pathlib import Path
 from typing import Iterable
 from dotenv import load_dotenv
@@ -11,9 +10,8 @@ from openai import OpenAI
 from rank_bm25 import BM25Okapi
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parents[1] / ".env")
-sys.path.append(str(Path(__file__).resolve().parent))
 
-from clarification_loop import build_question_prompt, parse_questions
+from cli.clarification_loop import build_question_prompt, parse_questions
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 NORMALIZED_PATH = BASE_DIR / "data" / "normalized" / "combined.jsonl"
@@ -24,7 +22,7 @@ EMBEDDINGS_INDEX_PATH = BASE_DIR / "data" / "normalized" / "embeddings_index.jso
 def load_corpus(path: Path) -> list[str]:
     if not path.exists():
         raise FileNotFoundError(
-            f"Normalized data not found: {path}. Run scripts/normalize_data.py first."
+            f"Normalized data not found: {path}. Run cli/normalize_data.py first."
         )
     texts = []
     with path.open("r", encoding="utf-8") as f:
@@ -66,7 +64,7 @@ def load_embeddings_cache(path: Path) -> dict[str, list[float]]:
 def load_embeddings_index(path: Path) -> dict[str, list[float]]:
     if not path.exists():
         raise FileNotFoundError(
-            f"Embeddings index not found: {path}. Run scripts/build_embeddings.py first."
+            f"Embeddings index not found: {path}. Run cli/build_embeddings.py first."
         )
     cache: dict[str, list[float]] = {}
     with path.open("r", encoding="utf-8") as f:
@@ -293,9 +291,6 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true", help="Skip OpenRouter call.")
     parser.add_argument("--stream", action="store_true", help="Stream LLM response to console.")
     parser.add_argument("--verbose", action="store_true", help="Print extra debugging details.")
-    parser.add_argument("--timeout", type=float, default=60, help="Request timeout in seconds.")
-    parser.add_argument("--embed-batch-size", type=int, default=32, help="Embedding batch size.")
-    parser.add_argument("--embed-retries", type=int, default=2, help="Embedding retry attempts.")
     parser.add_argument("--use-precomputed", action="store_true", help="Use precomputed embeddings index.")
     parser.add_argument("--embed-index-path", default=str(EMBEDDINGS_INDEX_PATH), help="Path to embeddings index JSONL.")
     parser.add_argument("--use-graph", action="store_true", help="Run the LangGraph workflow instead of the normal loop.")
@@ -325,7 +320,7 @@ def main() -> None:
         args.rag = "bm25"
 
     if args.rag == "embed":
-        client = _create_client(timeout=args.timeout)
+        client = _create_client()
         embed_model = os.getenv("OPENROUTER_EMBED_MODEL", "openai/text-embedding-3-small")
         if args.use_precomputed:
             if args.verbose:
@@ -343,9 +338,7 @@ def main() -> None:
                 embed_model,
                 corpus,
                 EMBEDDINGS_CACHE_PATH,
-                batch_size=args.embed_batch_size,
                 verbose=args.verbose,
-                retries=args.embed_retries,
             )
         if args.verbose:
             print("Embedding query text...")

@@ -5,7 +5,7 @@ import uuid
 from pathlib import Path
 import json
 
-from scripts.graph_controller import build_graph
+from cli.graph_controller import build_graph
 
 # simple in-memory session storage
 _sessions: Dict[str, Dict[str, Any]] = {}

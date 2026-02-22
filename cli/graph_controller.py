@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from openrouter_app import (
+from cli.openrouter_app import (
     call_openrouter,
     load_corpus,
     retrieve_context,

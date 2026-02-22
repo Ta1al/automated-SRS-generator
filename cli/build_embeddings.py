@@ -17,7 +17,7 @@ def _text_hash(text: str) -> str:
 def load_corpus(path: Path) -> list[str]:
     if not path.exists():
         raise FileNotFoundError(
-            f"Normalized data not found: {path}. Run scripts/normalize_data.py first."
+            f"Normalized data not found: {path}. Run cli/normalize_data.py first."
         )
     texts = []
     with path.open("r", encoding="utf-8") as f:

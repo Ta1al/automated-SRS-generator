@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parent))
 
-from clarification_loop import generate_questions, build_llm_prompt
+from cli.clarification_loop import generate_questions, build_llm_prompt
 
 
 def main() -> None:

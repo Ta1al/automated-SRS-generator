@@ -76,13 +76,13 @@ For detailed project specifications, please refer to the files in the `documenta
 Normalize the sample requirements and SRS templates into JSONL for RAG:
 
 ```bash
-python scripts/normalize_data.py
+python cli/normalize_data.py
 ```
 
 Preview a few normalized records:
 
 ```bash
-python scripts/preview_normalized.py --limit 5
+python cli/preview_normalized.py --limit 5
 ```
 
 ## Clarification Loop (Demo)
@@ -90,7 +90,7 @@ python scripts/preview_normalized.py --limit 5
 Generate initial clarification questions from a user idea:
 
 ```bash
-python scripts/clarification_demo.py --input "We want a web app that turns ideas into SRS documents"
+python cli/clarification_demo.py --input "We want a web app that turns ideas into SRS documents"
 ```
 
 ## OpenRouter Clarification App
@@ -104,32 +104,32 @@ pip install -r requirements.txt
 Run the interactive CLI (dry run skips the API call):
 
 ```bash
-python scripts/openrouter_app.py --dry-run
+python cli/openrouter_app.py --dry-run
 ```
 
 Stream the LLM response:
 
 ```bash
-python scripts/openrouter_app.py --stream
+python cli/openrouter_app.py --stream
 ```
 
 Use embeddings-based RAG (OpenRouter embeddings model):
 
 ```bash
 $env:OPENROUTER_EMBED_MODEL="openai/text-embedding-3-small"
-python scripts/openrouter_app.py --rag embed
+python cli/openrouter_app.py --rag embed
 ```
 
 Precompute embeddings once (recommended for speed):
 
 ```bash
-python scripts/build_embeddings.py
+python cli/build_embeddings.py
 ```
 
 Use local CPU embeddings (no OpenRouter required):
 
 ```bash
-python scripts/build_embeddings.py --model sentence-transformers/all-MiniLM-L6-v2 --device cpu
+python cli/build_embeddings.py --model sentence-transformers/all-MiniLM-L6-v2 --device cpu
 ```
 +
 +## Backend API
@@ -157,7 +157,7 @@ Set your OpenRouter key and run live:
 
 ```bash
 $env:OPENROUTER_API_KEY="your-key-here"
-python scripts/openrouter_app.py
+python cli/openrouter_app.py
 ```
 
 Or place the key in a root `.env` file:
