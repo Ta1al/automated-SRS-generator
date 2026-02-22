@@ -3,11 +3,14 @@ import hashlib
 import json
 import math
 import os
+import sys
 from pathlib import Path
 from typing import Iterable
 from dotenv import load_dotenv
 from openai import OpenAI
 from rank_bm25 import BM25Okapi
+# make sure parent directory is on sys.path when running the script
+sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parents[1] / ".env")
 

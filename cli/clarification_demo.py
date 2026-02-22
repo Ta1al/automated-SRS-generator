@@ -3,9 +3,10 @@ import json
 import sys
 from pathlib import Path
 
-sys.path.append(str(Path(__file__).resolve().parent))
+# include repo root so we can import the cli package
+sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from cli.clarification_loop import generate_questions, build_llm_prompt
+from cli.clarification_loop import build_question_prompt
 
 
 def main() -> None:
@@ -19,11 +20,8 @@ def main() -> None:
     answers = json.loads(args.answers) if args.answers else {}
     context = json.loads(args.context) if args.context else []
 
-    questions = generate_questions(args.input, max_questions=args.max)
-    payload = {
-        "questions": [q.__dict__ for q in questions],
-        "llm_prompt": build_llm_prompt(args.input, answers, context),
-    }
+    prompts = build_question_prompt(args.input, answers, context, max_questions=args.max)
+    payload = {"llm_prompt": prompts}
 
     print(json.dumps(payload, ensure_ascii=False, indent=2))
 
