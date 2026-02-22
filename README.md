@@ -131,11 +131,26 @@ Use local CPU embeddings (no OpenRouter required):
 ```bash
 python scripts/build_embeddings.py --model sentence-transformers/all-MiniLM-L6-v2 --device cpu
 ```
-
-Then run with the precomputed index:
-
-```bash
-python scripts/openrouter_app.py --rag embed --use-precomputed
++
++## Backend API
++
++Start the server with Uvicorn:
++
++```bash
++cd backend
++uvicorn api:app --reload --port 8000
++```
++
++Sample requests:
++
++```bash
++# start session
++curl -X POST http://localhost:8000/graph/start -H "Content-Type: application/json" -d '{"idea":"A fish game"}'
++
++# step with answer
++curl -X POST http://localhost:8000/graph/step -H "Content-Type: application/json" \
++     -d '{"session_id":"<id>","answer":"eating round bubbles"}'
++```
 ```
 
 Set your OpenRouter key and run live:

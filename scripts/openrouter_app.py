@@ -298,6 +298,7 @@ def main() -> None:
     parser.add_argument("--embed-retries", type=int, default=2, help="Embedding retry attempts.")
     parser.add_argument("--use-precomputed", action="store_true", help="Use precomputed embeddings index.")
     parser.add_argument("--embed-index-path", default=str(EMBEDDINGS_INDEX_PATH), help="Path to embeddings index JSONL.")
+    parser.add_argument("--use-graph", action="store_true", help="Run the LangGraph workflow instead of the normal loop.")
     parser.add_argument(
         "--rag",
         choices=["bm25", "embed"],
@@ -307,6 +308,15 @@ def main() -> None:
     args = parser.parse_args()
 
     idea = args.idea or input("Describe your product idea: ").strip()
+    if args.use_graph:
+        from graph_controller import build_graph
+
+        print("Running stateful graph workflow...")
+        ctx = build_graph().run({"idea": idea})
+        print("\n--- graph output ---")
+        print(json.dumps(ctx, ensure_ascii=False, indent=2))
+        return
+
     corpus = load_corpus(NORMALIZED_PATH)
 
     if args.rag == "embed" and args.dry_run:
