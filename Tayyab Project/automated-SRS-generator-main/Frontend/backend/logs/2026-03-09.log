@@ -1,0 +1,23 @@
+[2026-03-09T17:36:45.229Z] [INFO] 
+╔════════════════════════════════════════╗
+║  🚀 Chatbot Backend Server Running     ║
+║  📍 Port: 5000                        ║
+║  🔗 http://localhost:5000              ║
+║  🔐 Environment: development     ║
+║  📝 API Docs: /api                      ║
+╚════════════════════════════════════════╝
+      
+[2026-03-09T17:50:44.569Z] [INFO] 
+╔════════════════════════════════════════╗
+║  🚀 Chatbot Backend Server Running     ║
+║  📍 Port: 5000                        ║
+║  🔗 http://localhost:5000              ║
+║  🔐 Environment: development     ║
+║  📝 API Docs: /api                      ║
+╚════════════════════════════════════════╝
+      
+[2026-03-09T17:53:12.654Z] [INFO] 📨 POST /api/auth/login
+[2026-03-09T17:53:14.251Z] [INFO] ✅ User logged in: tayyab (ID: 2)
+[2026-03-09T18:05:02.720Z] [INFO] 📨 GET /api/chat/history
+[2026-03-09T18:05:02.986Z] [INFO] 📨 GET /api/chat/history
+[2026-03-09T18:05:11.022Z] [INFO] 📨 GET /api/chat/history

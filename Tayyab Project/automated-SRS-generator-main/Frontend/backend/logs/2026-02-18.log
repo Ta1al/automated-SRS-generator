@@ -1,0 +1,184 @@
+[2026-02-18T02:24:31.122Z] [INFO] ✅ MySQL Database connected successfully
+[2026-02-18T02:24:31.131Z] [INFO] 
+╔════════════════════════════════════════╗
+║  🚀 Chatbot Backend Server Running     ║
+║  📍 Port: 5000                        ║
+║  🔗 http://localhost:5000              ║
+║  🔐 Environment: development     ║
+║  📝 API Docs: /api                      ║
+╚════════════════════════════════════════╝
+      
+[2026-02-18T02:28:36.883Z] [INFO] ✅ MySQL Database connected successfully
+[2026-02-18T02:28:36.893Z] [INFO] 
+╔════════════════════════════════════════╗
+║  🚀 Chatbot Backend Server Running     ║
+║  📍 Port: 5000                        ║
+║  🔗 http://localhost:5000              ║
+║  🔐 Environment: development     ║
+║  📝 API Docs: /api                      ║
+╚════════════════════════════════════════╝
+      
+[2026-02-18T02:28:50.286Z] [INFO] 📨 GET /
+[2026-02-18T02:28:50.407Z] [WARN] 404 Not Found: GET /
+[2026-02-18T02:28:50.632Z] [INFO] 📨 GET /
+[2026-02-18T02:28:50.680Z] [WARN] 404 Not Found: GET /
+[2026-02-18T02:29:00.689Z] [INFO] 📨 GET /favicon.ico
+[2026-02-18T02:29:00.820Z] [WARN] 404 Not Found: GET /favicon.ico
+[2026-02-18T02:30:24.223Z] [INFO] 📨 POST /api/auth/login
+[2026-02-18T02:30:24.759Z] [INFO] ✅ User logged in: tayyab (ID: 2)
+[2026-02-18T02:30:31.335Z] [INFO] 📨 GET /api/chat/history
+[2026-02-18T02:30:31.459Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-18T02:30:31.708Z] [INFO] 📨 GET /api/chat/history
+[2026-02-18T02:30:31.719Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-18T02:30:38.860Z] [INFO] 📨 POST /api/chat/save
+[2026-02-18T02:30:39.198Z] [ERROR] Save chat error - Table 'chatbot_db.chat_history' doesn't exist
+[2026-02-18T02:30:39.230Z] [INFO] 📨 GET /api/chat/history
+[2026-02-18T02:30:39.233Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-18T02:31:02.782Z] [INFO] 📨 POST /api/auth/login
+[2026-02-18T02:31:03.062Z] [INFO] ✅ User logged in: tayyab (ID: 2)
+[2026-02-18T02:31:13.575Z] [INFO] 📨 POST /api/auth/login
+[2026-02-18T02:31:14.879Z] [INFO] ✅ User logged in: tayyab (ID: 2)
+[2026-02-18T02:31:23.374Z] [INFO] 📨 GET /api/chat/history
+[2026-02-18T02:31:23.381Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-18T02:31:23.415Z] [INFO] 📨 GET /api/chat/history
+[2026-02-18T02:31:23.425Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-18T02:33:04.663Z] [INFO] 📨 POST /api/auth/login
+[2026-02-18T02:33:04.952Z] [INFO] ✅ User logged in: tayyab (ID: 2)
+[2026-02-18T02:33:10.794Z] [INFO] 📨 GET /api/chat/history
+[2026-02-18T02:33:10.873Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-18T02:33:10.946Z] [INFO] 📨 GET /api/chat/history
+[2026-02-18T02:33:10.966Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-18T02:35:39.207Z] [INFO] 📨 POST /api/auth/login
+[2026-02-18T02:35:39.371Z] [INFO] ✅ User logged in: tayyab (ID: 2)
+[2026-02-18T02:35:43.510Z] [INFO] 📨 GET /api/chat/history
+[2026-02-18T02:35:43.620Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-18T02:35:43.656Z] [INFO] 📨 GET /api/chat/history
+[2026-02-18T02:35:43.846Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-18T02:41:01.728Z] [INFO] 📨 GET /api/chat/history
+[2026-02-18T02:41:02.089Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-18T02:41:12.338Z] [INFO] 📨 POST /api/auth/login
+[2026-02-18T02:41:31.447Z] [INFO] ✅ MySQL Database connected successfully
+[2026-02-18T02:41:31.455Z] [INFO] 
+╔════════════════════════════════════════╗
+║  🚀 Chatbot Backend Server Running     ║
+║  📍 Port: 5000                        ║
+║  🔗 http://localhost:5000              ║
+║  🔐 Environment: development     ║
+║  📝 API Docs: /api                      ║
+╚════════════════════════════════════════╝
+      
+[2026-02-18T02:41:38.491Z] [INFO] 📨 POST /api/auth/login
+[2026-02-18T02:41:38.794Z] [INFO] ✅ User logged in: tayyab (ID: 2)
+[2026-02-18T02:44:54.623Z] [INFO] 📨 POST /api/auth/login
+[2026-02-18T02:44:54.859Z] [INFO] ✅ User logged in: tayyab (ID: 2)
+[2026-02-18T02:53:49.056Z] [INFO] 📨 POST /api/auth/login
+[2026-02-18T02:53:49.429Z] [INFO] ✅ User logged in: tayyab (ID: 2)
+[2026-02-18T03:00:27.737Z] [ERROR] Failed to start server - testConnection is not a function
+[2026-02-18T03:03:18.658Z] [INFO] 
+╔════════════════════════════════════════╗
+║  🚀 Chatbot Backend Server Running     ║
+║  📍 Port: 5000                        ║
+║  🔗 http://localhost:5000              ║
+║  🔐 Environment: development     ║
+║  📝 API Docs: /api                      ║
+╚════════════════════════════════════════╝
+      
+[2026-02-18T03:22:46.050Z] [INFO] 
+╔════════════════════════════════════════╗
+║  🚀 Chatbot Backend Server Running     ║
+║  📍 Port: 5000                        ║
+║  🔗 http://localhost:5000              ║
+║  🔐 Environment: development     ║
+║  📝 API Docs: /api                      ║
+╚════════════════════════════════════════╝
+      
+[2026-02-18T03:35:25.824Z] [INFO] 
+╔════════════════════════════════════════╗
+║  🚀 Chatbot Backend Server Running     ║
+║  📍 Port: 5000                        ║
+║  🔗 http://localhost:5000              ║
+║  🔐 Environment: development     ║
+║  📝 API Docs: /api                      ║
+╚════════════════════════════════════════╝
+      
+[2026-02-18T03:35:27.865Z] [INFO] 📨 POST /api/auth/login
+[2026-02-18T03:35:28.297Z] [INFO] ✅ User logged in: tayyab (ID: 2)
+[2026-02-18T03:37:47.937Z] [INFO] 📨 POST /api/auth/login
+[2026-02-18T03:37:48.321Z] [INFO] ✅ User logged in: tayyab (ID: 2)
+[2026-02-18T04:03:49.125Z] [INFO] 
+╔════════════════════════════════════════╗
+║  🚀 Chatbot Backend Server Running     ║
+║  📍 Port: 5000                        ║
+║  🔗 http://localhost:5000              ║
+║  🔐 Environment: development     ║
+║  📝 API Docs: /api                      ║
+╚════════════════════════════════════════╝
+      
+[2026-02-18T04:09:56.948Z] [INFO] 
+╔════════════════════════════════════════╗
+║  🚀 Chatbot Backend Server Running     ║
+║  📍 Port: 5000                        ║
+║  🔗 http://localhost:5000              ║
+║  🔐 Environment: development     ║
+║  📝 API Docs: /api                      ║
+╚════════════════════════════════════════╝
+      
+[2026-02-18T05:00:32.082Z] [INFO] 
+╔════════════════════════════════════════╗
+║  🚀 Chatbot Backend Server Running     ║
+║  📍 Port: 5000                        ║
+║  🔗 http://localhost:5000              ║
+║  🔐 Environment: development     ║
+║  📝 API Docs: /api                      ║
+╚════════════════════════════════════════╝
+      
+[2026-02-18T05:33:32.616Z] [INFO] 
+╔════════════════════════════════════════╗
+║  🚀 Chatbot Backend Server Running     ║
+║  📍 Port: 5000                        ║
+║  🔗 http://localhost:5000              ║
+║  🔐 Environment: development     ║
+║  📝 API Docs: /api                      ║
+╚════════════════════════════════════════╝
+      
+[2026-02-18T06:40:23.360Z] [INFO] 
+╔════════════════════════════════════════╗
+║  🚀 Chatbot Backend Server Running     ║
+║  📍 Port: 5000                        ║
+║  🔗 http://localhost:5000              ║
+║  🔐 Environment: development     ║
+║  📝 API Docs: /api                      ║
+╚════════════════════════════════════════╝
+      
+[2026-02-18T06:40:52.266Z] [INFO] 📨 POST /api/auth/signup
+[2026-02-18T06:41:08.216Z] [INFO] 📨 POST /api/auth/signup
+[2026-02-18T06:41:09.044Z] [INFO] ✅ New user registered: abbb (ID: 4)
+[2026-02-18T06:43:32.026Z] [INFO] 📨 GET /api/chat/history
+[2026-02-18T06:43:32.046Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-18T06:43:32.282Z] [INFO] 📨 GET /api/chat/history
+[2026-02-18T06:43:32.286Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-18T07:23:06.028Z] [INFO] 📨 POST /api/auth/login
+[2026-02-18T07:23:06.303Z] [INFO] ✅ User logged in: tayyab (ID: 2)
+[2026-02-18T07:23:11.548Z] [INFO] 📨 GET /api/chat/history
+[2026-02-18T07:23:11.568Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-18T07:23:11.595Z] [INFO] 📨 GET /api/chat/history
+[2026-02-18T07:23:11.599Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-18T07:23:39.949Z] [INFO] 📨 POST /api/auth/login
+[2026-02-18T07:23:40.202Z] [INFO] ✅ User logged in: tayyab (ID: 2)
+[2026-02-18T07:23:43.957Z] [INFO] 📨 GET /api/chat/history
+[2026-02-18T07:23:43.964Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-18T07:23:44.000Z] [INFO] 📨 GET /api/chat/history
+[2026-02-18T07:23:44.012Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-18T07:23:48.760Z] [INFO] 📨 POST /api/chat/save
+[2026-02-18T07:23:48.953Z] [ERROR] Save chat error - Table 'chatbot_db.chat_history' doesn't exist
+[2026-02-18T07:23:48.969Z] [INFO] 📨 GET /api/chat/history
+[2026-02-18T07:23:48.975Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-18T22:16:12.150Z] [INFO] 
+╔════════════════════════════════════════╗
+║  🚀 Chatbot Backend Server Running     ║
+║  📍 Port: 5000                        ║
+║  🔗 http://localhost:5000              ║
+║  🔐 Environment: development     ║
+║  📝 API Docs: /api                      ║
+╚════════════════════════════════════════╝
+      

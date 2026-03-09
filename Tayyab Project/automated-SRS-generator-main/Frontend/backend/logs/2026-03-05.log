@@ -1,0 +1,67 @@
+[2026-03-05T01:00:42.786Z] [INFO] 📨 GET /api/chat/history
+[2026-03-05T01:17:58.174Z] [INFO] 📨 POST /api/auth/login
+[2026-03-05T01:17:59.547Z] [INFO] ✅ User logged in: tayyab (ID: 2)
+[2026-03-05T01:55:50.592Z] [INFO] 
+╔════════════════════════════════════════╗
+║  🚀 Chatbot Backend Server Running     ║
+║  📍 Port: 5000                        ║
+║  🔗 http://localhost:5000              ║
+║  🔐 Environment: development     ║
+║  📝 API Docs: /api                      ║
+╚════════════════════════════════════════╝
+      
+[2026-03-05T04:47:35.834Z] [INFO] 
+╔════════════════════════════════════════╗
+║  🚀 Chatbot Backend Server Running     ║
+║  📍 Port: 5000                        ║
+║  🔗 http://localhost:5000              ║
+║  🔐 Environment: development     ║
+║  📝 API Docs: /api                      ║
+╚════════════════════════════════════════╝
+      
+[2026-03-05T04:48:24.462Z] [INFO] 📨 POST /api/auth/login
+[2026-03-05T04:48:25.759Z] [INFO] ✅ User logged in: tayyab (ID: 2)
+[2026-03-05T04:48:30.287Z] [INFO] 📨 GET /api/chat/history
+[2026-03-05T04:48:30.520Z] [INFO] 📨 GET /api/chat/history
+[2026-03-05T04:49:51.398Z] [INFO] 📨 POST /api/auth/login
+[2026-03-05T04:49:52.550Z] [INFO] ✅ User logged in: tayyab (ID: 2)
+[2026-03-05T04:50:00.592Z] [INFO] 📨 GET /api/chat/history
+[2026-03-05T04:50:00.765Z] [INFO] 📨 GET /api/chat/history
+[2026-03-05T04:50:06.916Z] [INFO] 📨 GET /api/chat/history
+[2026-03-05T05:12:55.553Z] [INFO] 📨 GET /api/chat/history
+[2026-03-05T16:33:23.298Z] [INFO] 
+╔════════════════════════════════════════╗
+║  🚀 Chatbot Backend Server Running     ║
+║  📍 Port: 5000                        ║
+║  🔗 http://localhost:5000              ║
+║  🔐 Environment: development     ║
+║  📝 API Docs: /api                      ║
+╚════════════════════════════════════════╝
+      
+[2026-03-05T16:44:07.879Z] [INFO] 
+╔════════════════════════════════════════╗
+║  🚀 Chatbot Backend Server Running     ║
+║  📍 Port: 5000                        ║
+║  🔗 http://localhost:5000              ║
+║  🔐 Environment: development     ║
+║  📝 API Docs: /api                      ║
+╚════════════════════════════════════════╝
+      
+[2026-03-05T17:57:16.241Z] [INFO] 
+╔════════════════════════════════════════╗
+║  🚀 Chatbot Backend Server Running     ║
+║  📍 Port: 5000                        ║
+║  🔗 http://localhost:5000              ║
+║  🔐 Environment: development     ║
+║  📝 API Docs: /api                      ║
+╚════════════════════════════════════════╝
+      
+[2026-03-05T17:57:18.450Z] [INFO] 📨 POST /api/auth/login
+[2026-03-05T17:57:19.340Z] [INFO] ✅ User logged in: tayyab (ID: 2)
+[2026-03-05T17:57:23.348Z] [INFO] 📨 GET /api/chat/history
+[2026-03-05T17:57:23.687Z] [INFO] 📨 GET /api/chat/history
+[2026-03-05T17:58:23.775Z] [INFO] 📨 GET /api/chat/history
+[2026-03-05T18:07:58.013Z] [INFO] 📨 POST /api/auth/login
+[2026-03-05T18:07:58.310Z] [INFO] ✅ User logged in: tayyab (ID: 2)
+[2026-03-05T18:08:15.554Z] [INFO] 📨 GET /api/chat/history
+[2026-03-05T18:08:15.721Z] [INFO] 📨 GET /api/chat/history

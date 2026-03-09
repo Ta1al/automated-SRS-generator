@@ -1,0 +1,7 @@
+openai==2.21.0
+httpx==0.28.1
+rank-bm25==0.2.2
+python-dotenv==1.0.1
+sentence-transformers==3.4.1
+fastapi==0.118.0
+uvicorn==0.22.0

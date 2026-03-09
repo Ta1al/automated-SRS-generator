@@ -1,0 +1,258 @@
+[2026-02-12T03:05:04.545Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T03:05:06.434Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T03:05:07.213Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T03:05:07.444Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T03:07:01.973Z] [INFO] 📨 POST /api/auth/login
+[2026-02-12T03:07:03.261Z] [INFO] ✅ User logged in: tayyab (ID: 2)
+[2026-02-12T03:07:18.214Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T03:07:18.393Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T03:07:18.594Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T03:07:18.609Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T03:12:10.010Z] [INFO] ✅ MySQL Database connected successfully
+[2026-02-12T03:12:10.021Z] [INFO] 
+╔════════════════════════════════════════╗
+║  🚀 Chatbot Backend Server Running     ║
+║  📍 Port: 5000                        ║
+║  🔗 http://localhost:5000              ║
+║  🔐 Environment: development     ║
+║  📝 API Docs: /api                      ║
+╚════════════════════════════════════════╝
+      
+[2026-02-12T03:12:46.545Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T03:12:46.577Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T03:12:46.625Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T03:12:46.640Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T03:15:56.923Z] [INFO] ✅ MySQL Database connected successfully
+[2026-02-12T03:15:56.935Z] [INFO] 
+╔════════════════════════════════════════╗
+║  🚀 Chatbot Backend Server Running     ║
+║  📍 Port: 5000                        ║
+║  🔗 http://localhost:5000              ║
+║  🔐 Environment: development     ║
+║  📝 API Docs: /api                      ║
+╚════════════════════════════════════════╝
+      
+[2026-02-12T03:16:18.510Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T03:16:18.655Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T03:16:18.749Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T03:16:18.756Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T03:16:21.275Z] [INFO] 📨 POST /api/auth/login
+[2026-02-12T03:16:21.616Z] [INFO] ✅ User logged in: tayyab (ID: 2)
+[2026-02-12T03:16:26.328Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T03:16:26.335Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T03:16:26.363Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T03:16:26.373Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T03:19:25.567Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T03:19:25.575Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T03:19:25.587Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T03:19:25.593Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T03:19:35.308Z] [INFO] 📨 POST /api/auth/login
+[2026-02-12T03:19:35.560Z] [INFO] ✅ User logged in: tayyab (ID: 2)
+[2026-02-12T03:19:39.835Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T03:19:39.846Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T03:19:39.878Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T03:19:39.883Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T03:20:09.690Z] [INFO] 📨 POST /api/auth/login
+[2026-02-12T03:20:10.142Z] [INFO] ✅ User logged in: tayyab (ID: 2)
+[2026-02-12T03:20:24.206Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T03:20:24.595Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T03:20:24.664Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T03:20:24.750Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T03:21:54.364Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T03:21:54.692Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T03:21:54.928Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T03:21:54.936Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T03:22:24.725Z] [INFO] 📨 POST /api/auth/login
+[2026-02-12T03:22:24.963Z] [INFO] ✅ User logged in: tayyab (ID: 2)
+[2026-02-12T03:22:29.373Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T03:22:29.381Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T03:22:29.414Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T03:22:29.423Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T03:26:32.117Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T03:26:32.120Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T03:26:32.135Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T03:26:32.140Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T03:26:36.563Z] [INFO] 📨 POST /api/auth/login
+[2026-02-12T03:26:36.799Z] [INFO] ✅ User logged in: tayyab (ID: 2)
+[2026-02-12T03:26:41.382Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T03:26:41.388Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T03:26:41.419Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T03:26:41.427Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T03:28:34.901Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T03:28:35.233Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T03:28:35.313Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T03:28:35.344Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T03:29:22.322Z] [INFO] 📨 POST /api/auth/login
+[2026-02-12T03:29:47.080Z] [INFO] 📨 POST /api/auth/login
+[2026-02-12T03:31:15.025Z] [INFO] ✅ MySQL Database connected successfully
+[2026-02-12T03:31:15.234Z] [INFO] 
+╔════════════════════════════════════════╗
+║  🚀 Chatbot Backend Server Running     ║
+║  📍 Port: 5000                        ║
+║  🔗 http://localhost:5000              ║
+║  🔐 Environment: development     ║
+║  📝 API Docs: /api                      ║
+╚════════════════════════════════════════╝
+      
+[2026-02-12T03:31:22.441Z] [INFO] 📨 POST /api/auth/login
+[2026-02-12T03:31:23.859Z] [INFO] ✅ User logged in: tayyab (ID: 2)
+[2026-02-12T03:31:30.363Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T03:31:30.648Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T03:31:30.718Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T03:31:30.761Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T03:36:18.250Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T03:36:18.279Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T03:36:18.295Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T03:36:18.302Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T03:36:20.591Z] [INFO] 📨 POST /api/auth/login
+[2026-02-12T03:36:20.894Z] [INFO] ✅ User logged in: tayyab (ID: 2)
+[2026-02-12T03:36:25.507Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T03:36:25.512Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T03:36:25.539Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T03:36:25.547Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T03:36:49.154Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T03:36:49.499Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T03:36:49.741Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T03:36:50.002Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T03:42:59.185Z] [INFO] 📨 POST /api/auth/login
+[2026-02-12T03:42:59.428Z] [INFO] ✅ User logged in: tayyab (ID: 2)
+[2026-02-12T03:43:05.170Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T03:43:05.349Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T03:43:05.416Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T03:43:05.431Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T03:45:41.610Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T03:45:42.184Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T03:45:42.253Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T03:45:42.326Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T03:45:46.171Z] [INFO] 📨 POST /api/auth/login
+[2026-02-12T03:45:46.899Z] [INFO] ✅ User logged in: tayyab (ID: 2)
+[2026-02-12T03:45:54.327Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T03:45:54.351Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T03:45:54.404Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T03:45:54.426Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T03:50:03.610Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T03:50:03.863Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T03:50:04.115Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T03:50:04.255Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T03:50:07.608Z] [INFO] 📨 POST /api/auth/login
+[2026-02-12T03:50:07.923Z] [INFO] ✅ User logged in: tayyab (ID: 2)
+[2026-02-12T03:50:12.862Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T03:50:12.869Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T03:50:12.910Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T03:50:12.921Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T04:53:28.452Z] [INFO] ✅ MySQL Database connected successfully
+[2026-02-12T04:53:28.481Z] [INFO] 
+╔════════════════════════════════════════╗
+║  🚀 Chatbot Backend Server Running     ║
+║  📍 Port: 5000                        ║
+║  🔗 http://localhost:5000              ║
+║  🔐 Environment: development     ║
+║  📝 API Docs: /api                      ║
+╚════════════════════════════════════════╝
+      
+[2026-02-12T04:54:51.997Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T04:54:52.063Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T04:54:52.115Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T04:54:52.120Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T04:58:05.904Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T04:58:06.145Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T04:58:06.574Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T04:58:06.639Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T04:58:10.964Z] [INFO] 📨 POST /api/auth/login
+[2026-02-12T04:58:11.452Z] [INFO] ✅ User logged in: tayyab (ID: 2)
+[2026-02-12T04:58:16.378Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T04:58:16.384Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T04:58:16.417Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T04:58:16.438Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T05:00:13.300Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T05:00:13.699Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T05:00:13.842Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T05:00:13.939Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T05:00:17.129Z] [INFO] 📨 POST /api/auth/login
+[2026-02-12T05:00:17.436Z] [INFO] ✅ User logged in: tayyab (ID: 2)
+[2026-02-12T05:00:22.683Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T05:00:22.702Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T05:00:22.848Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T05:00:22.865Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T05:01:23.644Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T05:01:24.133Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T05:01:24.388Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T05:01:24.400Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T05:01:27.303Z] [INFO] 📨 POST /api/auth/login
+[2026-02-12T05:01:27.603Z] [INFO] ✅ User logged in: tayyab (ID: 2)
+[2026-02-12T05:01:32.637Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T05:01:32.750Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T05:01:32.856Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T05:01:32.887Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T05:05:32.336Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T05:05:32.680Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T05:05:32.751Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T05:05:32.762Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T05:05:37.794Z] [INFO] 📨 POST /api/auth/login
+[2026-02-12T05:05:38.254Z] [INFO] ✅ User logged in: tayyab (ID: 2)
+[2026-02-12T05:05:57.260Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T05:05:57.268Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T05:05:57.294Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T05:05:57.305Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T05:08:19.584Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T05:08:19.941Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T05:08:20.631Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T05:08:20.783Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T05:08:28.331Z] [INFO] 📨 POST /api/auth/login
+[2026-02-12T05:08:28.583Z] [INFO] ✅ User logged in: tayyab (ID: 2)
+[2026-02-12T05:08:36.977Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T05:08:36.994Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T05:08:37.109Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T05:08:37.124Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T08:01:17.417Z] [INFO] ✅ MySQL Database connected successfully
+[2026-02-12T08:01:17.434Z] [INFO] 
+╔════════════════════════════════════════╗
+║  🚀 Chatbot Backend Server Running     ║
+║  📍 Port: 5000                        ║
+║  🔗 http://localhost:5000              ║
+║  🔐 Environment: development     ║
+║  📝 API Docs: /api                      ║
+╚════════════════════════════════════════╝
+      
+[2026-02-12T08:17:39.084Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T08:17:39.385Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T08:17:39.438Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T08:17:39.442Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T08:25:17.715Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T08:25:18.171Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T08:25:18.237Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T08:25:18.252Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T08:25:31.032Z] [INFO] 📨 POST /api/auth/login
+[2026-02-12T08:25:31.424Z] [INFO] ✅ User logged in: tayyab (ID: 2)
+[2026-02-12T08:32:19.755Z] [INFO] 📨 POST /api/auth/login
+[2026-02-12T08:32:20.041Z] [INFO] ✅ User logged in: tayyab (ID: 2)
+[2026-02-12T08:53:54.523Z] [INFO] ✅ MySQL Database connected successfully
+[2026-02-12T08:53:54.537Z] [INFO] 
+╔════════════════════════════════════════╗
+║  🚀 Chatbot Backend Server Running     ║
+║  📍 Port: 5000                        ║
+║  🔗 http://localhost:5000              ║
+║  🔐 Environment: development     ║
+║  📝 API Docs: /api                      ║
+╚════════════════════════════════════════╝
+      
+[2026-02-12T08:55:31.245Z] [INFO] 📨 POST /api/auth/login
+[2026-02-12T08:55:31.742Z] [INFO] ✅ User logged in: tayyab (ID: 2)
+[2026-02-12T08:56:56.772Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T08:56:56.804Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T08:56:56.872Z] [INFO] 📨 GET /api/chat/history
+[2026-02-12T08:56:56.878Z] [ERROR] GET /api/chat/history - Cannot read properties of undefined (reading 'username')
+[2026-02-12T08:57:20.155Z] [INFO] 📨 POST /api/auth/login
+[2026-02-12T08:57:20.556Z] [INFO] ✅ User logged in: tayyab (ID: 2)
+[2026-02-12T09:03:21.182Z] [INFO] ✅ MySQL Database connected successfully
+[2026-02-12T09:03:21.199Z] [INFO] 
+╔════════════════════════════════════════╗
+║  🚀 Chatbot Backend Server Running     ║
+║  📍 Port: 5000                        ║
+║  🔗 http://localhost:5000              ║
+║  🔐 Environment: development     ║
+║  📝 API Docs: /api                      ║
+╚════════════════════════════════════════╝
+      
+[2026-02-12T09:04:21.908Z] [INFO] 📨 POST /api/auth/login
+[2026-02-12T09:04:22.340Z] [INFO] ✅ User logged in: tayyab (ID: 2)
