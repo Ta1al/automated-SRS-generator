@@ -4,7 +4,7 @@ PostgreSQL-backed LangGraph checkpointer using psycopg3's async connection pool.
 Install prerequisite:
     pip install langgraph-checkpoint-postgres psycopg[binary,pool]
 
-Usage (see main.py lifespan):
+Usage (see app/main.py lifespan):
     async with managed_checkpointer(settings.db_uri) as checkpointer:
         graph = compile_graph(checkpointer)
 """

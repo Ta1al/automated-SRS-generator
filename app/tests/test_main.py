@@ -2,7 +2,7 @@
 Unit and integration tests for the SRS Generator backend.
 
 Run with:
-    pytest tests/ -v
+    pytest app/tests/ -v
 
 Test categories:
     - Mermaid syntax validation (validate_mermaid_syntax)
@@ -58,7 +58,7 @@ async def mock_app():
         mock_cp_ctx.return_value.__aenter__ = AsyncMock(return_value=memory_saver)
         mock_cp_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
 
-        from main import create_app
+        from app.main import create_app
 
         application = create_app()
         # Force-set the graph using in-memory checkpointer

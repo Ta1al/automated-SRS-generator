@@ -79,7 +79,7 @@ docker compose up -d
 ### 5. Start the server
 
 ```powershell
-python main.py
+python -m app.main
 ```
 
 Server starts at `http://localhost:8000`.
@@ -135,7 +135,7 @@ curl http://localhost:8000/api/sessions/<thread_id>/document
 ## Tests
 
 ```powershell
-python -m pytest tests/ -v
+python -m pytest app/tests/ -v
 ```
 
 ## Requirement taxonomy labels

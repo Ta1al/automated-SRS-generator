@@ -2,10 +2,10 @@
 AI-Driven SRS Generator — FastAPI application entry point.
 
 Start the server:
-    python main.py
+    python -m app.main
 
 Or with uvicorn directly:
-    uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
 Prerequisites:
     1. Copy .env.example to .env and fill in your values.
@@ -112,7 +112,7 @@ app = create_app()
 if __name__ == "__main__":
     settings = get_settings()
     uvicorn.run(
-        "main:app",
+        "app.main:app",
         host=settings.app_host,
         port=settings.app_port,
         reload=settings.app_reload,
