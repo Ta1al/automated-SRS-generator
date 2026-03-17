@@ -12,35 +12,42 @@ template.
 
 ## Architecture
 
-```
-User ─── HTTP/SSE ─── FastAPI ─── LangGraph StateGraph ─── OpenRouter LLM
-                         │                │
-                    PostgreSQL         ChromaDB
-                  (checkpointer)    (RAG vector store)
+```mermaid
+flowchart LR
+    User[User] -->|HTTP + SSE| Frontend[Next.js Frontend]
+    Frontend -->|REST to internal API| PrismaApi[Next.js API Routes]
+    PrismaApi -->|Session + chat persistence| PgApp[(PostgreSQL App DB)]
+    PrismaApi -->|Proxy /api/sessions/*| FastAPI[FastAPI Backend]
+
+    FastAPI -->|Compile + execute| Graph[LangGraph StateGraph]
+    Graph -->|LLM calls| OpenRouter[OpenRouter Model]
+    Graph -->|RAG retrieval| Chroma[(ChromaDB Vector Store)]
+    Graph -->|Checkpoint state| PgCheckpoint[(PostgreSQL Checkpointer)]
 ```
 
 ### Graph topology
 
-```
-START → retrieve_rag_context → elicit_requirements → evaluate_completeness
-          ↙ [gaps remain]                              ↘ [no gaps]
-  ask_clarifying_questions (HITL interrupt)         classify_requirements
-          ↓ resume                                        ↓  (fan-out via Send)
-  evaluate_completeness          ┌──────────────────────────────────────┐
-                                 │ draft_section_3_fr (Functional Reqs) │
-                                 │ draft_section_3_nfr (NF Reqs)  (par) │
-                                 │ draft_section_3_iface (Interfaces)   │
-                                 └───────────────┬──────────────────────┘
-                                                 ↓
-                             draft_section_1 → draft_section_2 → draft_section_4
-                                                 ↓
-                             generate_mermaid → validate_mermaid
-                               ↙ [errors]                ↘ [valid]
-                         correct_mermaid              qa_review
-                               ↓                    ↙         ↘
-                         validate_mermaid  ask_clarifying   finalize_document
-                                              questions          ↓
-                                                              END
+```mermaid
+flowchart TD
+    START([START]) --> retrieve_rag_context --> elicit_requirements --> evaluate_completeness --> classify_requirements
+
+    classify_requirements --> draft_section_3_fr
+    classify_requirements --> draft_section_3_nfr
+    classify_requirements --> draft_section_3_iface
+
+    draft_section_3_fr --> draft_section_1
+    draft_section_3_nfr --> draft_section_1
+    draft_section_3_iface --> draft_section_1
+
+    draft_section_1 --> draft_section_2 --> draft_section_4 --> generate_mermaid --> validate_mermaid
+
+    validate_mermaid -->|errors and retries left| correct_mermaid
+    correct_mermaid --> validate_mermaid
+    validate_mermaid -->|valid or retries exhausted| qa_review
+
+    qa_review -->|gaps remain| ask_clarifying_questions
+    ask_clarifying_questions -->|resume| evaluate_completeness
+    qa_review -->|passed| finalize_document --> END([END])
 ```
 
 ---
