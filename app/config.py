@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     openrouter_api_key: str = Field(..., description="OpenRouter API key")
     model_name: str = Field("openai/gpt-4o-mini", description="OpenRouter model slug")
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
-    openrouter_referer: str = "https://github.com/asg-srs-generator"
+    openrouter_referer: str = "https://github.com/automated-srs-generator"
 
     # Database
     db_uri: str = Field(
