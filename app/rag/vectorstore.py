@@ -48,7 +48,12 @@ def init_vectorstore() -> None:
     )
 
     existing_count = _collection.count()
-    _seed_collection(_collection)
+    _seed_collection(
+        _collection,
+        existing_count=existing_count,
+        seed_if_empty=settings.vectorstore_seed_if_empty,
+        force_reseed=settings.vectorstore_force_reseed,
+    )
     logger.info(
         "ChromaDB collection '%s' synced from seed data (%d -> %d chunks).",
         settings.chroma_collection,
@@ -57,8 +62,21 @@ def init_vectorstore() -> None:
     )
 
 
-def _seed_collection(collection: chromadb.Collection) -> None:
+def _seed_collection(
+    collection: chromadb.Collection,
+    *,
+    existing_count: int,
+    seed_if_empty: bool,
+    force_reseed: bool,
+) -> None:
     """Load all .txt files from seed_data/ into the collection."""
+    if seed_if_empty and existing_count > 0 and not force_reseed:
+        logger.info(
+            "Skipping seed sync because collection already has %d chunks.",
+            existing_count,
+        )
+        return
+
     seed_files = sorted(_SEED_DATA_DIR.glob("*.txt"))
     if not seed_files:
         logger.warning("No seed data files found in %s", _SEED_DATA_DIR)

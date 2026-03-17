@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { getSessionUser } from "@/lib/auth";
+import { backendFetch } from "@/lib/backend";
 import { prisma } from "@/lib/prisma";
 
 type Context = {
@@ -23,11 +24,19 @@ export async function DELETE(_request: NextRequest, context: Context) {
     },
     select: {
       id: true,
+      backendThreadId: true,
     },
   });
 
   if (!chat) {
     return NextResponse.json({ error: "Chat not found" }, { status: 404 });
+  }
+
+  try {
+    await backendFetch(`/api/sessions/${chat.backendThreadId}`, {
+      method: "DELETE",
+    });
+  } catch {
   }
 
   await prisma.chat.delete({

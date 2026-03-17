@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import type { InputJsonValue } from "@prisma/client/runtime/library";
 
 import { getSessionUser } from "@/lib/auth";
 import { backendFetch, consumeSseResponse } from "@/lib/backend";
@@ -123,16 +122,6 @@ export async function POST(request: NextRequest, context: Context) {
             });
           }
 
-          let stateJsonForUpdate: InputJsonValue | undefined;
-          if (chat.stateJson !== null && chat.stateJson !== undefined) {
-            stateJsonForUpdate = chat.stateJson as InputJsonValue;
-          }
-
-          const stateResponse = await backendFetch(`/api/sessions/${chat.backendThreadId}/state`);
-          if (stateResponse.ok) {
-            stateJsonForUpdate = (await stateResponse.json()) as InputJsonValue;
-          }
-
           let currentDocument = finalDocument || chat.currentDocument;
           if (!currentDocument) {
             const documentResponse = await backendFetch(
@@ -150,15 +139,10 @@ export async function POST(request: NextRequest, context: Context) {
           const chatUpdateData: {
             title: string;
             currentDocument: string | null;
-            stateJson?: InputJsonValue;
           } = {
             title: nextTitle,
             currentDocument,
           };
-
-          if (stateJsonForUpdate !== undefined) {
-            chatUpdateData.stateJson = stateJsonForUpdate;
-          }
 
           const updatedChat = await prisma.chat.update({
             where: { id: chat.id },

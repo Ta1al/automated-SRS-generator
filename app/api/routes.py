@@ -172,11 +172,16 @@ async def _stream_graph(
                 "retryable": True,
             }),
         }
-    except Exception as exc:
+    except Exception:
         logger.exception("Error during graph streaming for thread %s", thread_id)
         yield {
             "event": "error",
-            "data": json.dumps({"message": str(exc), "retryable": False}),
+            "data": json.dumps(
+                {
+                    "message": "Unexpected backend error while generating the SRS. Please retry.",
+                    "retryable": False,
+                }
+            ),
         }
 
 
@@ -232,6 +237,31 @@ async def interact(
             yield event
 
     return EventSourceResponse(event_generator(), ping=15)
+
+
+@router.delete("/sessions/{thread_id}", status_code=204)
+async def delete_session(thread_id: str, request: Request) -> None:
+    """
+    Delete all persisted LangGraph checkpoint state for a thread.
+    """
+    app_state = request.app.state
+    if not hasattr(app_state, "graph") or app_state.graph is None:
+        raise HTTPException(status_code=503, detail="Graph not initialised.")
+
+    checkpointer = getattr(app_state.graph, "checkpointer", None)
+    if checkpointer is None:
+        raise HTTPException(status_code=501, detail="Session deletion is not supported.")
+
+    delete_thread = getattr(checkpointer, "adelete_thread", None)
+    if not callable(delete_thread):
+        raise HTTPException(status_code=501, detail="Session deletion is not supported.")
+
+    try:
+        await delete_thread(thread_id)
+        logger.info("Deleted backend session state for thread %s", thread_id)
+    except Exception as exc:
+        logger.exception("Failed to delete backend session state for thread %s", thread_id)
+        raise HTTPException(status_code=500, detail="Failed to delete session state.") from exc
 
 
 @router.get("/sessions/{thread_id}/document")

@@ -33,10 +33,21 @@ class Settings(BaseSettings):
     # App server
     app_host: str = "0.0.0.0"
     app_port: int = 8000
-    app_reload: bool = True
+    app_reload: bool = False
+    cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
+    cors_allow_credentials: bool = True
 
     # LangGraph
     max_mermaid_retries: int = 3
+
+    # Vector store lifecycle
+    vectorstore_seed_if_empty: bool = True
+    vectorstore_force_reseed: bool = False
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        origins = [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+        return origins or ["http://localhost:3000"]
 
 
 @lru_cache(maxsize=1)

@@ -69,6 +69,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 def create_app() -> FastAPI:
     settings = get_settings()
+    cors_origins = settings.cors_origin_list
+    allow_credentials = settings.cors_allow_credentials and "*" not in cors_origins
 
     application = FastAPI(
         title="AI-Driven SRS Generator",
@@ -86,8 +88,8 @@ def create_app() -> FastAPI:
     # CORS — permissive by default for local dev; tighten for production
     application.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
+        allow_origins=cors_origins,
+        allow_credentials=allow_credentials,
         allow_methods=["*"],
         allow_headers=["*"],
     )
