@@ -1,86 +1,97 @@
 # Class Diagram
 
-This diagram shows the main classes and their relationships in the system.
+This diagram shows the main implemented models and core runtime components.
 
 ```mermaid
 classDiagram
     class User {
         +id: string
         +email: string
-        +password: string
+        +name: string?
+        +passwordHash: string
         +createdAt: datetime
-        +login()
-        +logout()
-        +signup()
+        +updatedAt: datetime
     }
 
     class Chat {
         +id: string
         +userId: string
         +title: string
+        +backendThreadId: string
+        +currentDocument: string?
+        +stateJson: json?
         +createdAt: datetime
         +updatedAt: datetime
-        +getMessages()
-        +addMessage()
     }
 
-    class Message {
+    class ChatMessage {
         +id: string
         +chatId: string
+        +role: USER|ASSISTANT
         +content: string
-        +role: string
         +createdAt: datetime
     }
 
-    class Graph {
-        +state: GraphState
-        +nodes: list
-        +edges: list
-        +compile()
-        +invoke()
+    class SRSState {
+        +chat_history: BaseMessage[]
+        +document_buffer: string
+        +missing_context: ClarificationQuestion[]
+        +requirements: Requirement[]
+        +rag_context: string
+        +sections: map
+        +mermaid_blocks: string[]
+        +mermaid_errors: string[]
+        +is_complete: bool
+        +final_document: string
     }
 
-    class GraphState {
-        +documents: list
-        +query: string
-        +requirements: list
-        +srs: string
+    class GraphRuntime {
+        +build_graph(checkpointer)
+        +astream(...)
+        +aget_state(...)
+    }
+
+    class FastAPIRoutes {
+        +create_session()
+        +interact() SSE
+        +get_document()
+        +get_state()
+    }
+
+    class PrismaChatAPI {
+        +GET/POST chats
+        +POST interact
+        +GET messages
+        +DELETE chat
     }
 
     class VectorStore {
-        +embeddings: list
-        +documents: list
-        +addDocuments()
-        +similaritySearch()
+        +init_vectorstore()
+        +retrieve(query)
     }
 
-    class SRSGenerator {
-        +graph: Graph
-        +vectorStore: VectorStore
-        +generateSRS()
-        +validateSRS()
+    class MermaidValidation {
+        +validate_mermaid_syntax()
     }
 
-    class MermaidValidator {
-        +validateDiagram()
-        +validateSyntax()
-    }
-
-    User "1" -- "*" Chat: has
-    Chat "1" -- "*" Message: contains
-    SRSGenerator "1" -- "1" Graph: uses
-    SRSGenerator "1" -- "1" VectorStore: uses
-    SRSGenerator "1" -- "1" MermaidValidator: uses
-    Graph "1" -- "1" GraphState: maintains
+    User "1" --> "*" Chat : owns
+    Chat "1" --> "*" ChatMessage : contains
+    PrismaChatAPI --> User : authenticates
+    PrismaChatAPI --> Chat : persists
+    PrismaChatAPI --> ChatMessage : writes
+    PrismaChatAPI --> FastAPIRoutes : proxies to backend
+    FastAPIRoutes --> GraphRuntime : executes
+    GraphRuntime --> SRSState : reads/writes
+    GraphRuntime --> VectorStore : retrieves context
+    GraphRuntime --> MermaidValidation : validates diagrams
 ```
 
 ## Class Descriptions
 
-- **User** - Represents system users with authentication
-- **Chat** - Represents a chat session for SRS generation
-- **Message** - Individual messages within a chat
-- **Graph** - LangGraph workflow for SRS generation
-- **GraphState** - State management for the graph
-- **VectorStore** - Manages document embeddings and retrieval
-- **SRSGenerator** - Main orchestrator for SRS generation
-- **MermaidValidator** - Validates generated Mermaid diagrams
+- **User / Chat / ChatMessage** - Persisted Prisma models used by the Next.js app
+- **SRSState** - Typed shared state passed through LangGraph nodes
+- **GraphRuntime** - Compiled LangGraph workflow used by FastAPI endpoints
+- **FastAPIRoutes** - Backend API for session lifecycle and SSE graph interaction
+- **PrismaChatAPI** - Frontend API routes that authenticate users and bridge to backend
+- **VectorStore** - Chroma-based retrieval over pre-seeded standards/compliance corpus
+- **MermaidValidation** - Syntax validation step used in graph post-processing

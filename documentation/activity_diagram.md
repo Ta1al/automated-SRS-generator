@@ -4,16 +4,21 @@ This diagram shows the main activity flow of the automated SRS generator system.
 
 ```mermaid
 flowchart TD
-    Start([User Initiates SRS Generation]) --> UploadDocs[Upload Documents]
-    UploadDocs --> ProcessDocs[Process Documents]
-    ProcessDocs --> VectorStore[Store in Vector Database]
-    VectorStore --> ExtractInfo[Extract Information]
-    ExtractInfo --> GenerateReqs[Generate Requirements]
-    GenerateReqs --> ValidateMermaid[Validate with Mermaid]
-    ValidateMermaid --> Decision{Validation Passed?}
-    Decision -->|No| Refine[Refine Requirements]
-    Refine --> GenerateReqs
-    Decision -->|Yes| GenerateSRS[Generate SRS Document]
+    Start([User Initiates SRS Generation]) --> CreateSession[Create Session]
+    CreateSession --> SendPrompt[Send Initial Prompt]
+    SendPrompt --> RetrieveContext[Retrieve Pre-seeded RAG Context]
+    RetrieveContext --> ElicitReqs[Elicit Requirements]
+    ElicitReqs --> Evaluate[Evaluate Completeness]
+    Evaluate --> NeedsMore{Missing Context?}
+    NeedsMore -->|Yes| AskQuestions[Ask Clarifying Questions]
+    AskQuestions --> UserAnswers[User Answers]
+    UserAnswers --> Evaluate
+    NeedsMore -->|No| DraftSRS[Draft SRS Sections]
+    DraftSRS --> ValidateMermaid[Generate and Validate Mermaid]
+    ValidateMermaid --> FixNeeded{Validation Passed?}
+    FixNeeded -->|No| Refine[Correct Mermaid and Re-validate]
+    Refine --> ValidateMermaid
+    FixNeeded -->|Yes| GenerateSRS[Finalize SRS Document]
     GenerateSRS --> ReturnSRS[Return SRS to User]
     ReturnSRS --> End([Process Complete])
 ```
@@ -21,12 +26,13 @@ flowchart TD
 ## Process Description
 
 1. **User Initiates SRS Generation** - User starts the process through the frontend
-2. **Upload Documents** - User uploads seed documents (GDPR, HIPAA, etc.)
-3. **Process Documents** - Backend processes uploaded documents
-4. **Store in Vector Database** - Documents are embedded and stored in vector store
-5. **Extract Information** - Graph nodes extract relevant information
-6. **Generate Requirements** - Requirements are generated based on extracted info
-7. **Validate with Mermaid** - Generated requirements are validated
-8. **Validation Check** - If validation fails, refine requirements; otherwise continue
-9. **Generate SRS Document** - Final SRS document is assembled
-10. **Return SRS to User** - Document is returned to the user
+2. **Create Session** - Frontend creates a backend thread/session for graph execution
+3. **Send Initial Prompt** - User provides initial product idea/requirements
+4. **Retrieve Pre-seeded RAG Context** - Backend retrieves relevant seeded standards/regulatory context from vector store
+5. **Elicit Requirements** - Graph transforms input into structured requirement content
+6. **Evaluate Completeness** - Graph checks for missing details
+7. **Clarification Loop** - If gaps exist, system asks questions and user answers, then evaluation repeats
+8. **Draft SRS Sections** - Graph drafts core SRS sections from collected context
+9. **Generate and Validate Mermaid** - Diagrams are generated and syntax-validated, with correction retries if needed
+10. **Finalize SRS Document** - Final document is assembled after QA/validation
+11. **Return SRS to User** - Document is returned through the chat flow

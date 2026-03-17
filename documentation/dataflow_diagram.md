@@ -4,75 +4,83 @@
 
 ```mermaid
 graph LR
-    User((User)) -->|Upload Docs & Query| System["Automated SRS Generator"]
-    System -->|Returns SRS Document| User
-    User -->|View/Manage| Frontend["Web Frontend"]
-    Frontend -->|API Requests| System
+    User((User)) -->|Chat actions| Frontend["Next.js Web Frontend"]
+    Frontend -->|Internal API requests| Api["Next.js API Routes"]
+    Api -->|Session + interact calls| Backend["FastAPI + LangGraph"]
+    Backend -->|SSE status/token/question/complete| Api
+    Api -->|Chat updates + final document| Frontend
+    Frontend -->|Rendered result| User
 ```
 
 ## DFD Level 1 - Main Processes
 
 ```mermaid
 graph TD
-    User((User))
-    DB[(Database)]
-    VectorDB[(Vector Store)]
-    
-    User -->|Documents & Query| Input["1.0 Document Input"]
-    Input -->|Processed Docs| Processing["2.0 Processing & Extraction"]
-    Processing -->|Embeddings| VectorDB
-    Processing -->|Extracted Data| Graph["3.0 Graph Processing"]
-    Graph -->|Requirements| Validation["4.0 Validation"]
-    Validation -->|Valid Data| Generation["5.0 SRS Generation"]
-    Generation -->|Chat History| DB
-    Generation -->|SRS Document| Output["6.0 Output Delivery"]
-    Output -->|Return SRS| User
+    User((User)) --> P1["1.0 Start or open chat"]
+    P1 --> P2["2.0 Persist chat + user message"]
+    P2 --> AppDB[(PostgreSQL App DB)]
+
+    P2 --> P3["3.0 Backend session interaction (SSE)"]
+    P3 --> Graph["4.0 LangGraph pipeline"]
+
+    Graph --> VectorDB[(Chroma Vector Store)]
+    Graph --> LLM[OpenRouter LLM]
+    Graph --> Checkpointer[(PostgreSQL Checkpointer)]
+
+    Graph --> P5["5.0 Return stream events + final draft"]
+    P5 --> P6["6.0 Persist assistant output/state/document"]
+    P6 --> AppDB
+    P6 --> User
 ```
 
 ## DFD Level 2 - Detailed Processing
 
 ```mermaid
 graph TD
-    subgraph Frontend
-        UI["User Interface<br/>Chat Workspace"]
+    subgraph Frontend["Frontend (Next.js)"]
+        UI["Chat Workspace UI"]
+        FEApi["/api/chats/* routes"]
     end
-    
-    subgraph Backend["Backend API"]
-        Auth["Authentication<br/>Service"]
-        Chat["Chat<br/>Service"]
+
+    subgraph AppStorage["Application Storage"]
+        PrismaDB[(PostgreSQL via Prisma)]
     end
-    
-    subgraph RAG["RAG Pipeline"]
-        Vectorize["Vectorization<br/>with Embeddings"]
-        Search["Similarity<br/>Search"]
+
+    subgraph Backend["Backend (FastAPI)"]
+        Sessions["/api/sessions"]
+        Interact["/api/sessions/{id}/interact (SSE)"]
+        DocState["/api/sessions/{id}/document|state"]
     end
-    
-    subgraph Graph["Graph Execution"]
-        Nodes["Graph Nodes<br/>Processing"]
-        LLM["LLM<br/>Integration"]
+
+    subgraph GraphExec["LangGraph Execution"]
+        RAG["retrieve_rag_context"]
+        Elicit["elicit/evaluate + clarify loop"]
+        Draft["classify + draft sections"]
+        Mermaid["generate/validate/correct mermaid"]
+        QA["qa_review + finalize_document"]
     end
-    
-    subgraph Validation["Validation"]
-        Mermaid["Mermaid<br/>Validator"]
-        DataCheck["Data<br/>Validation"]
+
+    subgraph AIData["AI and Retrieval"]
+        Chroma[(ChromaDB)]
+        OpenRouter[OpenRouter]
+        Checkpoint[(PostgreSQL checkpointer)]
     end
-    
-    subgraph Storage
-        UserDB[(User DB)]
-        ChatDB[(Chat DB)]
-        VectorDB[(Vector Store)]
-    end
-    
-    UI -->|Authenticate| Auth
-    UI -->|Create Chat| Chat
-    Chat -->|Store| ChatDB
-    Chat -->|Send Query| Vectorize
-    Vectorize -->|Store Embeddings| VectorDB
-    Vectorize -->|Search| Search
-    Search -->|Retrieved Docs| Nodes
-    Nodes -->|Process| LLM
-    LLM -->|Generated Content| Mermaid
-    Mermaid -->|Validate| DataCheck
-    DataCheck -->|Store Results| ChatDB
-    DataCheck -->|Return SRS| UI
+
+    UI --> FEApi
+    FEApi --> PrismaDB
+    FEApi --> Sessions
+    FEApi --> Interact
+    FEApi --> DocState
+
+    Interact --> RAG --> Elicit --> Draft --> Mermaid --> QA
+    RAG --> Chroma
+    Elicit --> OpenRouter
+    Draft --> OpenRouter
+    Mermaid --> OpenRouter
+    Interact --> Checkpoint
+
+    QA --> Interact
+    Interact --> FEApi
+    FEApi --> PrismaDB
+    FEApi --> UI
 ```
