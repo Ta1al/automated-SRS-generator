@@ -2,7 +2,7 @@
 fastapi==0.115.8
 uvicorn[standard]==0.34.0
 sse-starlette==2.2.1
-python-multipart==0.0.20
+python-multipart==0.0.22
 
 # LangChain / LangGraph
 langchain==0.3.19
