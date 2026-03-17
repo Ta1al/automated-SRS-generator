@@ -694,6 +694,11 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
   const [deletingChatId, setDeletingChatId] = useState<string | null>(null);
   const [activeBackendNode, setActiveBackendNode] = useState<string | null>(null);
   const [selectedDraftPart, setSelectedDraftPart] = useState<DraftPart | null>(null);
+  const [retryPayload, setRetryPayload] = useState<{
+    chatId: string;
+    message: string;
+    revisionTarget?: RevisionTarget;
+  } | null>(null);
 
   // Ref used to hold the latest selectedChatId inside the sendToBackend closure.
   const selectedChatIdRef = useRef(selectedChatId);
@@ -854,6 +859,14 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
   // Core send function — shared by initial submission and question-answer send.
   // ---------------------------------------------------------------------------
 
+  async function handleRetry() {
+    if (!retryPayload || isSending) return;
+    const { chatId, message, revisionTarget } = retryPayload;
+    setRetryPayload(null);
+    setError("");
+    await sendToBackend(chatId, message, revisionTarget);
+  }
+
   async function sendToBackend(
     chatId: string,
     messageText: string,
@@ -861,6 +874,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
   ) {
     setIsSending(true);
     setError("");
+    setRetryPayload(null);
     setBackendStatuses([]);
     setStreamedAssistantText("");
     setActiveBackendNode(null);
@@ -1016,6 +1030,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
       const message =
         caughtError instanceof Error ? caughtError.message : "Failed to send message.";
       setError(message);
+      setRetryPayload({ chatId, message: messageText, revisionTarget });
     } finally {
       setIsSending(false);
     }
@@ -1377,7 +1392,20 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
                 {isSending ? "Sending..." : questionMode !== null ? "Answer" : "Send"}
               </button>
             </div>
-            {error ? <p className="mt-2 text-sm text-red-600">{error}</p> : null}
+            {error ? (
+              <div className="mt-2 flex items-center gap-2">
+                <p className="text-sm text-red-600">{error}</p>
+                {retryPayload && !isSending ? (
+                  <button
+                    type="button"
+                    onClick={() => void handleRetry()}
+                    className="rounded-md border border-red-300 px-2.5 py-1 text-xs text-red-700 transition-colors hover:bg-red-50"
+                  >
+                    Retry
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
           </form>
         </main>
 

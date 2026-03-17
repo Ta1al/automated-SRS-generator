@@ -24,6 +24,8 @@ import logging
 import uuid
 from typing import Any, AsyncGenerator
 
+import openai
+
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from langchain_core.messages import HumanMessage
@@ -161,11 +163,20 @@ async def _stream_graph(
                             }
                             return
 
+    except openai.APIError as exc:
+        logger.exception("OpenAI API error during graph streaming for thread %s", thread_id)
+        yield {
+            "event": "error",
+            "data": json.dumps({
+                "message": "The AI service encountered a network error. Please retry.",
+                "retryable": True,
+            }),
+        }
     except Exception as exc:
         logger.exception("Error during graph streaming for thread %s", thread_id)
         yield {
             "event": "error",
-            "data": json.dumps({"message": str(exc)}),
+            "data": json.dumps({"message": str(exc), "retryable": False}),
         }
 
 
