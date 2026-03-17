@@ -1,0 +1,37 @@
+# Python
+*/__pycache__/*
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment variables
+.env
+
+# ChromaDB persistence
+.chroma/
+
+# IDE
+.vscode/
+.idea/
+
+# Test coverage
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Type checking
+.mypy_cache/
+
+# OS
+.DS_Store
+Thumbs.db

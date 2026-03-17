@@ -1,0 +1,39 @@
+HIPAA PRIVACY AND SECURITY RULE — KEY REQUIREMENTS FOR SOFTWARE SYSTEMS
+
+OVERVIEW
+The Health Insurance Portability and Accountability Act (HIPAA) establishes mandatory safeguards for systems that create, receive, maintain, or transmit Protected Health Information (PHI) and electronic PHI (ePHI).
+
+ADMINISTRATIVE SAFEGUARDS
+- Conduct periodic risk analysis to identify threats to ePHI confidentiality, integrity, and availability.
+- Implement a risk management policy to reduce identified risks to a reasonable level.
+- Establish sanctions policies for workforce members who violate HIPAA policies.
+- Implement an information access management process — access granted only to those who need it.
+- Maintain activity logs and audit controls for all access to ePHI.
+
+PHYSICAL SAFEGUARDS
+- Restrict physical access to systems storing ePHI.
+- Implement workstation use policies and device controls.
+- Implement media disposal procedures for hardware and electronic media.
+
+TECHNICAL SAFEGUARDS (most relevant for software requirements)
+- ACCESS CONTROL: Implement unique user identification, automatic logoff, and emergency access procedures. Encrypt ePHI in transit and at rest using AES-256 at minimum.
+- AUDIT CONTROLS: Record and examine activity in systems containing ePHI. Audit logs must be tamper-evident and retained for a minimum of 6 years.
+- INTEGRITY CONTROLS: Protect ePHI from improper alteration. Implement checksums or digital signatures for data at rest.
+- TRANSMISSION SECURITY: Encrypt ePHI during electronic transmission. Use TLS 1.2 or higher for all network communications.
+- AUTHENTICATION: Implement multi-factor authentication for systems accessing ePHI.
+
+BREACH NOTIFICATION REQUIREMENTS
+- Software must generate audit trails sufficient to detect and report breaches within 60 days.
+- Log all access, modification, and deletion events with user ID, timestamp, and IP address.
+
+HIPAA-RELEVANT SOFTWARE REQUIREMENTS EXAMPLES
+- SE-001: The system shall encrypt all ePHI at rest using AES-256-GCM encryption.
+- SE-002: The system shall encrypt all ePHI in transit using TLS 1.3.
+- SE-003: The system shall enforce role-based access control (RBAC) limiting ePHI access to authorized personnel only.
+- SE-004: The system shall maintain immutable audit logs recording every access event to ePHI including user ID, action type, timestamp, and source IP address.
+- SE-005: The system shall implement automatic session timeout after 15 minutes of inactivity.
+- SE-006: The system shall support multi-factor authentication for all accounts with ePHI access.
+- L-001: The system shall comply with HIPAA Privacy Rule (45 CFR Part 164, Subpart E).
+- L-002: The system shall comply with HIPAA Security Rule (45 CFR Part 164, Subpart C).
+- L-003: The system shall retain audit logs for a minimum of 6 years.
+- L-004: The system shall support breach notification workflows enabling notification within 60 days of breach discovery.

@@ -1,0 +1,53 @@
+WCAG 2.1 / 2.2 — WEB CONTENT ACCESSIBILITY GUIDELINES KEY REQUIREMENTS
+
+OVERVIEW
+WCAG 2.1 (ISO/IEC 40500) defines how to make web content more accessible to people with disabilities. Compliance is legally mandated in many jurisdictions (ADA in the USA, EN 301 549 in the EU).
+
+FOUR CORE PRINCIPLES (POUR)
+1. PERCEIVABLE — Information must be presentable to users in ways they can perceive.
+2. OPERABLE — UI components and navigation must be operable.
+3. UNDERSTANDABLE — Information and UI operation must be understandable.
+4. ROBUST — Content must be interpretable by diverse assistive technologies.
+
+CONFORMANCE LEVELS
+- Level A (minimum): Must satisfy for basic accessibility.
+- Level AA (standard): Required by most accessibility laws; recommended target.
+- Level AAA (enhanced): Highest level; not required for all content.
+
+KEY SUCCESS CRITERIA (Level AA — commonly required)
+
+PERCEIVABLE
+- 1.1.1 Non-text Content (A): Provide text alternatives for all non-text content.
+- 1.3.1 Info and Relationships (A): Information conveyed through presentation is programmatically determinable.
+- 1.4.3 Contrast (Minimum) (AA): Text has a contrast ratio of at least 4.5:1 (3:1 for large text).
+- 1.4.4 Resize text (AA): Text can be resized to 200% without loss of content or functionality.
+- 1.4.10 Reflow (AA): Content can be presented without horizontal scrolling at 320px width.
+- 1.4.11 Non-text Contrast (AA): UI components have contrast ratio of at least 3:1 against adjacent colours.
+
+OPERABLE
+- 2.1.1 Keyboard (A): All functionality available from keyboard.
+- 2.4.3 Focus Order (A): Focusable components receive focus in an order preserving meaning.
+- 2.4.6 Headings and Labels (AA): Descriptive headings and labels provided.
+- 2.4.7 Focus Visible (AA): Keyboard focus indicator is visible.
+- 2.5.3 Label in Name (A): Accessible name contains visible label text.
+
+UNDERSTANDABLE
+- 3.1.1 Language of Page (A): Default human language programmatically determinable.
+- 3.3.1 Error Identification (A): Input errors identified and described to user in text.
+- 3.3.2 Labels or Instructions (A): Labels or instructions for user input.
+- 3.3.3 Error Suggestion (AA): Suggestions for fixing identified input errors are provided.
+- 3.3.4 Error Prevention (AA): For legal or financial transactions, submissions are reversible, verified, or confirmed.
+
+ROBUST
+- 4.1.2 Name, Role, Value (A): All UI components have accessible name, role, and value via assistive technology APIs.
+- 4.1.3 Status Messages (AA): Status messages can be programmatically determined through role or property.
+
+WCAG-RELEVANT SOFTWARE REQUIREMENTS EXAMPLES
+- LF-001: The system UI shall achieve WCAG 2.1 Level AA conformance across all publicly accessible pages.
+- LF-002: All non-decorative images shall include descriptive alt text attributes.
+- LF-003: All interactive form elements shall have associated visible labels.
+- LF-004: The system shall maintain a colour contrast ratio of at least 4.5:1 for all body text against background colours.
+- LF-005: All system functionality shall be operable using keyboard navigation alone, without requiring a mouse.
+- LF-006: The system shall provide visible focus indicators for all interactive elements when navigated via keyboard.
+- LF-007: Error messages shall clearly identify the field in error and provide a descriptive, actionable correction suggestion.
+- US-001: New users shall be able to complete the primary user journey without external training materials, targeting a System Usability Scale (SUS) score of 75 or above.

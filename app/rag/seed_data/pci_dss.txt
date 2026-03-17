@@ -1,0 +1,41 @@
+PCI DSS v4.0 — PAYMENT CARD INDUSTRY DATA SECURITY STANDARD KEY REQUIREMENTS
+
+OVERVIEW
+PCI DSS applies to all entities that store, process, or transmit cardholder data (CHD) or sensitive authentication data (SAD). Software systems handling payment cards must implement the following controls.
+
+GOAL 1 — BUILD AND MAINTAIN A SECURE NETWORK (Requirements 1–2)
+- Install and maintain network security controls (firewalls).
+- Do not use vendor-supplied defaults for system passwords or security parameters.
+
+GOAL 2 — PROTECT ACCOUNT DATA (Requirements 3–4)
+- Protect stored cardholder data: Never store CVV/CVV2, full magnetic stripe, or PIN data after authentication.
+- PAN (Primary Account Number) must be masked when displayed (show only first 6 and last 4 digits).
+- Protect cardholder data with strong cryptography during transmission (TLS 1.2+ mandatory, TLS 1.3 recommended).
+
+GOAL 3 — MAINTAIN A VULNERABILITY MANAGEMENT PROGRAM (Requirements 5–6)
+- Protect all systems from malware; maintain up-to-date antivirus.
+- Develop and maintain secure systems: Apply security patches within 1 month of release for critical vulnerabilities.
+- Follow OWASP Top 10 guidelines to protect web-facing applications.
+
+GOAL 4 — IMPLEMENT STRONG ACCESS CONTROL (Requirements 7–9)
+- Restrict access to system components and cardholder data by business need to know.
+- Identify users and authenticate access to system components — unique IDs, MFA for all non-console administrative access.
+- Restrict physical access to cardholder data environments.
+
+GOAL 5 — REGULARLY MONITOR AND TEST NETWORKS (Requirements 10–11)
+- Log and monitor all access to system components and cardholder data. Retain logs for at least 12 months (3 months immediately available).
+- Test security of systems and networks regularly — quarterly vulnerability scans, annual penetration testing.
+
+GOAL 6 — MAINTAIN AN INFORMATION SECURITY POLICY (Requirement 12)
+- Maintain a policy addressing information security for all personnel.
+
+PCI-DSS-RELEVANT SOFTWARE REQUIREMENTS EXAMPLES
+- SE-020: The system shall never store Sensitive Authentication Data (CVV, full magnetic stripe, PIN blocks) after payment authorisation.
+- SE-021: The system shall display Primary Account Numbers (PAN) in masked format showing only the first 6 and last 4 digits (e.g., 4111 11** **** 1111).
+- SE-022: The system shall transmit all cardholder data exclusively over TLS 1.3 connections.
+- SE-023: The system shall enforce multi-factor authentication for all administrative access to the cardholder data environment.
+- L-020: The system shall comply with PCI DSS v4.0 requirements for level-1 merchants.
+- O-020: The system shall retain payment transaction logs for a minimum of 12 months with the most recent 3 months immediately accessible.
+- PE-020: The payment processing API shall respond to authorisation requests within 3 seconds at the 99th percentile.
+- SC-020: The payment processing subsystem shall scale horizontally to handle a minimum of 10,000 concurrent payment transactions.
+- FT-020: The payment service shall implement circuit breaker patterns to gracefully degrade to a queued-payment mode during payment gateway outages, ensuring zero transaction loss.

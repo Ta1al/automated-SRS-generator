@@ -1,0 +1,166 @@
+SOFTWARE REQUIREMENTS SPECIFICATION TEMPLATE — PRACTICAL OUTLINE AND AUTHORING GUIDANCE
+
+OVERVIEW
+This seed document captures a modern Software Requirements Specification (SRS) template structure and authoring guidance. It complements IEEE 830 by adding explicit sections for verification, compliance, build and delivery, distribution, observability, and AI/ML-specific requirements.
+
+DOCUMENT HEADER
+- Title: Software Requirements Specification
+- Subtitle: For <project name>
+- Version, author, organization, and last modified date
+- Revision history table with name, date, reason for change, and version
+
+TABLE OF CONTENTS
+The template uses a formal table of contents covering:
+- 1. Introduction
+- 2. Product Overview
+- 3. Requirements
+- 4. Verification
+- 5. Appendixes
+
+SECTION 1 — INTRODUCTION
+
+1.1 Document Purpose
+State why the SRS exists, who will use it, and how it supports product, engineering, QA, security, compliance, and operations across the lifecycle.
+
+1.2 Product Scope
+Define the product name, version or release, primary purpose, major capabilities, business outcomes, boundaries, inclusions, and exclusions.
+
+1.3 Definitions, Acronyms, and Abbreviations
+Provide a glossary for domain terms and abbreviations used throughout the SRS. Keep terminology consistent and alphabetised.
+
+1.4 References
+List authoritative references such as standards, contracts, policies, interface specifications, UX guidelines, architecture records, or scope documents. Include title, owner, version, date, and location or URL. Distinguish normative from informative references.
+
+1.5 Document Overview
+Briefly explain what each major section covers and how readers should navigate the document.
+
+SECTION 2 — PRODUCT OVERVIEW
+
+2.1 Product Perspective
+Describe the product context, whether it is new, replacement, or part of a broader system. Summarise upstream and downstream systems, ownership boundaries, support model, and key external dependencies.
+
+2.2 Product Functions
+Provide a high-level summary of the system's major functional areas. Keep this section concise and defer detailed behaviors to Section 3.
+
+2.3 Product Constraints
+Capture binding constraints as verifiable statements. Typical examples include mandated technology choices, regulatory obligations, hardware constraints, performance baselines, and security requirements.
+
+2.4 User Characteristics
+Identify user groups, roles, access levels, expertise, usage frequency, accessibility needs, and goals.
+
+2.5 Assumptions and Dependencies
+List environmental assumptions and dependencies on external systems, components, vendors, hardware, services, or teams. Note impact if assumptions prove false.
+
+2.6 Apportioning of Requirements
+Map major requirements to subsystems, services, releases, or increments. Record deferred items explicitly.
+
+SECTION 3 — REQUIREMENTS
+
+GENERAL RULES
+- Requirements should be testable, unambiguous, and stated with explicit obligation words such as shall, should, or may.
+- Use unique identifiers and maintain traceability into verification artifacts.
+- Capture inputs, processing expectations, outputs, and relevant conditions or constraints.
+
+RECOMMENDED REQUIREMENT TEMPLATE
+- ID: REQ-AREA-NNN or REQ-AREA-NNN-VER
+- Title: Short descriptive title
+- Statement: The system shall ...
+- Rationale: Why the requirement exists
+- Acceptance Criteria: Concrete pass/fail conditions
+- Verification Method: Test, Analysis, Inspection, Demonstration, or other
+- More Information: Related context or linked artifacts
+
+RECOMMENDED REQUIREMENT AREAS
+- FUNC for functional behavior
+- INT for interfaces
+- PERF for performance
+- SEC for security
+- REL for reliability
+- AVAIL for availability
+- OBS for observability
+- COMP for compliance
+- INST for installation
+- BUILD for build and delivery
+- DIST for distribution
+- MAINT for maintainability
+- REUSE for reusability
+- PORT for portability
+- COST for cost constraints
+- DEAD for deadlines
+- POC for proof of concept
+- CM for change management
+- ML for machine learning concerns
+
+3.1 External Interfaces
+Cover required and provided interfaces. Typical subsections include:
+- 3.1.1 User Interfaces: flows, accessibility standards, localization, error states, common controls, and keyboard behavior
+- 3.1.2 Hardware Interfaces: supported devices, signals, timing, throughput, and reliability expectations
+- 3.1.3 Software Interfaces: connected systems, APIs, messages, protocols, ownership, auth expectations, limits, errors, and timeout semantics
+
+3.2 Functional
+Organise functional requirements by feature, use case, or service boundary. Define triggers, externally visible behavior, outputs, failure modes, and edge cases.
+
+3.3 Quality of Service
+Use measurable targets and conditions.
+- 3.3.1 Performance: latency, throughput, capacity, and resource usage under defined workloads
+- 3.3.2 Security: authentication, authorization, encryption, privacy, auditability, secure defaults, and abuse resistance
+- 3.3.3 Reliability: retry behavior, idempotency, rollback, degradation, and recovery expectations
+- 3.3.4 Availability: uptime targets, maintenance windows, failover, restart, and recovery mechanisms
+- 3.3.5 Observability: logs, metrics, traces, correlation identifiers, retention, redaction, dashboards, and alerts
+
+3.4 Compliance
+Specify requirements derived from regulations, standards, contracts, records retention policies, reporting duties, or licensing obligations.
+
+3.5 Design and Implementation
+Capture binding expectations that affect delivery and long-term operation.
+- 3.5.1 Installation: supported environments, prerequisites, configuration, secrets, rollback, and uninstall behavior
+- 3.5.2 Build and Delivery: reproducible builds, dependency controls, artifact integrity, versioning, and promotion across environments
+- 3.5.3 Distribution: deployment topology, data distribution, replication, and organisational or network constraints
+- 3.5.4 Maintainability: modularity, complexity limits, coding standards, internal documentation, and developer-facing observability
+- 3.5.5 Reusability: reusable components, API stability, and packaging constraints
+- 3.5.6 Portability: operating systems, architectures, cloud portability, and environment abstraction
+- 3.5.7 Cost: budget, spend limits, or cost-per-transaction constraints
+- 3.5.8 Deadline: milestones, increments, readiness criteria, and scope implications
+- 3.5.9 Proof of Concept: feasibility goals, timeboxing, measurable success criteria, and what decisions the POC informs
+- 3.5.10 Change Management: change categories, approvals, compatibility guarantees, deprecation policy, rollout, rollback, and release communication
+
+3.6 AI/ML
+For systems with ML or LLM components, define requirements that complement functional and non-functional requirements.
+- 3.6.1 Model Specification: purpose, inputs, outputs, target behavior, evaluation criteria, and tolerances
+- 3.6.2 Data Management: provenance, ownership, consent, labeling, lineage, reproducibility, storage, and anonymisation
+- 3.6.3 Guardrails: input validation, output filtering, action constraints, unsafe condition detection, escalation, and rollback
+- 3.6.4 Ethics: fairness, transparency, accountability, explainability expectations, and review obligations
+- 3.6.5 Human-in-the-Loop: where human approval or intervention is required and how it is audited
+- 3.6.6 Model Lifecycle and Operations: deployment, monitoring, retraining triggers, rollback, versioning, and archival
+
+SECTION 4 — VERIFICATION
+
+Describe how each requirement will be verified and linked to objective evidence. A verification matrix should include:
+- Requirement ID
+- Verification Method
+- Test or artifact link
+- Status
+- Evidence
+
+Common verification methods:
+- Test
+- Analysis
+- Inspection
+- Demonstration
+
+Guidance
+- Include positive and negative coverage.
+- Include non-functional verification for security, performance, reliability, and availability.
+- For AI/ML systems, link evaluation reports, model cards, and dataset versions where relevant.
+
+SECTION 5 — APPENDIXES
+
+Include optional supporting material such as glossaries, data dictionaries, reference diagrams, example datasets, or change impact analyses. Reference supporting material rather than duplicating it when possible.
+
+AUTHORING GUIDANCE
+- Focus on what the system must do, not implementation detail unless a constraint is binding.
+- Prefer stable repository paths or durable URLs in references.
+- Keep requirement IDs immutable and traceable.
+- Avoid vague adjectives such as fast, user-friendly, secure, or scalable without measurable thresholds.
+- Use acceptance criteria and verification methods that allow objective review.
+- For AI-enabled systems, define refusal behavior, safety boundaries, fallback behavior, and human review points explicitly.

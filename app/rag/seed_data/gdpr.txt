@@ -1,0 +1,44 @@
+GDPR — GENERAL DATA PROTECTION REGULATION KEY REQUIREMENTS FOR SOFTWARE SYSTEMS
+
+OVERVIEW
+The General Data Protection Regulation (EU 2016/679) mandates privacy-by-design and privacy-by-default principles. Any software system processing personal data of EU residents must comply.
+
+CORE PRINCIPLES (Article 5)
+- Lawfulness, fairness, and transparency: Process personal data lawfully; inform users clearly.
+- Purpose limitation: Collect data only for specified, explicit, and legitimate purposes.
+- Data minimisation: Collect only the minimum data necessary.
+- Accuracy: Maintain accurate and up-to-date personal data.
+- Storage limitation: Retain personal data only as long as necessary.
+- Integrity and confidentiality: Protect data using appropriate technical and organisational measures.
+
+DATA SUBJECT RIGHTS (Articles 15–22)
+- Right of access: Users can request what data is held about them.
+- Right to rectification: Users can correct inaccurate personal data.
+- Right to erasure ("right to be forgotten"): Users can request deletion of their data.
+- Right to data portability: Users can export their data in a machine-readable format (e.g., JSON, CSV).
+- Right to restriction of processing: Users can limit how their data is processed.
+- Right to object: Users can object to processing based on legitimate interests.
+
+PRIVACY BY DESIGN AND BY DEFAULT (Article 25)
+- Systems must implement data protection at the architecture level, not as an afterthought.
+- Default settings must provide the highest level of privacy protection.
+
+TECHNICAL AND ORGANISATIONAL MEASURES (Article 32)
+- Pseudonymisation and encryption of personal data.
+- Ongoing confidentiality, integrity, availability, and resilience of processing systems.
+- Ability to restore personal data following a breach or incident.
+- Regular testing and evaluation of security measures.
+
+DATA BREACH NOTIFICATION (Article 33)
+- Personal data breaches must be reported to the supervisory authority within 72 hours.
+- Affected individuals must be notified without undue delay if high risk.
+
+GDPR-RELEVANT SOFTWARE REQUIREMENTS EXAMPLES
+- L-010: The system shall provide a user-accessible data export feature returning all personal data in JSON format within 30 days of request (GDPR Article 20).
+- L-011: The system shall implement a data deletion workflow that permanently removes all personally identifiable information within 30 days of a user's erasure request (GDPR Article 17).
+- L-012: The system shall display a clear consent mechanism prior to collecting any personal data, recording the timestamp and content of consent accepted (GDPR Article 7).
+- L-013: The system shall not transfer personal data outside the EEA without an adequacy decision or appropriate safeguards (GDPR Chapter V).
+- SE-010: The system shall pseudonymise user identifiers in analytics and logging pipelines.
+- SE-011: The system shall encrypt all personal data at rest using AES-256.
+- O-010: The system shall generate a data processing audit log retaining each operation for a minimum of 3 years.
+- O-011: The system shall provide a Data Protection Impact Assessment (DPIA) report export capability for administrators.
