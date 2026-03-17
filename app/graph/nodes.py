@@ -15,6 +15,7 @@ import logging
 import re
 from typing import Any
 
+import httpx
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from langgraph.types import interrupt
@@ -26,6 +27,17 @@ from app.rag.vectorstore import retrieve
 from app.validation.mermaid import validate_mermaid_syntax
 
 logger = logging.getLogger(__name__)
+
+# ── Shared HTTP clients ────────────────────────────────────────────────────────
+# langchain_openai's internal _cached_async_httpx_client uses @lru_cache keyed
+# only by (base_url, timeout), ignoring event-loop identity.  When a cached
+# AsyncClient is reused across different event loops the connections from the
+# old (now-closed) loop cause "RuntimeError: Event loop is closed", which the
+# openai SDK re-raises as "APIError: Network connection lost".
+# Passing explicit clients here bypasses that cache entirely.
+# See: https://github.com/langchain-ai/langchain/issues/35783
+_async_http_client = httpx.AsyncClient()
+_sync_http_client = httpx.Client()
 
 # ── LLM factory ───────────────────────────────────────────────────────────────
 
@@ -43,6 +55,8 @@ def _get_llm(temperature: float = 0.2, streaming: bool = True) -> ChatOpenAI:
             "HTTP-Referer": settings.openrouter_referer,
             "X-Title": "SRS Generator",
         },
+        http_async_client=_async_http_client,
+        http_client=_sync_http_client,
     )
 
 
