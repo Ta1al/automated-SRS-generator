@@ -1,6 +1,8 @@
 "use client";
 
 import { Fragment, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 import {
   consumeSseResponse,
@@ -80,7 +82,24 @@ const SECTION_TITLES: Record<string, string> = {
 };
 
 const SECTION_ORDER = ["s1", "s2", "s3_iface", "s3_fr", "s3_nfr", "s4"];
-const SECTION_THREE_NODES = new Set(["draft_section_3_iface", "draft_section_3_fr", "draft_section_3_nfr"]);
+// All five section writers run in parallel after elicit_requirements
+const PARALLEL_DRAFT_NODES = new Set([
+  "draft_section_1",
+  "draft_section_2",
+  "draft_section_3_iface",
+  "draft_section_3_fr",
+  "draft_section_3_nfr",
+]);
+// Keep legacy alias so getWaitingOnLabel still compiles
+const SECTION_THREE_NODES = PARALLEL_DRAFT_NODES;
+const DRAFT_NODE_TO_SECTION_KEY: Record<string, string> = {
+  draft_section_1: "s1",
+  draft_section_2: "s2",
+  draft_section_3_iface: "s3_iface",
+  draft_section_3_fr: "s3_fr",
+  draft_section_3_nfr: "s3_nfr",
+  draft_section_4: "s4",
+};
 
 const NODE_LABELS: Record<string, string> = {
   retrieve_rag_context: "Retrieved compliance context",
@@ -211,27 +230,23 @@ function getWaitingOnLabel(statuses: BackendStatusEvent[], activeNode: string | 
   );
   const latest = statuses[statuses.length - 1];
 
-  if (latest.node === "classify_requirements") {
+  if (latest.node === "elicit_requirements") {
     return "Drafting the core requirements sections";
   }
 
-  if (SECTION_THREE_NODES.has(latest.node)) {
-    const completedCount = [...SECTION_THREE_NODES].filter((node) => finishedNodes.has(node)).length;
-    return completedCount < SECTION_THREE_NODES.size
-      ? `Drafting the core requirements sections (${completedCount}/${SECTION_THREE_NODES.size})`
-      : NODE_LABELS.draft_section_1;
+  if (PARALLEL_DRAFT_NODES.has(latest.node)) {
+    const completedCount = [...PARALLEL_DRAFT_NODES].filter((node) => finishedNodes.has(node)).length;
+    return completedCount < PARALLEL_DRAFT_NODES.size
+      ? `Drafting sections in parallel (${completedCount}/${PARALLEL_DRAFT_NODES.size})`
+      : NODE_LABELS.draft_section_4;
   }
 
   const nextNodeMap: Record<string, string> = {
     retrieve_rag_context: "elicit_requirements",
-    elicit_requirements: "evaluate_completeness",
-    evaluate_completeness: "classify_requirements",
-    draft_section_1: "draft_section_2",
-    draft_section_2: "draft_section_4",
+    elicit_requirements: "draft_section_1",
     draft_section_4: "generate_mermaid",
     generate_mermaid: "validate_mermaid",
-    validate_mermaid: "qa_review",
-    qa_review: "ask_clarifying_questions",
+    validate_mermaid: "finalize_document",
   };
 
   const nextNode = nextNodeMap[latest.node];
@@ -245,6 +260,28 @@ function getWaitingOnLabel(statuses: BackendStatusEvent[], activeNode: string | 
 function getStatusLabel(event: BackendStatusEvent) {
   const base = NODE_LABELS[event.node] || event.node.replaceAll("_", " ");
   return event.status === "finished" ? base : `${base} (${event.status})`;
+}
+
+function MarkdownContent({ content }: { content: string }) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      components={{
+        h1: ({ children }) => <h1 className="mb-2 text-lg font-semibold">{children}</h1>,
+        h2: ({ children }) => <h2 className="mb-2 text-base font-semibold">{children}</h2>,
+        h3: ({ children }) => <h3 className="mb-1 text-sm font-semibold">{children}</h3>,
+        p: ({ children }) => <p className="mb-2 last:mb-0 leading-relaxed">{children}</p>,
+        ul: ({ children }) => <ul className="mb-2 list-disc pl-5">{children}</ul>,
+        ol: ({ children }) => <ol className="mb-2 list-decimal pl-5">{children}</ol>,
+        li: ({ children }) => <li className="mb-1">{children}</li>,
+        strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+        em: ({ children }) => <em className="italic">{children}</em>,
+        code: ({ children }) => <code className="rounded bg-black/10 px-1 py-0.5">{children}</code>,
+      }}
+    >
+      {content}
+    </ReactMarkdown>
+  );
 }
 
 function parseAssistantClarificationContent(content: string): {
@@ -465,19 +502,6 @@ function extractJsonSegments(text: string) {
   return segments;
 }
 
-function looksLikeJsonPayload(text: string) {
-  const trimmed = text.trim();
-  if (!trimmed) {
-    return false;
-  }
-
-  return (
-    trimmed.startsWith("{") ||
-    trimmed.startsWith("[") ||
-    /"[a-zA-Z0-9_\-]+"\s*:\s*/.test(trimmed)
-  );
-}
-
 function formatElicitationPayload(record: Record<string, unknown>) {
   const lines: string[] = [];
 
@@ -689,7 +713,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
   const [documentText, setDocumentText] = useState<string>("");
   const [stateJson, setStateJson] = useState<Record<string, unknown> | null>(null);
   const [backendStatuses, setBackendStatuses] = useState<BackendStatusEvent[]>([]);
-  const [streamedAssistantText, setStreamedAssistantText] = useState("");
+  const [liveSectionDrafts, setLiveSectionDrafts] = useState<Record<string, string>>({});
   const [questionMode, setQuestionMode] = useState<QuestionMode | null>(null);
   const [deletingChatId, setDeletingChatId] = useState<string | null>(null);
   const [activeBackendNode, setActiveBackendNode] = useState<string | null>(null);
@@ -715,7 +739,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, streamedAssistantText, questionMode]);
+  }, [messages, questionMode]);
 
   const selectedChat = useMemo(
     () => chats.find((chat) => chat.id === selectedChatId) ?? null,
@@ -771,7 +795,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
       setDocumentText("");
       setStateJson(null);
       setBackendStatuses([]);
-      setStreamedAssistantText("");
+      setLiveSectionDrafts({});
       setQuestionMode(null);
       setActiveBackendNode(null);
       setSelectedDraftPart(null);
@@ -798,7 +822,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
       setDocumentText(payload.chat.currentDocument || "");
       setStateJson(payload.chat.stateJson || null);
       setBackendStatuses([]);
-      setStreamedAssistantText("");
+      setLiveSectionDrafts({});
       setQuestionMode(null);
       setActiveBackendNode(null);
       setSelectedDraftPart(null);
@@ -840,7 +864,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
           setDocumentText("");
           setStateJson(null);
           setBackendStatuses([]);
-          setStreamedAssistantText("");
+          setLiveSectionDrafts({});
           setQuestionMode(null);
           setActiveBackendNode(null);
           setSelectedDraftPart(null);
@@ -876,7 +900,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
     setError("");
     setRetryPayload(null);
     setBackendStatuses([]);
-    setStreamedAssistantText("");
+    setLiveSectionDrafts({});
     setActiveBackendNode(null);
 
     const optimisticMessage: ChatMessage = {
@@ -930,15 +954,13 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
             setActiveBackendNode(node);
           }
 
-          setStreamedAssistantText((prev) => {
-            const next = prev + content;
-            const parsed = parseAssistantClarificationContent(next);
-            if (parsed || looksLikeJsonPayload(next)) {
-              return "";
-            }
-
-            return next;
-          });
+          if (node && DRAFT_NODE_TO_SECTION_KEY[node]) {
+            const sectionKey = DRAFT_NODE_TO_SECTION_KEY[node];
+            setLiveSectionDrafts((prev) => ({
+              ...prev,
+              [sectionKey]: (prev[sectionKey] || "") + content,
+            }));
+          }
         },
         onQuestion: ({ prompt, questions }) => {
           setActiveBackendNode(null);
@@ -948,11 +970,11 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
             currentIdx: 0,
             answered: [],
           });
-          setStreamedAssistantText("");
         },
         onComplete: ({ document }) => {
           setActiveBackendNode(null);
           setDocumentText(document || "");
+          setLiveSectionDrafts({});
         },
       });
 
@@ -969,7 +991,9 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
       setDocumentText(payload.chat.currentDocument || summary.finalDocument || "");
       setStateJson(payload.chat.stateJson || null);
       setBackendStatuses(payload.statuses?.length ? payload.statuses : summary.statuses);
-      setStreamedAssistantText("");
+      if (payload.chat.currentDocument || summary.finalDocument) {
+        setLiveSectionDrafts({});
+      }
       setActiveBackendNode(null);
 
       if (summary.questions.length) {
@@ -1025,7 +1049,6 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
       );
     } catch (caughtError) {
       setMessages((prev) => prev.filter((message) => message.id !== optimisticMessage.id));
-      setStreamedAssistantText("");
       setActiveBackendNode(null);
       const message =
         caughtError instanceof Error ? caughtError.message : "Failed to send message.";
@@ -1123,32 +1146,41 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
   );
 
   const draftedSections = useMemo(() => {
-    if (!stateJson || typeof stateJson !== "object") {
-      return [] as Array<{ key: string; content: string }>;
+    const sectionMap = new Map<string, string>();
+
+    if (stateJson && typeof stateJson === "object") {
+      const sections = (stateJson as Record<string, unknown>).sections;
+      if (sections && typeof sections === "object" && !Array.isArray(sections)) {
+        for (const [key, value] of Object.entries(sections as Record<string, unknown>)) {
+          if (typeof value === "string") {
+            const trimmed = value.trim();
+            if (trimmed) {
+              sectionMap.set(key, trimmed);
+            }
+            continue;
+          }
+
+          try {
+            sectionMap.set(key, JSON.stringify(value, null, 2));
+          } catch {
+            sectionMap.set(key, String(value));
+          }
+        }
+      }
     }
 
-    const sections = (stateJson as Record<string, unknown>).sections;
-    if (!sections || typeof sections !== "object" || Array.isArray(sections)) {
-      return [] as Array<{ key: string; content: string }>;
+    for (const [key, value] of Object.entries(liveSectionDrafts)) {
+      const trimmed = value.trim();
+      if (trimmed) {
+        sectionMap.set(key, trimmed);
+      }
     }
 
-    return Object.entries(sections as Record<string, unknown>)
-      .map(([key, value]) => {
-        if (typeof value === "string") {
-          return { key, content: value.trim() };
-        }
-
-        try {
-          return { key, content: JSON.stringify(value, null, 2) };
-        } catch {
-          return { key, content: String(value) };
-        }
-      })
+    return Array.from(sectionMap.entries())
+      .map(([key, content]) => ({ key, content }))
       .filter((entry) => entry.content.length > 0)
-      .sort(
-        (first, second) => SECTION_ORDER.indexOf(first.key) - SECTION_ORDER.indexOf(second.key),
-      );
-  }, [stateJson]);
+      .sort((first, second) => SECTION_ORDER.indexOf(first.key) - SECTION_ORDER.indexOf(second.key));
+  }, [stateJson, liveSectionDrafts]);
 
   const draftSections = useMemo(
     () =>
@@ -1290,16 +1322,13 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
                     : "bg-zinc-100 text-black"
                 }`}
               >
-                {message.content}
+                {message.role === "ASSISTANT" ? (
+                  <MarkdownContent content={message.content} />
+                ) : (
+                  message.content
+                )}
               </div>
             ))}
-
-            {/* Live-streamed assistant text (before a complete event) */}
-            {streamedAssistantText ? (
-              <div className="max-w-[85%] rounded-lg bg-zinc-100 px-3 py-2 text-sm whitespace-pre-wrap text-black">
-                {streamedAssistantText}
-              </div>
-            ) : null}
 
             {/* One-by-one question mode */}
             {questionMode !== null ? (
@@ -1346,7 +1375,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
               <ReceivingBubble waitingOn={waitingOnLabel} statuses={backendStatuses} />
             ) : null}
 
-            {visibleMessages.length === 0 && !streamedAssistantText && questionMode === null ? (
+            {visibleMessages.length === 0 && questionMode === null ? (
               <p className="text-sm text-black/60">Start by asking about your product idea.</p>
             ) : null}
 
@@ -1461,11 +1490,15 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
             <h3 className="text-xs font-semibold text-black/70">
               {selectedDraftPart ? `Preview · ${selectedDraftPart.title}` : "Document preview"}
             </h3>
-            <pre className="mt-2 max-h-[520px] overflow-auto text-xs whitespace-pre-wrap text-black/90">
-              {selectedDraftPart?.content ||
-                resolvedDocumentText ||
-                "The draft SRS document will appear here once sections are available."}
-            </pre>
+            <div className="mt-2 max-h-[520px] overflow-auto text-xs text-black/90">
+              <MarkdownContent
+                content={
+                  selectedDraftPart?.content ||
+                  resolvedDocumentText ||
+                  "The draft SRS document will appear here once sections are available."
+                }
+              />
+            </div>
           </div>
         </aside>
       </div>

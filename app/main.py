@@ -16,8 +16,17 @@ Prerequisites:
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import sys
 from contextlib import asynccontextmanager
+
+# psycopg3 (and other async DB drivers) are incompatible with Windows'
+# default ProactorEventLoop. Switch to SelectorEventLoop before any
+# event-loop-dependent code is imported.
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
 from typing import AsyncIterator
 
 import uvicorn
@@ -112,11 +121,17 @@ app = create_app()
 
 
 if __name__ == "__main__":
+    # Re-apply selector policy here too so it's active before any uvicorn
+    # internals run (matters on Windows when started via `python -m app.main`).
+    if sys.platform == "win32":
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
     settings = get_settings()
     uvicorn.run(
         "app.main:app",
         host=settings.app_host,
         port=settings.app_port,
         reload=settings.app_reload,
+        reload_dirs=["app"],   # watch only backend source; ignore frontend build output
         log_level="info",
     )

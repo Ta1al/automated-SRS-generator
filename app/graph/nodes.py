@@ -10,12 +10,14 @@ Convention:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
 from typing import Any
 
 import httpx
+import openai
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from langgraph.types import interrupt
@@ -51,6 +53,7 @@ def _get_llm(temperature: float = 0.2, streaming: bool = True) -> ChatOpenAI:
         model=settings.model_name,
         temperature=temperature,
         streaming=streaming,
+        timeout=45,  # fail fast on stalled requests; retry loop handles recovery
         default_headers={
             "HTTP-Referer": settings.openrouter_referer,
             "X-Title": "SRS Generator",
@@ -58,6 +61,45 @@ def _get_llm(temperature: float = 0.2, streaming: bool = True) -> ChatOpenAI:
         http_async_client=_async_http_client,
         http_client=_sync_http_client,
     )
+
+
+async def _llm_invoke_with_retry(
+    llm: ChatOpenAI,
+    messages: list[Any],
+    *,
+    node_name: str,
+    max_attempts: int = 3,
+) -> Any:
+    """Invoke the LLM with bounded retries for transient transport/API failures."""
+    last_error: Exception | None = None
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return await llm.ainvoke(messages)
+        except (openai.APIError, httpx.TransportError, httpx.TimeoutException) as exc:
+            last_error = exc
+            if attempt >= max_attempts:
+                logger.exception(
+                    "LLM call failed after %d attempts in node '%s'.",
+                    max_attempts,
+                    node_name,
+                )
+                raise
+
+            backoff_seconds = float(2 ** (attempt - 1))
+            logger.warning(
+                "Transient LLM error in node '%s' (attempt %d/%d): %s. Retrying in %.1fs.",
+                node_name,
+                attempt,
+                max_attempts,
+                exc,
+                backoff_seconds,
+            )
+            await asyncio.sleep(backoff_seconds)
+
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("Unexpected retry state in _llm_invoke_with_retry.")
 
 
 # ── Helper: extract text from last AI response ────────────────────────────────
@@ -161,7 +203,7 @@ async def elicit_requirements(state: SRSState) -> dict:
     if context_block:
         messages.append(HumanMessage(content=context_block))
 
-    response = await llm.ainvoke(messages)
+    response = await _llm_invoke_with_retry(llm, messages, node_name="elicit_requirements")
     raw = _ai_text(response)
 
     # Try to parse as JSON; fall back to storing as-is
@@ -199,11 +241,13 @@ async def evaluate_completeness(state: SRSState) -> dict:
         "\n\nIdentify ALL remaining gaps."
     )
 
-    response = await llm.ainvoke(
+    response = await _llm_invoke_with_retry(
+        llm,
         [
             SystemMessage(content=prompts.EVALUATOR_SYSTEM),
             HumanMessage(content=user_prompt),
-        ]
+        ],
+        node_name="evaluate_completeness",
     )
 
     try:
@@ -310,11 +354,13 @@ async def classify_requirements(state: SRSState) -> dict:
     batch = [{"id": r["id"], "text": r["text"]} for r in existing]
     user_prompt = f"Classify these requirements:\n{json.dumps(batch, indent=2)}"
 
-    response = await llm.ainvoke(
+    response = await _llm_invoke_with_retry(
+        llm,
         [
             SystemMessage(content=prompts.CLASSIFIER_SYSTEM),
             HumanMessage(content=user_prompt),
-        ]
+        ],
+        node_name="classify_requirements",
     )
 
     try:
@@ -349,11 +395,13 @@ async def draft_section_1(state: SRSState) -> dict:
     llm = _get_llm(temperature=0.3)
     context = _build_writing_context(state)
 
-    response = await llm.ainvoke(
+    response = await _llm_invoke_with_retry(
+        llm,
         [
             SystemMessage(content=prompts.WRITER_S1_SYSTEM),
             HumanMessage(content=context),
-        ]
+        ],
+        node_name="draft_section_1",
     )
     return {"sections": {"s1": _ai_text(response)}}
 
@@ -365,11 +413,13 @@ async def draft_section_2(state: SRSState) -> dict:
     llm = _get_llm(temperature=0.3)
     context = _build_writing_context(state)
 
-    response = await llm.ainvoke(
+    response = await _llm_invoke_with_retry(
+        llm,
         [
             SystemMessage(content=prompts.WRITER_S2_SYSTEM),
             HumanMessage(content=context),
-        ]
+        ],
+        node_name="draft_section_2",
     )
     return {"sections": {"s2": _ai_text(response)}}
 
@@ -381,11 +431,13 @@ async def draft_section_3_fr(state: SRSState) -> dict:
     llm = _get_llm(temperature=0.2)
     context = _build_writing_context(state)
 
-    response = await llm.ainvoke(
+    response = await _llm_invoke_with_retry(
+        llm,
         [
             SystemMessage(content=prompts.WRITER_S3_FR_SYSTEM),
             HumanMessage(content=context),
-        ]
+        ],
+        node_name="draft_section_3_fr",
     )
     return {"sections": {"s3_fr": _ai_text(response)}}
 
@@ -401,11 +453,13 @@ async def draft_section_3_nfr(state: SRSState) -> dict:
     rag = state.get("rag_context", "")
     extra = f"\n\nREGULATORY CONTEXT (use to generate L-NNN, SE-NNN requirements):\n{rag}" if rag else ""
 
-    response = await llm.ainvoke(
+    response = await _llm_invoke_with_retry(
+        llm,
         [
             SystemMessage(content=prompts.WRITER_S3_NFR_SYSTEM),
             HumanMessage(content=context + extra),
-        ]
+        ],
+        node_name="draft_section_3_nfr",
     )
     return {"sections": {"s3_nfr": _ai_text(response)}}
 
@@ -417,11 +471,13 @@ async def draft_section_3_iface(state: SRSState) -> dict:
     llm = _get_llm(temperature=0.2)
     context = _build_writing_context(state)
 
-    response = await llm.ainvoke(
+    response = await _llm_invoke_with_retry(
+        llm,
         [
             SystemMessage(content=prompts.WRITER_S3_IFACE_SYSTEM),
             HumanMessage(content=context),
-        ]
+        ],
+        node_name="draft_section_3_iface",
     )
     return {"sections": {"s3_iface": _ai_text(response)}}
 
@@ -441,13 +497,15 @@ async def draft_section_4(state: SRSState) -> dict:
         ]
     )
 
-    response = await llm.ainvoke(
+    response = await _llm_invoke_with_retry(
+        llm,
         [
             SystemMessage(content=prompts.WRITER_S4_SYSTEM),
             HumanMessage(
                 content=f"Generate the verification matrix for:\n\n{section_3_combined}"
             ),
-        ]
+        ],
+        node_name="draft_section_4",
     )
     return {"sections": {"s4": _ai_text(response)}}
 
@@ -479,13 +537,15 @@ async def generate_mermaid(state: SRSState) -> dict:
     for idx, (diagram_label, diagram_prompt) in enumerate(diagram_configs):
         system_prompt = prompts.MERMAID_SYSTEM.format(diagram_type=diagram_label)
         try:
-            response = await llm.ainvoke(
+            response = await _llm_invoke_with_retry(
+                llm,
                 [
                     SystemMessage(content=system_prompt),
                     HumanMessage(
                         content=f"System context:\n{context}\n\nGenerate: {diagram_prompt}"
                     ),
-                ]
+                ],
+                node_name="generate_mermaid",
             )
             raw = _ai_text(response)
             # Strip markdown fences to get raw diagram code
@@ -540,8 +600,10 @@ async def correct_mermaid(state: SRSState) -> dict:
             original_code=f"```mermaid\n{block}\n```",
             error_message=error,
         )
-        response = await llm.ainvoke(
-            [HumanMessage(content=correction_prompt)]
+        response = await _llm_invoke_with_retry(
+            llm,
+            [HumanMessage(content=correction_prompt)],
+            node_name="correct_mermaid",
         )
         corrected = _extract_mermaid_code(_ai_text(response))
         if corrected:
@@ -572,11 +634,13 @@ async def qa_review(state: SRSState) -> dict:
         ]
     )
 
-    response = await llm.ainvoke(
+    response = await _llm_invoke_with_retry(
+        llm,
         [
             SystemMessage(content=prompts.QA_REVIEWER_SYSTEM),
             HumanMessage(content=f"Review this SRS draft:\n\n{draft[:12000]}"),
-        ]
+        ],
+        node_name="qa_review",
     )
 
     try:
