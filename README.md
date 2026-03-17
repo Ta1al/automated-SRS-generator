@@ -92,6 +92,24 @@ python -m app.main
 Server starts at `http://localhost:8000`.
 Interactive API docs: `http://localhost:8000/docs`
 
+### 6. Start the frontend
+
+```powershell
+cd frontend
+npm install
+npm run prisma:generate
+npm run dev
+```
+
+Frontend runs at `http://localhost:3000`.
+
+If this is your first frontend run, initialize auth/chat tables once:
+
+```powershell
+cd ..
+docker compose exec -T postgres psql -U srs_user -d srs_db -f frontend/prisma/init_auth_chat.sql
+```
+
 ---
 
 ## API
