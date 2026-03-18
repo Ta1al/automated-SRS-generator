@@ -139,39 +139,16 @@ function buildDraftDocument(sections: Array<{ key: string; content: string }>) {
 }
 
 function normalizeMarkdownForPreview(content: string) {
-  const lines = content.replace(/\r\n?/g, "\n").split("\n");
-  const normalized: string[] = [];
-  let insideMarkdownFence = false;
+  const normalized = content.replace(/\r\n?/g, "\n").trim();
+  const wrappedMarkdownFenceMatch = normalized.match(/^```(?:markdown|md)\s*\n([\s\S]*?)\n```\s*$/i);
+  const unwrapped = wrappedMarkdownFenceMatch ? wrappedMarkdownFenceMatch[1] : normalized;
 
-  for (const line of lines) {
-    const trimmed = line.trim();
-
-    if (/^```markdown\b/i.test(trimmed)) {
-      const remainder = line.replace(/^[\t ]*```markdown\s*/i, "").trimEnd();
-      if (remainder) {
-        normalized.push(remainder);
-      }
-      insideMarkdownFence = true;
-      continue;
-    }
-
-    if (insideMarkdownFence && trimmed === "```") {
-      insideMarkdownFence = false;
-      continue;
-    }
-
-    normalized.push(line);
-  }
-
-  return normalized
-    .join("\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+  return unwrapped.replace(/\n{3,}/g, "\n\n").trim();
 }
 
 function buildDraftPreviewText(content: string) {
   return normalizeMarkdownForPreview(content)
-    .replace(/(^|\s)#{1,6}\s+/g, "$1")
+    .replace(/^\s{0,3}#{1,6}\s+/gm, "")
     .replace(/```[\s\S]*?```/g, " ")
     .replace(/`([^`]+)`/g, "$1")
     .replace(/[*_~]/g, "")
@@ -805,8 +782,8 @@ function SelectedDraftBubble({
           Clear
         </button>
       </div>
-      <div className="mt-3 max-h-52 overflow-y-auto whitespace-pre-wrap rounded-xl bg-white/75 px-3 py-2 text-xs leading-relaxed text-black/80">
-        {part.content}
+      <div className="mt-3 max-h-52 overflow-y-auto rounded-xl bg-white/75 px-3 py-2 text-xs leading-relaxed text-black/80">
+        <MarkdownContent content={part.content} />
       </div>
     </div>
   );
