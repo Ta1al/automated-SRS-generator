@@ -20,6 +20,7 @@ import asyncio
 import logging
 import re
 import shutil
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -104,14 +105,15 @@ async def validate_mermaid_syntax(code: str) -> tuple[bool, str]:
         tmp_in.write(code)
         tmp_in_path = tmp_in.name
 
-    # Output to /dev/null (or NUL on Windows) — we only care about exit code
-    null_out = "NUL" if Path("/dev/null").exists() is False else "/dev/null"
+    # mmdc validates output extension; use a throwaway .svg temp file.
+    with tempfile.NamedTemporaryFile(suffix=".svg", delete=False) as tmp_out:
+        tmp_out_path = tmp_out.name
 
     try:
         proc = await asyncio.create_subprocess_exec(
             mmdc_path,
             "-i", tmp_in_path,
-            "-o", null_out,
+            "-o", tmp_out_path,
             "--quiet",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -122,6 +124,37 @@ async def validate_mermaid_syntax(code: str) -> tuple[bool, str]:
         if proc.returncode == 0:
             return True, ""
         return False, stderr or "mmdc exited with a non-zero return code."
+    except NotImplementedError:
+        logger.warning(
+            "Async subprocess is not supported in this runtime; "
+            "falling back to sync mmdc execution in a worker thread."
+        )
+
+        def _run_mmdc_sync() -> tuple[int, str]:
+            completed = subprocess.run(
+                [
+                    mmdc_path,
+                    "-i", tmp_in_path,
+                    "-o", tmp_out_path,
+                    "--quiet",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=20,
+                check=False,
+            )
+            return completed.returncode, (completed.stderr or "").strip()
+
+        try:
+            return_code, stderr = await asyncio.to_thread(_run_mmdc_sync)
+            if return_code == 0:
+                return True, ""
+            return False, stderr or "mmdc exited with a non-zero return code."
+        except subprocess.TimeoutExpired:
+            return False, "mmdc validation timed out (>20 s)."
+        except Exception as exc:  # pragma: no cover
+            logger.exception("Unexpected error running sync mmdc fallback: %s", exc)
+            return _heuristic_validate(code)
     except asyncio.TimeoutError:
         return False, "mmdc validation timed out (>20 s)."
     except Exception as exc:  # pragma: no cover
@@ -129,3 +162,4 @@ async def validate_mermaid_syntax(code: str) -> tuple[bool, str]:
         return _heuristic_validate(code)
     finally:
         Path(tmp_in_path).unlink(missing_ok=True)
+        Path(tmp_out_path).unlink(missing_ok=True)

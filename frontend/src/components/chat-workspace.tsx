@@ -133,13 +133,56 @@ function slugifyText(value: string) {
 
 function buildDraftDocument(sections: Array<{ key: string; content: string }>) {
   return sections
-    .map((section) => section.content.trim())
+    .map((section) => normalizeMarkdownForPreview(section.content).trim())
     .filter(Boolean)
     .join("\n\n");
 }
 
+function normalizeMarkdownForPreview(content: string) {
+  const lines = content.replace(/\r\n?/g, "\n").split("\n");
+  const normalized: string[] = [];
+  let insideMarkdownFence = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    if (/^```markdown\b/i.test(trimmed)) {
+      const remainder = line.replace(/^[\t ]*```markdown\s*/i, "").trimEnd();
+      if (remainder) {
+        normalized.push(remainder);
+      }
+      insideMarkdownFence = true;
+      continue;
+    }
+
+    if (insideMarkdownFence && trimmed === "```") {
+      insideMarkdownFence = false;
+      continue;
+    }
+
+    normalized.push(line);
+  }
+
+  return normalized
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function buildDraftPreviewText(content: string) {
+  return normalizeMarkdownForPreview(content)
+    .replace(/(^|\s)#{1,6}\s+/g, "$1")
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/[*_~]/g, "")
+    .replace(/\|/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 180);
+}
+
 function extractDraftParts(sectionKey: string, content: string): DraftPart[] {
-  const trimmedContent = content.trim();
+  const trimmedContent = normalizeMarkdownForPreview(content).trim();
   if (!trimmedContent) {
     return [];
   }
@@ -161,7 +204,7 @@ function extractDraftParts(sectionKey: string, content: string): DraftPart[] {
         title: formatSectionTitle(sectionKey),
         content: trimmedContent,
         sectionKey,
-        preview: trimmedContent.replace(/\s+/g, " ").slice(0, 180),
+        preview: buildDraftPreviewText(trimmedContent),
       },
     ];
   }
@@ -181,7 +224,7 @@ function extractDraftParts(sectionKey: string, content: string): DraftPart[] {
       title: currentTitle,
       content: partContent,
       sectionKey,
-      preview: partContent.replace(/\s+/g, " ").slice(0, 180),
+      preview: buildDraftPreviewText(partContent),
     });
   };
 
@@ -211,7 +254,7 @@ function extractDraftParts(sectionKey: string, content: string): DraftPart[] {
           title: formatSectionTitle(sectionKey),
           content: trimmedContent,
           sectionKey,
-          preview: trimmedContent.replace(/\s+/g, " ").slice(0, 180),
+          preview: buildDraftPreviewText(trimmedContent),
         },
       ];
 }
@@ -263,6 +306,8 @@ function getStatusLabel(event: BackendStatusEvent) {
 }
 
 function MarkdownContent({ content }: { content: string }) {
+  const normalizedContent = normalizeMarkdownForPreview(content);
+
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
@@ -276,12 +321,81 @@ function MarkdownContent({ content }: { content: string }) {
         li: ({ children }) => <li className="mb-1">{children}</li>,
         strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
         em: ({ children }) => <em className="italic">{children}</em>,
-        code: ({ children }) => <code className="rounded bg-black/10 px-1 py-0.5">{children}</code>,
+        table: ({ children }) => (
+          <div className="mb-2 overflow-x-auto">
+            <table className="min-w-full border-collapse text-left text-xs">{children}</table>
+          </div>
+        ),
+        thead: ({ children }) => <thead className="bg-black/5">{children}</thead>,
+        tbody: ({ children }) => <tbody>{children}</tbody>,
+        tr: ({ children }) => <tr className="border-b border-black/10">{children}</tr>,
+        th: ({ children }) => <th className="px-2 py-1 font-semibold">{children}</th>,
+        td: ({ children }) => <td className="px-2 py-1 align-top">{children}</td>,
+        code: ({ className, children, ...props }) => {
+          const languageMatch = typeof className === "string" ? /language-([\w-]+)/.exec(className) : null;
+          const language = languageMatch?.[1]?.toLowerCase();
+          const codeText = String(children ?? "").replace(/\n$/, "");
+
+          if (language === "mermaid") {
+            return <MermaidBlock chart={codeText} />;
+          }
+
+          if (language) {
+            return (
+              <pre className="mb-2 overflow-x-auto rounded-md bg-black/90 p-3 text-xs text-white">
+                <code className={className} {...props}>
+                  {children}
+                </code>
+              </pre>
+            );
+          }
+
+          return (
+            <code className="rounded bg-black/10 px-1 py-0.5" {...props}>
+              {children}
+            </code>
+          );
+        },
       }}
     >
-      {content}
+      {normalizedContent}
     </ReactMarkdown>
   );
+}
+
+function MermaidBlock({ chart }: { chart: string }) {
+  const elementRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function render() {
+      if (!elementRef.current) {
+        return;
+      }
+
+      try {
+        const mermaid = (await import("mermaid")).default;
+        mermaid.initialize({ startOnLoad: false, securityLevel: "loose" });
+        const renderId = `mermaid-${Math.random().toString(36).slice(2)}`;
+        const { svg } = await mermaid.render(renderId, chart);
+        if (mounted && elementRef.current) {
+          elementRef.current.innerHTML = svg;
+        }
+      } catch {
+        if (mounted && elementRef.current) {
+          elementRef.current.textContent = "Failed to render Mermaid diagram.";
+        }
+      }
+    }
+
+    void render();
+    return () => {
+      mounted = false;
+    };
+  }, [chart]);
+
+  return <div ref={elementRef} className="mb-2 overflow-x-auto rounded-md border border-black/10 bg-white p-2" />;
 }
 
 function parseAssistantClarificationContent(content: string): {
@@ -718,6 +832,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
   const [deletingChatId, setDeletingChatId] = useState<string | null>(null);
   const [activeBackendNode, setActiveBackendNode] = useState<string | null>(null);
   const [selectedDraftPart, setSelectedDraftPart] = useState<DraftPart | null>(null);
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [retryPayload, setRetryPayload] = useState<{
     chatId: string;
     message: string;
@@ -1444,6 +1559,13 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
           <p className="mt-1 text-xs text-black/60">
             Click a section or requirement to send a targeted revision request through chat.
           </p>
+          <button
+            type="button"
+            onClick={() => setIsPreviewOpen(true)}
+            className="mt-3 rounded-md border border-black/15 bg-white px-3 py-1.5 text-xs font-medium text-black hover:bg-zinc-100"
+          >
+            Open document preview
+          </button>
 
           <div className="mt-3 space-y-3">
             {draftSections.length === 0 ? (
@@ -1486,11 +1608,25 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
             )}
           </div>
 
-          <div className="mt-4 rounded-md border border-black/10 bg-white p-3">
-            <h3 className="text-xs font-semibold text-black/70">
-              {selectedDraftPart ? `Preview · ${selectedDraftPart.title}` : "Document preview"}
-            </h3>
-            <div className="mt-2 max-h-[520px] overflow-auto text-xs text-black/90">
+        </aside>
+      </div>
+
+      {isPreviewOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="flex h-[85vh] w-full max-w-5xl flex-col rounded-xl bg-white shadow-xl">
+            <div className="flex items-center justify-between border-b border-black/10 px-4 py-3">
+              <h3 className="text-sm font-semibold">
+                {selectedDraftPart ? `Preview · ${selectedDraftPart.title}` : "Document preview"}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setIsPreviewOpen(false)}
+                className="rounded-md border border-black/15 px-3 py-1 text-xs hover:bg-zinc-100"
+              >
+                Close
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-auto px-4 py-3 text-sm text-black/90">
               <MarkdownContent
                 content={
                   selectedDraftPart?.content ||
@@ -1500,8 +1636,8 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
               />
             </div>
           </div>
-        </aside>
-      </div>
+        </div>
+      ) : null}
     </div>
   );
 }
