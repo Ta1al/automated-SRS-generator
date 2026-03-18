@@ -1,9 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { z } from "zod";
 
 import { getSessionUser } from "@/lib/auth";
 import { backendFetch, consumeSseResponse } from "@/lib/backend";
 import { prisma } from "@/lib/prisma";
+
+function shouldPersistAssistantMessage(message: string) {
+  const trimmed = message.trim();
+  if (!trimmed) {
+    return false;
+  }
+
+  if (
+    (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
+    (trimmed.startsWith("[") && trimmed.endsWith("]"))
+  ) {
+    return false;
+  }
+
+  return true;
+}
 
 const interactSchema = z.object({
   message: z.string().min(1),
@@ -112,17 +129,21 @@ export async function POST(request: NextRequest, context: Context) {
               onEvent: sendEvent,
             });
 
-          if (assistantMessage) {
-            await prisma.chatMessage.create({
-              data: {
-                chatId: chat.id,
-                role: "ASSISTANT",
-                content: assistantMessage,
-              },
-            });
+          let latestState: Record<string, unknown> | null = null;
+          try {
+            const stateResponse = await backendFetch(`/api/sessions/${chat.backendThreadId}/state`);
+            if (stateResponse.ok) {
+              const payload = (await stateResponse.json()) as Record<string, unknown>;
+              latestState = payload;
+            }
+          } catch {
           }
 
-          let currentDocument = finalDocument || chat.currentDocument;
+          let currentDocument =
+            finalDocument ||
+            (typeof latestState?.final_document === "string" ? latestState.final_document : "") ||
+            chat.currentDocument;
+
           if (!currentDocument) {
             const documentResponse = await backendFetch(
               `/api/sessions/${chat.backendThreadId}/document`,
@@ -133,16 +154,50 @@ export async function POST(request: NextRequest, context: Context) {
             }
           }
 
+          const hasDraftSections =
+            !!latestState &&
+            typeof latestState.sections === "object" &&
+            latestState.sections !== null &&
+            !Array.isArray(latestState.sections) &&
+            Object.keys(latestState.sections as Record<string, unknown>).length > 0;
+
+          let persistedAssistantMessage = "";
+          if (questions.length > 0) {
+            persistedAssistantMessage = assistantMessage;
+          } else if (currentDocument || hasDraftSections) {
+            persistedAssistantMessage =
+              "I updated the SRS draft. Review the sections in the right panel and select any part to request revisions.";
+          } else if (shouldPersistAssistantMessage(assistantMessage)) {
+            persistedAssistantMessage = assistantMessage;
+          }
+
+          if (persistedAssistantMessage) {
+            await prisma.chatMessage.create({
+              data: {
+                chatId: chat.id,
+                role: "ASSISTANT",
+                content: persistedAssistantMessage,
+              },
+            });
+          }
+
           const nextTitle =
             chat.title === "New Chat" ? parsed.data.message.slice(0, 60) : chat.title;
+
+          const normalizedCurrentDocument = currentDocument || null;
 
           const chatUpdateData: {
             title: string;
             currentDocument: string | null;
+            stateJson?: Prisma.InputJsonValue;
           } = {
             title: nextTitle,
-            currentDocument,
+            currentDocument: normalizedCurrentDocument,
           };
+
+          if (latestState) {
+            chatUpdateData.stateJson = latestState as Prisma.InputJsonValue;
+          }
 
           const updatedChat = await prisma.chat.update({
             where: { id: chat.id },
