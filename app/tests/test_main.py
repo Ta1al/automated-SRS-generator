@@ -14,7 +14,10 @@ Test categories:
 
 from __future__ import annotations
 
+import base64
 import json
+import io
+import zipfile
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -406,3 +409,69 @@ class TestSessionRoutes:
 
         assert response.status_code == 200
         assert response.json()["status"] == "ok"
+
+
+class TestDocxExport:
+    @pytest.mark.asyncio
+    async def test_markdown_to_docx_bytes_applies_formatting_metadata_and_diagram_image(self):
+        from app.export.docx import markdown_to_docx_bytes
+
+        tiny_png = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO8B6x0AAAAASUVORK5CYII="
+        )
+
+        markdown = """# Long Document Title That Should Not Be Core Metadata
+
+This line has **bold text** and _italic text_.
+
+```mermaid
+flowchart TD
+  A --> B
+```
+"""
+
+        with patch("app.export.docx._render_mermaid_png", return_value=tiny_png):
+            payload = markdown_to_docx_bytes(
+                markdown,
+                title="SRS",
+                author="QA Team",
+                comments="ACME Corp",
+            )
+
+        assert isinstance(payload, bytes)
+        assert len(payload) > 0
+
+        with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+            names = set(archive.namelist())
+            assert "[Content_Types].xml" in names
+            assert "word/document.xml" in names
+            assert any(name.startswith("word/media/image") for name in names)
+
+            document_xml = archive.read("word/document.xml").decode("utf-8")
+            core_xml = archive.read("docProps/core.xml").decode("utf-8")
+
+            assert "**bold text**" not in document_xml
+            assert "bold text" in document_xml
+            assert "QA Team" in core_xml
+            assert "ACME Corp" in core_xml
+            assert "<dc:title>SRS</dc:title>" in core_xml
+
+    @pytest.mark.asyncio
+    async def test_get_document_docx_returns_attachment(self, mock_app):
+        fake_state = MagicMock(values={"final_document": "# Sample SRS\n\n## Section\nContent."})
+        mock_app.state.graph.aget_state = AsyncMock(return_value=fake_state)
+
+        async with AsyncClient(
+            transport=ASGITransport(app=mock_app), base_url="http://test"
+        ) as client:
+            response = await client.get("/api/sessions/test-thread/document.docx")
+
+        assert response.status_code == 200
+        assert (
+            response.headers["content-type"]
+            == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+        assert "attachment; filename=\"srs-test-thread.docx\"" in response.headers.get(
+            "content-disposition", ""
+        )
+        assert len(response.content) > 0
