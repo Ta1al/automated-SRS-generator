@@ -75,6 +75,7 @@ pip install -r requirements.txt
 ```powershell
 Copy-Item .env.example .env
 # Edit .env and set OPENROUTER_API_KEY
+# Optional DOCX metadata: DOCX_TITLE, DOCX_AUTHOR, DOCX_COMMENT
 ```
 
 ### 4. Start PostgreSQL
@@ -120,6 +121,7 @@ docker compose exec -T postgres psql -U srs_user -d srs_db -f frontend/prisma/in
 | `POST` | `/api/sessions/{id}/interact` | Send a message; stream SSE response |
 | `DELETE` | `/api/sessions/{id}` | Delete persisted session checkpoint state |
 | `GET` | `/api/sessions/{id}/document` | Retrieve the completed SRS document |
+| `GET` | `/api/sessions/{id}/document.docx` | Download the completed SRS as DOCX |
 | `GET` | `/api/sessions/{id}/state` | Debug — inspect graph state |
 | `GET` | `/health` | Health check |
 
