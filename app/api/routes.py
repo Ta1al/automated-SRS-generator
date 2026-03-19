@@ -27,11 +27,14 @@ from typing import Any, AsyncGenerator
 import openai
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from langchain_core.messages import HumanMessage
 from langgraph.types import Command
 from pydantic import BaseModel
 from sse_starlette import EventSourceResponse
+
+from app.config import get_settings
+from app.export.docx import markdown_to_docx_bytes
 
 logger = logging.getLogger(__name__)
 
@@ -290,6 +293,47 @@ async def get_document(thread_id: str, request: Request) -> JSONResponse:
         )
 
     return JSONResponse({"thread_id": thread_id, "document": final_doc})
+
+
+@router.get("/sessions/{thread_id}/document.docx")
+async def get_document_docx(thread_id: str, request: Request) -> Response:
+    """
+    Return the final SRS document as a DOCX file.
+    """
+    app_state = request.app.state
+    if not hasattr(app_state, "graph") or app_state.graph is None:
+        raise HTTPException(status_code=503, detail="Graph not initialised.")
+
+    config = {"configurable": {"thread_id": thread_id}}
+    try:
+        state = await app_state.graph.aget_state(config)
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail=f"Session not found: {exc}") from exc
+
+    if state is None or not state.values:
+        raise HTTPException(status_code=404, detail="Session not found.")
+
+    final_doc = state.values.get("final_document", "")
+    if not final_doc:
+        raise HTTPException(
+            status_code=202,
+            detail="Document not yet complete. Continue the elicitation session.",
+        )
+
+    settings = get_settings()
+    docx_bytes = markdown_to_docx_bytes(
+        final_doc,
+        title=settings.docx_title,
+        author=settings.docx_author,
+        comments=settings.docx_comment,
+    )
+    return Response(
+        content=docx_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={
+            "Content-Disposition": f'attachment; filename="srs-{thread_id}.docx"',
+        },
+    )
 
 
 @router.get("/sessions/{thread_id}/state")
