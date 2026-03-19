@@ -23,6 +23,10 @@ flowchart LR
     Graph -->|LLM calls| OpenRouter[OpenRouter Model]
     Graph -->|RAG retrieval| Chroma[(ChromaDB Vector Store)]
     Graph -->|Checkpoint state| PgCheckpoint[(PostgreSQL Checkpointer)]
+    
+    Frontend -->|Download document.docx| FastAPI
+    FastAPI -->|DOCX export with metadata| DocxExport[python-docx]
+    DocxExport -->|Render diagrams| MermaidRender[mmdc / mermaid.ink]
 ```
 
 ### Graph topology

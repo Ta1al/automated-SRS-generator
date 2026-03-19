@@ -6,10 +6,10 @@
 graph LR
     User((User)) -->|Chat actions| Frontend["Next.js Web Frontend"]
     Frontend -->|Internal API requests| Api["Next.js API Routes"]
-    Api -->|Session + interact calls| Backend["FastAPI + LangGraph"]
+    Api -->|Session & interact calls| Backend["FastAPI + LangGraph"]
     Backend -->|SSE status/token/question/complete| Api
-    Api -->|Chat updates + final document| Frontend
-    Frontend -->|Rendered result| User
+    Api -->|Chat updates & final document| Frontend
+    Frontend -->|Export Markdown or DOCX| User
 ```
 
 ## DFD Level 1 - Main Processes
@@ -20,7 +20,7 @@ graph TD
     P1 --> P2["2.0 Persist chat + user message"]
     P2 --> AppDB[(PostgreSQL App DB)]
 
-    P2 --> P3["3.0 Backend session interaction (SSE)"]
+    P2 --> P3["3.0 Backend session interaction SSE"]
     P3 --> Graph["4.0 LangGraph pipeline"]
 
     Graph --> VectorDB[(Chroma Vector Store)]
@@ -30,7 +30,15 @@ graph TD
     Graph --> P5["5.0 Return stream events + final draft"]
     P5 --> P6["6.0 Persist assistant output/state/document"]
     P6 --> AppDB
-    P6 --> User
+    
+    P6 --> P7["7.0 Prepare document export"]
+    P7 --> P8{Export Format?}
+    P8 -->|Markdown| ReturnMarkdown["Return Markdown JSON"]
+    P8 -->|DOCX| DocxConvert["Convert to DOCX + render diagrams"]
+    DocxConvert --> ReturnDocx["Return DOCX binary"]
+    ReturnMarkdown --> P9["8.0 Present to user"]
+    ReturnDocx --> P9
+    P9 --> User
 ```
 
 ## DFD Level 2 - Detailed Processing
@@ -40,6 +48,7 @@ graph TD
     subgraph Frontend["Frontend (Next.js)"]
         UI["Chat Workspace UI"]
         FEApi["/api/chats/* routes"]
+        ExportProxy["/api/chats/[id]/export/docx proxy"]
     end
 
     subgraph AppStorage["Application Storage"]
@@ -48,8 +57,9 @@ graph TD
 
     subgraph Backend["Backend (FastAPI)"]
         Sessions["/api/sessions"]
-        Interact["/api/sessions/{id}/interact (SSE)"]
-        DocState["/api/sessions/{id}/document|state"]
+        Interact["/api/sessions/{id}/interact SSE"]
+        DocState["/api/sessions/{id}/document"]
+        DocxExport["/api/sessions/{id}/document.docx"]
     end
 
     subgraph GraphExec["LangGraph Execution"]
@@ -58,6 +68,14 @@ graph TD
         Draft["classify + draft sections"]
         Mermaid["generate/validate/correct mermaid"]
         QA["qa_review + finalize_document"]
+    end
+
+    subgraph DocxProc["DOCX Processing"]
+        MarkdownParse["Parse inline Markdown"]
+        BoldItalic["Apply bold/italic/code styles"]
+        DiagramRender["Render Mermaid to PNG via mmdc/mermaid.ink"]
+        EmbedImages["Embed PNG images in DOCX"]
+        SetMetadata["Set title/author/comments from env"]
     end
 
     subgraph AIData["AI and Retrieval"]
@@ -70,7 +88,9 @@ graph TD
     FEApi --> PrismaDB
     FEApi --> Sessions
     FEApi --> Interact
-    FEApi --> DocState
+    FEApi --> ExportProxy
+    
+    ExportProxy --> DocxExport
 
     Interact --> RAG --> Elicit --> Draft --> Mermaid --> QA
     RAG --> Chroma
@@ -81,6 +101,16 @@ graph TD
 
     QA --> Interact
     Interact --> FEApi
+    FEApi --> DocState
+    DocState --> PrismaDB
+    
+    DocxExport --> MarkdownParse
+    MarkdownParse --> BoldItalic
+    BoldItalic --> DiagramRender
+    DiagramRender --> EmbedImages
+    EmbedImages --> SetMetadata
+    SetMetadata --> ExportProxy
+    
     FEApi --> PrismaDB
     FEApi --> UI
 ```

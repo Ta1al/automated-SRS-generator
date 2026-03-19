@@ -19,8 +19,14 @@ flowchart TD
     FixNeeded -->|No| Refine[Correct Mermaid and Re-validate]
     Refine --> ValidateMermaid
     FixNeeded -->|Yes| GenerateSRS[Finalize SRS Document]
-    GenerateSRS --> ReturnSRS[Return SRS to User]
-    ReturnSRS --> End([Process Complete])
+    GenerateSRS --> ExportChoice{Export Format?}
+    ExportChoice -->|Markdown| ReturnMarkdown[Return Markdown Document]
+    ExportChoice -->|DOCX| RenderDocx[Render to DOCX with Formatting]
+    RenderDocx --> EmbedDiagrams[Embed Mermaid Diagrams as PNG]
+    EmbedDiagrams --> ApplyMetadata[Apply Title/Author/Comment from .env]
+    ApplyMetadata --> ReturnDocx[Return DOCX File]
+    ReturnMarkdown --> End([Process Complete])
+    ReturnDocx --> End
 ```
 
 ## Process Description
@@ -35,4 +41,8 @@ flowchart TD
 8. **Draft SRS Sections** - Graph drafts core SRS sections from collected context
 9. **Generate and Validate Mermaid** - Diagrams are generated and syntax-validated, with correction retries if needed
 10. **Finalize SRS Document** - Final document is assembled after QA/validation
-11. **Return SRS to User** - Document is returned through the chat flow
+11. **Export Format Decision** - User can export as Markdown or DOCX
+12. **Render to DOCX** - If DOCX chosen, Markdown is converted with true formatting (bold, italic, code styles)
+13. **Embed Diagrams** - Mermaid diagram blocks are rendered to PNG images via mmdc or mermaid.ink and embedded
+14. **Apply Metadata** - Document title, author, and comments are applied from .env configuration
+15. **Return Document** - Final document is returned to user in requested format
