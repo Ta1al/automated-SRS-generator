@@ -810,6 +810,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
   const [activeBackendNode, setActiveBackendNode] = useState<string | null>(null);
   const [selectedDraftPart, setSelectedDraftPart] = useState<DraftPart | null>(null);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [isExportingDocx, setIsExportingDocx] = useState(false);
   const [retryPayload, setRetryPayload] = useState<{
     chatId: string;
     message: string;
@@ -1210,6 +1211,60 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
     window.location.href = "/login";
   }
 
+  async function handleDownloadDocx() {
+    const chatId = selectedChatIdRef.current;
+    if (!chatId || isExportingDocx) {
+      return;
+    }
+
+    setError("");
+    setIsExportingDocx(true);
+
+    try {
+      const response = await fetch(`/api/chats/${chatId}/export/docx`, {
+        method: "GET",
+        cache: "no-store",
+      });
+
+      const contentType = response.headers.get("content-type") || "";
+
+      if (
+        !response.ok ||
+        response.status !== 200 ||
+        !contentType.includes(
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+      ) {
+        const payload = await response.json().catch(() => null);
+        const responseError =
+          payload && typeof payload === "object" && "error" in payload
+            ? String((payload as { error?: unknown }).error || "")
+            : "";
+        throw new Error(responseError || "Failed to export DOCX.");
+      }
+
+      const blob = await response.blob();
+      const disposition = response.headers.get("content-disposition") || "";
+      const filenameMatch = disposition.match(/filename="?([^";]+)"?/i);
+      const filename = filenameMatch?.[1] || "srs-document.docx";
+
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(objectUrl);
+    } catch (caughtError) {
+      const message =
+        caughtError instanceof Error ? caughtError.message : "Failed to export DOCX.";
+      setError(message);
+    } finally {
+      setIsExportingDocx(false);
+    }
+  }
+
   // When question mode is active, hide the last ASSISTANT message from the DB
   // since it contains the same questions that are already shown as interactive
   // bubbles below.
@@ -1595,13 +1650,23 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
               <h3 className="text-sm font-semibold">
                 {selectedDraftPart ? `Preview · ${selectedDraftPart.title}` : "Document preview"}
               </h3>
-              <button
-                type="button"
-                onClick={() => setIsPreviewOpen(false)}
-                className="rounded-md border border-black/15 px-3 py-1 text-xs hover:bg-zinc-100"
-              >
-                Close
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void handleDownloadDocx()}
+                  disabled={isExportingDocx || !selectedChatId}
+                  className="rounded-md border border-black/15 px-3 py-1 text-xs hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isExportingDocx ? "Exporting…" : "Download .docx"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsPreviewOpen(false)}
+                  className="rounded-md border border-black/15 px-3 py-1 text-xs hover:bg-zinc-100"
+                >
+                  Close
+                </button>
+              </div>
             </div>
             <div className="min-h-0 flex-1 overflow-auto px-4 py-3 text-sm text-black/90">
               <MarkdownContent
