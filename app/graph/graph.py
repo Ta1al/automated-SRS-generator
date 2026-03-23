@@ -41,6 +41,7 @@ from app.graph.nodes import (
     elicit_requirements,
     finalize_document,
     generate_mermaid,
+    revise_selected_section,
     retrieve_rag_context,
     validate_mermaid,
 )
@@ -66,8 +67,12 @@ def _fan_out_all_sections(state: SRSState) -> list[Send]:
     ]
 
 
-def _route_from_start(state: SRSState) -> Literal["retrieve_rag_context", "generate_mermaid"]:
-    """Support optional diagrams-only runs that bypass full drafting."""
+def _route_from_start(state: SRSState) -> Literal[
+    "retrieve_rag_context", "generate_mermaid", "revise_selected_section"
+]:
+    """Route into full drafting, diagrams-only, or targeted section revision."""
+    if state.get("revision_mode", False):
+        return "revise_selected_section"
     if state.get("diagrams_only", False):
         return "generate_mermaid"
     return "retrieve_rag_context"
@@ -134,6 +139,9 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None) -> StateGraph:
     builder.add_node("validate_mermaid", validate_mermaid)
     builder.add_node("correct_mermaid", correct_mermaid)
 
+    # Targeted revision pipeline
+    builder.add_node("revise_selected_section", revise_selected_section)
+
     # Finalisation
     builder.add_node("finalize_document", finalize_document)
 
@@ -146,6 +154,7 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None) -> StateGraph:
         {
             "retrieve_rag_context": "retrieve_rag_context",
             "generate_mermaid": "generate_mermaid",
+            "revise_selected_section": "revise_selected_section",
         },
     )
     builder.add_edge("retrieve_rag_context", "elicit_requirements")
@@ -184,6 +193,9 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None) -> StateGraph:
         },
     )
     builder.add_edge("correct_mermaid", "validate_mermaid")
+
+    # Section-only revision path
+    builder.add_edge("revise_selected_section", "finalize_document")
 
     builder.add_edge("finalize_document", END)
 

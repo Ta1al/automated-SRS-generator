@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import uuid
 from typing import Any, AsyncGenerator, Literal
 
@@ -40,14 +41,23 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["srs"])
 
+
+def _slugify_for_filename(value: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    return slug[:80]
+
 # ── Request / Response models ─────────────────────────────────────────────────
 
 
 class InteractRequest(BaseModel):
     message: str
-    mode: Literal["full", "diagrams_only"] = "full"
+    mode: Literal["full", "diagrams_only", "section_revision"] = "full"
     generate_diagrams: bool = False
     section_seed: dict[str, str] | None = None
+    revision_mode: bool = False
+    revision_target_section_key: str | None = None
+    revision_target_title: str | None = None
+    revision_target_content: str | None = None
 
 
 # ── Helper: detect if a thread is currently interrupted ──────────────────────
@@ -73,9 +83,13 @@ async def _stream_graph(
     thread_id: str,
     message: str,
     is_resume: bool,
-    mode: Literal["full", "diagrams_only"],
+    mode: Literal["full", "diagrams_only", "section_revision"],
     generate_diagrams: bool,
     section_seed: dict[str, str] | None,
+    revision_mode: bool,
+    revision_target_section_key: str | None,
+    revision_target_title: str | None,
+    revision_target_content: str | None,
 ) -> AsyncGenerator[dict, None]:
     """
     Async generator that drives the LangGraph graph and yields SSE-compatible
@@ -109,9 +123,15 @@ async def _stream_graph(
                 "mermaid_correction_attempts": 0,
                 "generate_diagrams": generate_diagrams,
                 "diagrams_only": mode == "diagrams_only",
+                "revision_mode": revision_mode,
+                "revision_target_section_key": revision_target_section_key or "",
+                "revision_target_title": revision_target_title or "",
+                "revision_target_content": revision_target_content or "",
+                "revision_request": message,
                 "is_complete": False,
                 "qa_gaps": [],
                 "final_document": "",
+                "project_title": "",
             }
 
         async for stream_event in graph.astream(
@@ -247,6 +267,10 @@ async def interact(
             body.mode,
             body.generate_diagrams,
             body.section_seed,
+            body.revision_mode,
+            body.revision_target_section_key,
+            body.revision_target_title,
+            body.revision_target_content,
         ):
             if await request.is_disconnected():
                 logger.info("Client disconnected mid-stream for thread %s", thread_id)
@@ -335,9 +359,17 @@ async def get_document_docx(thread_id: str, request: Request) -> Response:
         )
 
     settings = get_settings()
+    project_title = str(state.values.get("project_title", "")).strip()
+    resolved_title = project_title or settings.docx_title
+    download_name = (
+        f"{_slugify_for_filename(project_title)}.docx"
+        if project_title
+        else f"srs-{thread_id}.docx"
+    )
+
     docx_bytes = markdown_to_docx_bytes(
         final_doc,
-        title=settings.docx_title,
+        title=resolved_title,
         author=settings.docx_author,
         comments=settings.docx_comment,
     )
@@ -345,7 +377,7 @@ async def get_document_docx(thread_id: str, request: Request) -> Response:
         content=docx_bytes,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers={
-            "Content-Disposition": f'attachment; filename="srs-{thread_id}.docx"',
+            "Content-Disposition": f'attachment; filename="{download_name}"',
         },
     )
 
@@ -380,6 +412,7 @@ async def get_state(thread_id: str, request: Request) -> JSONResponse:
             "missing_context": state.values.get("missing_context", []),
             "qa_gaps": state.values.get("qa_gaps", []),
             "sections": state.values.get("sections", {}),
+            "project_title": state.values.get("project_title", ""),
             "final_document": state.values.get("final_document", ""),
         }
     )

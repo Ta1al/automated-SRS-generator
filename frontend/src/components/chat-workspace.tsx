@@ -45,6 +45,7 @@ type ActiveRunSummary = {
   questionPrompt: string | null;
   questions: ClarificationQuestion[];
   statuses: BackendStatusEvent[];
+  liveSections?: Record<string, string>;
 };
 
 type QuestionMode = {
@@ -97,8 +98,8 @@ const DRAFT_NODE_TO_SECTION_KEY: Record<string, string> = {
 
 const NODE_LABELS: Record<string, string> = {
   retrieve_rag_context: "Retrieved compliance context",
-  elicit_requirements: "Extracted the initial product outline",
-  evaluate_completeness: "Audited the brief for missing requirements",
+  elicit_requirements: "the initial product outline",
+  evaluate_completeness: "Audited brief for missing requirements",
   ask_clarifying_questions: "Prepared follow-up questions",
   classify_requirements: "Classified requirements",
   draft_section_3_fr: "Drafted functional requirements",
@@ -107,6 +108,7 @@ const NODE_LABELS: Record<string, string> = {
   draft_section_1: "Drafted introduction",
   draft_section_2: "Drafted product overview",
   draft_section_4: "Built verification matrix",
+  revise_selected_section: "Revised selected section",
   generate_mermaid: "Generated diagrams",
   validate_mermaid: "Validated diagrams",
   correct_mermaid: "Corrected diagram syntax",
@@ -920,6 +922,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
 
         setBackendStatuses(run.statuses || []);
         setActiveBackendNode(run.currentNode || null);
+        setLiveSectionDrafts(run.liveSections || {});
 
         if (run.status === "RUNNING") {
           setIsSending(true);
@@ -1071,6 +1074,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
           setIsSending(true);
           setBackendStatuses(run.statuses || []);
           setActiveBackendNode(run.currentNode || null);
+          setLiveSectionDrafts(run.liveSections || {});
           void pollActiveRun(chatId);
         } else if (run?.status === "NEEDS_INPUT" && run.questions.length > 0) {
           setQuestionMode({
@@ -1169,7 +1173,9 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
     const optimisticMessage: ChatMessage = {
       id: `optimistic-${Date.now()}`,
       role: "USER",
-      content: messageText,
+      content: revisionTarget
+        ? `[Selected section: ${revisionTarget.title}]\n${messageText}`
+        : messageText,
       createdAt: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, optimisticMessage]);

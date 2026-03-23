@@ -28,6 +28,14 @@ type Context = {
   }>;
 };
 
+function formatStoredUserMessage(message: string, revisionTarget?: { title: string }) {
+  if (!revisionTarget?.title) {
+    return message;
+  }
+
+  return `[Selected section: ${revisionTarget.title}]\n${message}`;
+}
+
 export async function POST(request: NextRequest, context: Context) {
   const session = await getSessionUser();
   if (!session) {
@@ -80,7 +88,7 @@ export async function POST(request: NextRequest, context: Context) {
     data: {
       chatId: chat.id,
       role: "USER",
-      content: parsed.data.message,
+      content: formatStoredUserMessage(parsed.data.message, parsed.data.revisionTarget),
     },
   });
 

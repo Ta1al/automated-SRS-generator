@@ -14,6 +14,7 @@ import asyncio
 import json
 import logging
 import re
+from collections import Counter
 from typing import Any
 
 import httpx
@@ -163,6 +164,87 @@ def _normalize_questions(raw_questions: Any) -> list[ClarificationQuestion]:
     return normalized
 
 
+def _normalize_project_title(value: Any) -> str:
+    """Normalize a candidate project title into a concise single-line string."""
+    if not isinstance(value, str):
+        return ""
+
+    normalized = re.sub(r"\s+", " ", value).strip()
+    if not normalized:
+        return ""
+    return normalized[:120]
+
+
+def _extract_project_title(parsed_payload: Any) -> str:
+    """Read project title from elicitor JSON payload with reasonable fallbacks."""
+    if not isinstance(parsed_payload, dict):
+        return ""
+
+    direct_title = _normalize_project_title(parsed_payload.get("project_title"))
+    if direct_title:
+        return direct_title
+
+    preliminary = parsed_payload.get("preliminary_sections")
+    if isinstance(preliminary, dict):
+        nested_title = _normalize_project_title(preliminary.get("product_name"))
+        if nested_title:
+            return nested_title
+
+    return ""
+
+
+def _tokenize_for_overlap(text: str) -> list[str]:
+    return re.findall(r"[a-z0-9]+", text.lower())
+
+
+def _retrieve_draft_context(
+    sections: dict[str, str],
+    *,
+    target_key: str,
+    query: str,
+    top_k: int = 3,
+) -> str:
+    """Retrieve top-k relevant snippets from existing draft sections using lexical overlap."""
+    query_tokens = _tokenize_for_overlap(query)
+    if not query_tokens:
+        return ""
+
+    query_counts = Counter(query_tokens)
+    scored_chunks: list[tuple[float, str, str]] = []
+
+    for section_key, section_content in sections.items():
+        if section_key == target_key:
+            continue
+        text = str(section_content or "").strip()
+        if not text:
+            continue
+
+        chunks = [chunk.strip() for chunk in re.split(r"\n{2,}", text) if chunk.strip()]
+        if not chunks:
+            chunks = [text]
+
+        for chunk in chunks:
+            chunk_tokens = _tokenize_for_overlap(chunk)
+            if not chunk_tokens:
+                continue
+            chunk_counts = Counter(chunk_tokens)
+            overlap = sum(min(query_counts[token], chunk_counts[token]) for token in query_counts)
+            if overlap <= 0:
+                continue
+
+            score = overlap / max(8, len(chunk_tokens))
+            scored_chunks.append((score, section_key, chunk))
+
+    scored_chunks.sort(key=lambda item: item[0], reverse=True)
+    top = scored_chunks[:top_k]
+    if not top:
+        return ""
+
+    return "\n\n".join(
+        f"[From {section_key}]\n{chunk[:1400]}" for _, section_key, chunk in top
+    )
+
+
 # ── Node 1: Retrieve RAG context ──────────────────────────────────────────────
 
 
@@ -205,16 +287,21 @@ async def elicit_requirements(state: SRSState) -> dict:
 
     response = await _llm_invoke_with_retry(llm, messages, node_name="elicit_requirements")
     raw = _ai_text(response)
+    project_title = state.get("project_title", "")
 
     # Try to parse as JSON; fall back to storing as-is
     try:
         parsed = _parse_json(raw)
         buffer = json.dumps(parsed, indent=2)
+        extracted_title = _extract_project_title(parsed)
+        if extracted_title:
+            project_title = extracted_title
     except (json.JSONDecodeError, ValueError):
         buffer = raw
 
     return {
         "document_buffer": buffer,
+        "project_title": project_title,
         "chat_history": [AIMessage(content=f"Elicitation result:\n{buffer}")],
     }
 
@@ -508,6 +595,63 @@ async def draft_section_4(state: SRSState) -> dict:
         node_name="draft_section_4",
     )
     return {"sections": {"s4": _ai_text(response)}}
+
+
+async def revise_selected_section(state: SRSState) -> dict:
+    """Revise only the selected section using context retrieved from the existing draft."""
+    sections = dict(state.get("sections", {}))
+    target_key = str(state.get("revision_target_section_key", "")).strip()
+    if not target_key:
+        return {"sections": {}}
+
+    current_text = str(state.get("revision_target_content", "")).strip() or str(
+        sections.get(target_key, "")
+    ).strip()
+    if not current_text:
+        return {"sections": {}}
+
+    requested_change = str(state.get("revision_request", "")).strip()
+    target_title = str(state.get("revision_target_title", "")).strip() or target_key
+
+    retrieval_query = "\n".join(
+        filter(None, [target_title, target_key, requested_change, current_text[:900]])
+    )
+    draft_context = _retrieve_draft_context(
+        sections,
+        target_key=target_key,
+        query=retrieval_query,
+        top_k=4,
+    )
+
+    llm = _get_llm(temperature=0.2)
+    prompt_parts = [
+        f"Selected section title: {target_title}",
+        f"Selected section key: {target_key}",
+        "Current section markdown:",
+        current_text,
+        "User requested change:",
+        requested_change or "(No additional instruction provided)",
+    ]
+
+    if draft_context:
+        prompt_parts.extend(
+            [
+                "Retrieved context from other draft sections:",
+                draft_context,
+            ]
+        )
+
+    response = await _llm_invoke_with_retry(
+        llm,
+        [
+            SystemMessage(content=prompts.REVISE_SECTION_SYSTEM),
+            HumanMessage(content="\n\n".join(prompt_parts)),
+        ],
+        node_name="revise_selected_section",
+    )
+    revised_section = _ai_text(response).strip() or current_text
+
+    return {"sections": {target_key: revised_section}}
 
 
 # ── Node 10: Generate Mermaid diagrams ────────────────────────────────────────

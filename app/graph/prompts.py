@@ -22,6 +22,7 @@ From the user's message, identify and document:
 
 Produce a concise preliminary outline in this JSON format:
 {{
+  "project_title": "...",
   "entities": ["..."],
   "workflows": ["..."],
   "constraints_mentioned": ["..."],
@@ -35,7 +36,8 @@ Produce a concise preliminary outline in this JSON format:
 }}
 
 Be objective. Do not invent information not present in the user's message.
-If information is absent, use null for that field.
+Always infer and provide a concise 3-8 word `project_title` from the user's prompt.
+If information is absent for other fields, use null for that field.
 """
 
 # ── Completeness Evaluator ────────────────────────────────────────────────────
@@ -295,6 +297,24 @@ Rules:
 - Every requirement ID mentioned in Section 3 MUST appear in this table.
 - Include a brief, actionable note for each entry (e.g., tool name, test type).
 - Return ONLY the Markdown content for Section 4.
+"""
+
+REVISE_SECTION_SYSTEM = """\
+You are a senior SRS editor performing a targeted section revision.
+
+You will be given:
+1) The selected section metadata and current section text
+2) The user's requested change
+3) Retrieved context from the existing draft (other sections)
+
+Task:
+- Rewrite ONLY the selected section so it incorporates the requested change.
+- Keep the section heading hierarchy and requirement ID style consistent.
+- Preserve unaffected details in this section unless the request explicitly changes them.
+- Do NOT rewrite other sections.
+- Do NOT include explanations, notes, or commentary.
+
+Return ONLY the revised Markdown for the selected section.
 """
 
 # ── Mermaid Diagram Generator ─────────────────────────────────────────────────

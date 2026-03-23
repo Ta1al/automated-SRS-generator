@@ -20,7 +20,7 @@ type StatusEventRecord = BackendStatusEvent & {
 };
 
 type TimingMap = Map<string, number>;
-type RunMode = "full" | "diagrams_only";
+type RunMode = "full" | "diagrams_only" | "section_revision";
 
 const DEFAULT_STAGE_MS = 45000;
 const ORDERED_STAGES_FULL = [
@@ -62,6 +62,10 @@ const ORDERED_STAGES_DIAGRAMS_ONLY = [
   "correct_mermaid",
   "finalize_document",
 ] as const;
+const ORDERED_STAGES_SECTION_REVISION = [
+  "revise_selected_section",
+  "finalize_document",
+] as const;
 const PARALLEL_DRAFT_STAGES = [
   "draft_section_1",
   "draft_section_2",
@@ -86,23 +90,8 @@ function shouldPersistAssistantMessage(message: string) {
   return true;
 }
 
-function buildBackendMessage(message: string, revisionTarget?: RevisionTarget) {
-  if (!revisionTarget) {
-    return message;
-  }
-
-  return [
-    "Revise the existing SRS draft section below.",
-    `Target section: ${revisionTarget.title}`,
-    revisionTarget.sectionKey ? `Section key: ${revisionTarget.sectionKey}` : "",
-    "Current section text:",
-    revisionTarget.content,
-    "Requested change:",
-    message,
-    "Update the SRS consistently and preserve unaffected requirements unless the requested change requires broader edits.",
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+function buildBackendMessage(message: string) {
+  return message;
 }
 
 async function loadTimingMap() {
@@ -226,6 +215,47 @@ function normalizeQuestions(rawQuestions: ClarificationQuestion[] | undefined) {
   }));
 }
 
+function normalizeProjectTitle(value: unknown) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  return value.replace(/\s+/g, " ").trim().slice(0, 120);
+}
+
+function extractProjectTitleFromState(state: Record<string, unknown> | null) {
+  if (!state) {
+    return "";
+  }
+
+  const direct = normalizeProjectTitle(state.project_title);
+  if (direct) {
+    return direct;
+  }
+
+  const documentBuffer = typeof state.document_buffer === "string" ? state.document_buffer.trim() : "";
+  if (!documentBuffer || !(documentBuffer.startsWith("{") && documentBuffer.endsWith("}"))) {
+    return "";
+  }
+
+  try {
+    const parsed = JSON.parse(documentBuffer) as Record<string, unknown>;
+    const fromTopLevel = normalizeProjectTitle(parsed.project_title);
+    if (fromTopLevel) {
+      return fromTopLevel;
+    }
+
+    const preliminary = parsed.preliminary_sections;
+    if (preliminary && typeof preliminary === "object" && !Array.isArray(preliminary)) {
+      return normalizeProjectTitle((preliminary as Record<string, unknown>).product_name);
+    }
+  } catch {
+    return "";
+  }
+
+  return "";
+}
+
 export async function getRunSummary(runId: string) {
   const run = await prisma.chatRun.findUnique({ where: { id: runId } });
   if (!run) {
@@ -290,16 +320,22 @@ export async function startBackgroundChatRun(params: {
     generateDiagrams = false,
     diagramsOnly = false,
   } = params;
-  const runMode: RunMode = diagramsOnly ? "diagrams_only" : "full";
+  const runMode: RunMode = diagramsOnly
+    ? "diagrams_only"
+    : revisionTarget
+      ? "section_revision"
+      : "full";
   const shouldGenerateDiagrams = diagramsOnly ? true : generateDiagrams;
   const orderedStages =
     runMode === "diagrams_only"
       ? ORDERED_STAGES_DIAGRAMS_ONLY
+      : runMode === "section_revision"
+        ? ORDERED_STAGES_SECTION_REVISION
       : shouldGenerateDiagrams
         ? ORDERED_STAGES_FULL
         : ORDERED_STAGES_NO_DIAGRAMS;
   const includeParallelDraftStages = runMode === "full";
-  const backendMessage = buildBackendMessage(message, revisionTarget);
+  const backendMessage = buildBackendMessage(message);
   const timingMap = await loadTimingMap();
   const statusEvents: StatusEventRecord[] = [];
   const finishedNodes = new Set<string>();
@@ -347,14 +383,17 @@ export async function startBackgroundChatRun(params: {
     }
 
     const sectionSeed =
-      runMode === "diagrams_only" &&
       chat.stateJson &&
       typeof chat.stateJson === "object" &&
       !Array.isArray(chat.stateJson) &&
       (chat.stateJson as Record<string, unknown>).sections &&
       typeof (chat.stateJson as Record<string, unknown>).sections === "object" &&
       !Array.isArray((chat.stateJson as Record<string, unknown>).sections)
-        ? ((chat.stateJson as Record<string, unknown>).sections as Record<string, string>)
+        ? Object.fromEntries(
+            Object.entries((chat.stateJson as Record<string, unknown>).sections as Record<string, unknown>)
+              .filter(([, value]) => typeof value === "string")
+              .map(([key, value]) => [key, value as string]),
+          )
         : undefined;
 
     const interactResponse = await backendFetch(`/api/sessions/${chat.backendThreadId}/interact`, {
@@ -364,6 +403,10 @@ export async function startBackgroundChatRun(params: {
         mode: runMode,
         generate_diagrams: shouldGenerateDiagrams,
         section_seed: sectionSeed,
+        revision_mode: runMode === "section_revision",
+        revision_target_section_key: revisionTarget?.sectionKey,
+        revision_target_title: revisionTarget?.title,
+        revision_target_content: revisionTarget?.content,
       }),
     });
 
@@ -504,6 +547,7 @@ export async function startBackgroundChatRun(params: {
       Object.keys(latestState.sections as Record<string, unknown>).length > 0;
 
     const normalizedQuestions = normalizeQuestions(summary.questions);
+    const generatedProjectTitle = extractProjectTitleFromState(latestState);
 
     let persistedAssistantMessage = "";
     if (normalizedQuestions.length > 0) {
@@ -515,12 +559,17 @@ export async function startBackgroundChatRun(params: {
       persistedAssistantMessage =
         runMode === "diagrams_only"
           ? "I generated diagrams for the current draft. Open document preview to review them."
+          : runMode === "section_revision"
+            ? "I updated the selected section in the SRS draft. Review it in the right panel and request more refinements if needed."
           : "I updated the SRS draft. Review the sections in the right panel and select any part to request revisions.";
     } else if (shouldPersistAssistantMessage(summary.assistantMessage)) {
       persistedAssistantMessage = summary.assistantMessage;
     }
 
-    const nextTitle = chat.title === "New Chat" ? message.slice(0, 60) : chat.title;
+    const nextTitle =
+      chat.title === "New Chat"
+        ? generatedProjectTitle || message.slice(0, 60)
+        : chat.title;
     const normalizedCurrentDocument = currentDocument || null;
 
     const chatUpdateData: {

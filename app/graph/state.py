@@ -86,6 +86,15 @@ class SRSState(TypedDict):
         diagrams_only:
             When True, bypass drafting and generate diagrams from existing sections.
 
+        revision_mode:
+            When True, bypass full drafting and only revise the selected section.
+
+        revision_target_section_key / revision_target_title / revision_target_content:
+            Metadata about the selected section to revise.
+
+        revision_request:
+            The user's requested change for the selected section.
+
         is_complete:
             Boolean flag set by the QA reviewer when the document passes.
 
@@ -95,6 +104,9 @@ class SRSState(TypedDict):
 
         final_document:
             Fully assembled, validated Markdown SRS document.
+
+        project_title:
+            Short LLM-generated title inferred from the user's prompt.
     """
 
     # ── Conversation ──────────────────────────────────────────────────────────
@@ -119,6 +131,13 @@ class SRSState(TypedDict):
     mermaid_correction_attempts: int
     generate_diagrams: bool
     diagrams_only: bool
+    revision_mode: bool
+
+    # ── Targeted revision ────────────────────────────────────────────────────
+    revision_target_section_key: str
+    revision_target_title: str
+    revision_target_content: str
+    revision_request: str
 
     # ── Quality assurance ─────────────────────────────────────────────────────
     is_complete: bool
@@ -126,3 +145,4 @@ class SRSState(TypedDict):
 
     # ── Final output ──────────────────────────────────────────────────────────
     final_document: str
+    project_title: str
