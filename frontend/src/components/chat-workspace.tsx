@@ -90,8 +90,6 @@ const PARALLEL_DRAFT_NODES = new Set([
   "draft_section_3_fr",
   "draft_section_3_nfr",
 ]);
-// Keep legacy alias so getWaitingOnLabel still compiles
-const SECTION_THREE_NODES = PARALLEL_DRAFT_NODES;
 const DRAFT_NODE_TO_SECTION_KEY: Record<string, string> = {
   draft_section_1: "s1",
   draft_section_2: "s2",
@@ -354,14 +352,25 @@ function MermaidBlock({ chart }: { chart: string }) {
       try {
         const mermaid = (await import("mermaid")).default;
         mermaid.initialize({ startOnLoad: false, securityLevel: "loose" });
+        await mermaid.parse(chart);
         const renderId = `mermaid-${Math.random().toString(36).slice(2)}`;
         const { svg } = await mermaid.render(renderId, chart);
         if (mounted && elementRef.current) {
-          elementRef.current.innerHTML = svg;
+          const lowerSvg = svg.toLowerCase();
+          const hasMermaidErrorText =
+            lowerSvg.includes("syntax error in text") ||
+            lowerSvg.includes("mermaid version") ||
+            lowerSvg.includes("parse error");
+
+          if (hasMermaidErrorText) {
+            elementRef.current.textContent = "Diagram unavailable.";
+          } else {
+            elementRef.current.innerHTML = svg;
+          }
         }
       } catch {
         if (mounted && elementRef.current) {
-          elementRef.current.textContent = "Failed to render Mermaid diagram.";
+          elementRef.current.textContent = "Diagram unavailable.";
         }
       }
     }
@@ -372,7 +381,7 @@ function MermaidBlock({ chart }: { chart: string }) {
     };
   }, [chart]);
 
-  return <div ref={elementRef} className="mb-2 overflow-x-auto rounded-md border border-black/10 bg-white p-2" />;
+  return <div ref={elementRef} className="mb-2 overflow-x-auto rounded-md bg-[color:var(--surface-lowest)] p-2 ring-1 ring-[color:var(--outline-variant)]/30" />;
 }
 
 function parseAssistantClarificationContent(content: string): {
@@ -689,8 +698,8 @@ function QuestionBubble({
   onOptionSelect?: (opt: string) => void;
 }) {
   return (
-    <div className="max-w-[85%] rounded-lg bg-zinc-100 px-4 py-3 text-sm text-black">
-      <p className="mb-2 text-xs font-medium text-black/45 uppercase tracking-[0.14em]">
+    <div className="max-w-[85%] rounded-xl bg-[color:var(--surface-highest)]/80 px-4 py-3 text-sm text-[color:var(--foreground)] backdrop-blur">
+      <p className="mb-2 text-xs font-semibold text-[color:var(--on-surface-variant)] uppercase tracking-[0.14em]">
         Question {number} of {total}
         {question.category ? ` · ${question.category}` : ""}
       </p>
@@ -698,14 +707,14 @@ function QuestionBubble({
 
       {question.suggested_options && question.suggested_options.length > 0 ? (
         <div className="mt-3">
-          <p className="mb-1.5 text-xs text-black/50">Suggested answers — click to use:</p>
+          <p className="mb-1.5 text-xs text-[color:var(--on-surface-variant)]">Suggested answers — click to use:</p>
           <div className="flex flex-wrap gap-1.5">
             {question.suggested_options.map((opt) => (
               <button
                 key={opt}
                 type="button"
                 onClick={() => onOptionSelect?.(opt)}
-                className="rounded-full border border-black/15 bg-white px-2.5 py-0.5 text-xs hover:border-black/30 hover:bg-black/5 transition-colors"
+                className="rounded-full bg-[color:var(--surface-lowest)] px-2.5 py-0.5 text-xs ring-1 ring-[color:var(--outline-variant)]/35 transition-colors hover:bg-[color:var(--surface-low)]"
               >
                 {opt}
               </button>
@@ -715,7 +724,7 @@ function QuestionBubble({
       ) : null}
 
       {question.rationale ? (
-        <p className="mt-2 text-xs text-black/45 italic">{question.rationale}</p>
+        <p className="mt-2 text-xs text-[color:var(--on-surface-variant)] italic">{question.rationale}</p>
       ) : null}
     </div>
   );
@@ -731,11 +740,11 @@ function ReceivingBubble({
   const recentStatuses = statuses.slice(-3);
 
   return (
-    <div className="max-w-[85%] rounded-2xl bg-zinc-100 px-4 py-3 text-black">
+    <div className="max-w-[85%] rounded-2xl bg-[color:var(--surface-highest)]/80 px-4 py-3 text-[color:var(--foreground)] backdrop-blur">
       <div className="flex items-start gap-3">
         <span className="mt-0.5 h-4 w-4 animate-spin rounded-full border-2 border-black/15 border-t-black" />
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-black/45">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[color:var(--on-surface-variant)]">
             Receiving SRS update
           </p>
           <p className="mt-1 text-sm leading-snug">Waiting on {waitingOn.toLowerCase()}.</p>
@@ -747,7 +756,7 @@ function ReceivingBubble({
           {recentStatuses.map((status) => (
             <span
               key={`${status.node}-${status.status}`}
-              className="rounded-full bg-white px-2.5 py-1 text-[11px] text-black/65 ring-1 ring-black/10"
+              className="rounded-full bg-[color:var(--surface-lowest)] px-2.5 py-1 text-[11px] text-[color:var(--on-surface-variant)] ring-1 ring-[color:var(--outline-variant)]/35"
             >
               {getStatusLabel(status)}
             </span>
@@ -766,10 +775,10 @@ function SelectedDraftBubble({
   onClear: () => void;
 }) {
   return (
-    <div className="max-w-[85%] rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-black">
+    <div className="max-w-[85%] rounded-2xl bg-[color:var(--surface-low)] px-4 py-3 text-[color:var(--foreground)] ring-1 ring-[color:var(--outline-variant)]/35">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-900/70">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[color:var(--on-surface-variant)]">
             Selected SRS part
           </p>
           <p className="mt-1 text-sm font-medium leading-snug">{part.title}</p>
@@ -777,12 +786,12 @@ function SelectedDraftBubble({
         <button
           type="button"
           onClick={onClear}
-          className="rounded-full border border-amber-300 px-2 py-0.5 text-[11px] text-amber-950 transition-colors hover:bg-amber-100"
+          className="rounded-full px-2 py-0.5 text-[11px] text-[color:var(--foreground)] ring-1 ring-[color:var(--outline-variant)]/40 transition-colors hover:bg-[color:var(--surface-lowest)]"
         >
           Clear
         </button>
       </div>
-      <div className="mt-3 max-h-52 overflow-y-auto rounded-xl bg-white/75 px-3 py-2 text-xs leading-relaxed text-black/80">
+      <div className="mt-3 max-h-52 overflow-y-auto rounded-xl bg-[color:var(--surface-lowest)] px-3 py-2 text-xs leading-relaxed text-[color:var(--on-surface-variant)]">
         <MarkdownContent content={part.content} />
       </div>
     </div>
@@ -1375,15 +1384,15 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
   );
 
   return (
-    <div className="flex h-screen flex-col bg-zinc-50">
-      <header className="flex items-center justify-between border-b border-black/10 bg-white px-4 py-3">
+    <div className="flex h-screen flex-col bg-[color:var(--surface)]">
+      <header className="flex items-center justify-between border-b border-[color:var(--outline-variant)]/35 bg-[color:var(--surface-lowest)] px-4 py-3">
         <div>
-          <h1 className="text-lg font-semibold">SRS Chat Workspace</h1>
-          <p className="text-xs text-black/60">{userEmail}</p>
+          <h1 className="font-headline text-lg font-semibold text-[color:var(--primary)]">SRS Chat Workspace</h1>
+          <p className="text-xs text-[color:var(--on-surface-variant)]">{userEmail}</p>
         </div>
         <button
           onClick={onLogout}
-          className="rounded-md border border-black/15 px-3 py-1.5 text-sm"
+          className="rounded-md px-3 py-1.5 text-sm ring-1 ring-[color:var(--outline-variant)]/50"
         >
           Logout
         </button>
@@ -1391,21 +1400,21 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
 
       <div className="grid min-h-0 flex-1 grid-cols-[260px_1fr_420px]">
         {/* ── Sidebar: chat list ── */}
-        <aside className="flex min-h-0 flex-col border-r border-black/10 bg-white">
+        <aside className="flex min-h-0 flex-col border-r border-[color:var(--outline-variant)]/35 bg-[color:var(--surface-low)]">
           <div className="flex items-center justify-between p-3">
-            <h2 className="text-sm font-semibold">Previous chats</h2>
+            <h2 className="text-sm font-semibold text-[color:var(--primary)]">Previous chats</h2>
             <button
               onClick={createChat}
-              className="rounded-md border border-black/15 px-2 py-1 text-xs"
+              className="rounded-md bg-[color:var(--primary)] px-2 py-1 text-xs text-white"
             >
               New
             </button>
           </div>
 
           <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
-            {isLoading ? <p className="px-1 text-sm text-black/60">Loading...</p> : null}
+            {isLoading ? <p className="px-1 text-sm text-[color:var(--on-surface-variant)]">Loading...</p> : null}
             {chats.length === 0 && !isLoading ? (
-              <p className="px-1 text-sm text-black/60">No chats yet. Create one.</p>
+              <p className="px-1 text-sm text-[color:var(--on-surface-variant)]">No chats yet. Create one.</p>
             ) : null}
 
             {chats.map((chat) => {
@@ -1413,8 +1422,10 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
               return (
                 <div
                   key={chat.id}
-                  className={`mb-2 flex items-start gap-2 rounded-md border px-2 py-2 ${
-                    isActive ? "border-black bg-black text-white" : "border-black/10 bg-white"
+                  className={`mb-2 flex items-start gap-2 rounded-md px-2 py-2 ring-1 ${
+                    isActive
+                      ? "bg-[color:var(--primary)] text-white ring-[color:var(--primary)]"
+                      : "bg-[color:var(--surface-lowest)] ring-[color:var(--outline-variant)]/35"
                   }`}
                 >
                   <button
@@ -1422,10 +1433,10 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
                       setSelectedChatId(chat.id);
                       void loadChatDetails(chat.id);
                     }}
-                    className={`min-w-0 flex-1 text-left ${isActive ? "text-white" : "text-black"}`}
+                    className={`min-w-0 flex-1 text-left ${isActive ? "text-white" : "text-[color:var(--foreground)]"}`}
                   >
                     <p className="truncate text-sm font-medium">{chat.title || "Untitled"}</p>
-                    <p className={`mt-1 text-xs ${isActive ? "text-white/70" : "text-black/60"}`}>
+                    <p className={`mt-1 text-xs ${isActive ? "text-white/70" : "text-[color:var(--on-surface-variant)]"}`}>
                       {new Date(chat.updatedAt).toLocaleString()}
                     </p>
                   </button>
@@ -1436,7 +1447,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
                     className={`rounded px-2 py-1 text-xs ${
                       isActive
                         ? "text-white/80 hover:bg-white/10"
-                        : "text-black/60 hover:bg-black/5"
+                        : "text-[color:var(--on-surface-variant)] hover:bg-[color:var(--surface-low)]"
                     } disabled:opacity-40`}
                     aria-label={`Delete ${chat.title || "chat"}`}
                     title="Delete chat"
@@ -1450,10 +1461,10 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
         </aside>
 
         {/* ── Main chat area ── */}
-        <main className="flex min-h-0 flex-col border-r border-black/10 bg-white">
-          <div className="border-b border-black/10 px-4 py-3">
-            <h2 className="text-sm font-semibold">Chat</h2>
-            <p className="text-xs text-black/60">
+        <main className="flex min-h-0 flex-col border-r border-[color:var(--outline-variant)]/35 bg-[color:var(--surface-lowest)]">
+          <div className="border-b border-[color:var(--outline-variant)]/35 px-4 py-3">
+            <h2 className="text-sm font-semibold text-[color:var(--primary)]">Interactive Generation</h2>
+            <p className="text-xs text-[color:var(--on-surface-variant)]">
               {selectedChat ? selectedChat.title : "Select or create a chat"}
             </p>
           </div>
@@ -1465,8 +1476,8 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
                 key={message.id}
                 className={`max-w-[85%] rounded-lg px-3 py-2 text-sm whitespace-pre-wrap ${
                   message.role === "USER"
-                    ? "ml-auto bg-black text-white"
-                    : "bg-zinc-100 text-black"
+                    ? "ml-auto bg-[color:var(--primary)] text-white"
+                    : "bg-[color:var(--surface-highest)]/80 text-[color:var(--foreground)] backdrop-blur"
                 }`}
               >
                 {message.role === "ASSISTANT" ? (
@@ -1482,7 +1493,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
               <>
                 {/* Intro prompt (if any) */}
                 {questionMode.introPrompt ? (
-                  <div className="max-w-[85%] rounded-lg bg-zinc-100 px-3 py-2 text-sm whitespace-pre-wrap text-black">
+                  <div className="max-w-[85%] rounded-lg bg-[color:var(--surface-highest)]/80 px-3 py-2 text-sm whitespace-pre-wrap text-[color:var(--foreground)] backdrop-blur">
                     {questionMode.introPrompt}
                   </div>
                 ) : null}
@@ -1495,7 +1506,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
                       number={i + 1}
                       total={questionMode.questions.length}
                     />
-                    <div className="ml-auto max-w-[85%] rounded-lg bg-black px-3 py-2 text-sm whitespace-pre-wrap text-white">
+                    <div className="ml-auto max-w-[85%] rounded-lg bg-[color:var(--primary)] px-3 py-2 text-sm whitespace-pre-wrap text-white">
                       {questionMode.answered[i]}
                     </div>
                   </Fragment>
@@ -1523,23 +1534,23 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
             ) : null}
 
             {visibleMessages.length === 0 && questionMode === null ? (
-              <p className="text-sm text-black/60">Start by asking about your product idea.</p>
+              <p className="text-sm text-[color:var(--on-surface-variant)]">Start by asking about your product idea.</p>
             ) : null}
 
             <div ref={messagesEndRef} />
           </div>
 
           {/* Input form */}
-          <form onSubmit={onSubmit} className="border-t border-black/10 p-3">
+          <form onSubmit={onSubmit} className="border-t border-[color:var(--outline-variant)]/35 p-3">
             {selectedDraftPart !== null && questionMode === null ? (
-              <div className="mb-2 flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+              <div className="mb-2 flex items-center justify-between gap-3 rounded-xl bg-[color:var(--surface-low)] px-3 py-2 text-xs text-[color:var(--foreground)] ring-1 ring-[color:var(--outline-variant)]/35">
                 <p className="min-w-0 truncate">
                   Editing target: <span className="font-semibold">{selectedDraftPart.title}</span>
                 </p>
                 <button
                   type="button"
                   onClick={() => setSelectedDraftPart(null)}
-                  className="rounded-full border border-amber-300 px-2 py-0.5 transition-colors hover:bg-amber-100"
+                  className="rounded-full px-2 py-0.5 ring-1 ring-[color:var(--outline-variant)]/40 transition-colors hover:bg-[color:var(--surface-lowest)]"
                 >
                   Clear
                 </button>
@@ -1557,13 +1568,13 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
                       ? `Describe how to revise \"${selectedDraftPart.title}\"...`
                       : "Describe the software you want to build..."
                 }
-                className="w-full rounded-md border border-black/15 px-3 py-2 text-sm"
+                className="w-full rounded-md bg-[color:var(--surface-low)] px-3 py-2 text-sm ring-1 ring-[color:var(--outline-variant)]/40 outline-none focus:ring-2 focus:ring-[color:var(--primary)]"
                 disabled={!selectedChatId || isSending}
               />
               <button
                 type="submit"
                 disabled={!selectedChatId || isSending || !input.trim()}
-                className="rounded-md bg-black px-4 py-2 text-sm text-white disabled:opacity-60"
+                className="rounded-md bg-[color:var(--primary)] px-4 py-2 text-sm text-white disabled:opacity-60"
               >
                 {isSending ? "Sending..." : questionMode !== null ? "Answer" : "Send"}
               </button>
@@ -1586,28 +1597,28 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
         </main>
 
         {/* ── Right sidebar: document / state ── */}
-        <aside className="min-h-0 overflow-y-auto bg-zinc-50 p-4">
-          <h2 className="text-sm font-semibold">SRS draft</h2>
-          <p className="mt-1 text-xs text-black/60">
+        <aside className="min-h-0 overflow-y-auto bg-[color:var(--surface-container)] p-4">
+          <h2 className="text-sm font-semibold text-[color:var(--primary)]">SRS draft</h2>
+          <p className="mt-1 text-xs text-[color:var(--on-surface-variant)]">
             Click a section or requirement to send a targeted revision request through chat.
           </p>
           <button
             type="button"
             onClick={() => setIsPreviewOpen(true)}
-            className="mt-3 rounded-md border border-black/15 bg-white px-3 py-1.5 text-xs font-medium text-black hover:bg-zinc-100"
+            className="mt-3 rounded-md bg-[color:var(--surface-lowest)] px-3 py-1.5 text-xs font-medium text-[color:var(--foreground)] ring-1 ring-[color:var(--outline-variant)]/35 hover:bg-[color:var(--surface-low)]"
           >
             Open document preview
           </button>
 
           <div className="mt-3 space-y-3">
             {draftSections.length === 0 ? (
-              <div className="rounded-md border border-black/10 bg-white p-3 text-xs text-black/60">
+              <div className="rounded-md bg-[color:var(--surface-lowest)] p-3 text-xs text-[color:var(--on-surface-variant)] ring-1 ring-[color:var(--outline-variant)]/35">
                 No drafted sections yet.
               </div>
             ) : (
               draftSections.map((section) => (
-                <div key={section.key} className="rounded-md border border-black/10 bg-white p-3">
-                  <h3 className="text-xs font-semibold uppercase tracking-[0.14em] text-black/70">
+                <div key={section.key} className="rounded-md bg-[color:var(--surface-lowest)] p-3 ring-1 ring-[color:var(--outline-variant)]/35">
+                  <h3 className="text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--on-surface-variant)]">
                     {section.title}
                   </h3>
 
@@ -1623,12 +1634,12 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
                           disabled={questionMode !== null || isSending}
                           className={`block w-full rounded-xl border px-3 py-2 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                             isSelected
-                              ? "border-amber-300 bg-amber-50"
-                              : "border-black/10 bg-zinc-50 hover:border-black/20 hover:bg-white"
+                              ? "bg-[color:var(--surface-low)] ring-[color:var(--primary)]/45"
+                              : "bg-[color:var(--surface-low)] ring-[color:var(--outline-variant)]/30 hover:bg-[color:var(--surface-lowest)]"
                           }`}
                         >
-                          <p className="text-xs font-medium text-black">{part.title}</p>
-                          <p className="mt-1 max-h-16 overflow-hidden text-xs leading-relaxed text-black/65">
+                          <p className="text-xs font-medium text-[color:var(--foreground)]">{part.title}</p>
+                          <p className="mt-1 max-h-16 overflow-hidden text-xs leading-relaxed text-[color:var(--on-surface-variant)]">
                             {part.preview}
                           </p>
                         </button>
@@ -1644,9 +1655,9 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
       </div>
 
       {isPreviewOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="flex h-[85vh] w-full max-w-5xl flex-col rounded-xl bg-white shadow-xl">
-            <div className="flex items-center justify-between border-b border-black/10 px-4 py-3">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4">
+          <div className="flex h-[85vh] w-full max-w-5xl flex-col rounded-xl bg-[color:var(--surface-lowest)] shadow-xl">
+            <div className="flex items-center justify-between border-b border-[color:var(--outline-variant)]/35 px-4 py-3">
               <h3 className="text-sm font-semibold">
                 {selectedDraftPart ? `Preview · ${selectedDraftPart.title}` : "Document preview"}
               </h3>
@@ -1655,20 +1666,20 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
                   type="button"
                   onClick={() => void handleDownloadDocx()}
                   disabled={isExportingDocx || !selectedChatId}
-                  className="rounded-md border border-black/15 px-3 py-1 text-xs hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-md px-3 py-1 text-xs ring-1 ring-[color:var(--outline-variant)]/45 hover:bg-[color:var(--surface-low)] disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {isExportingDocx ? "Exporting…" : "Download .docx"}
                 </button>
                 <button
                   type="button"
                   onClick={() => setIsPreviewOpen(false)}
-                  className="rounded-md border border-black/15 px-3 py-1 text-xs hover:bg-zinc-100"
+                  className="rounded-md px-3 py-1 text-xs ring-1 ring-[color:var(--outline-variant)]/45 hover:bg-[color:var(--surface-low)]"
                 >
                   Close
                 </button>
               </div>
             </div>
-            <div className="min-h-0 flex-1 overflow-auto px-4 py-3 text-sm text-black/90">
+            <div className="min-h-0 flex-1 overflow-auto px-4 py-3 text-sm text-[color:var(--foreground)]">
               <MarkdownContent
                 content={
                   selectedDraftPart?.content ||

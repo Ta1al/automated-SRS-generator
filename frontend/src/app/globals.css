@@ -1,19 +1,42 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --background: #f8f9fa;
+  --foreground: #191c1d;
+  --surface: #f8f9fa;
+  --surface-container: #edeeef;
+  --surface-low: #f3f4f5;
+  --surface-lowest: #ffffff;
+  --surface-highest: #e1e3e4;
+  --outline-variant: #c4c6d0;
+  --primary: #000e24;
+  --primary-container: #00234b;
+  --on-primary: #ffffff;
+  --on-surface-variant: #43474e;
 }
 
 body {
-  background: var(--background);
+  background-color: var(--surface);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-inter), Arial, Helvetica, sans-serif;
+}
+
+.font-headline,
+.font-label {
+  font-family: var(--font-inter), Arial, Helvetica, sans-serif;
+}
+
+.font-body {
+  font-family: var(--font-newsreader), Georgia, serif;
+}
+
+.app-panel {
+  background: var(--surface-lowest);
+  border: 1px solid color-mix(in oklab, var(--outline-variant) 30%, transparent);
+  box-shadow: 0 12px 32px rgba(25, 28, 29, 0.06);
+}
+
+.app-glass {
+  background: color-mix(in oklab, var(--surface-highest) 80%, transparent);
+  backdrop-filter: blur(12px);
 }
