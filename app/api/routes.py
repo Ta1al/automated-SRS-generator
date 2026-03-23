@@ -22,7 +22,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from typing import Any, AsyncGenerator
+from typing import Any, AsyncGenerator, Literal
 
 import openai
 
@@ -45,6 +45,9 @@ router = APIRouter(prefix="/api", tags=["srs"])
 
 class InteractRequest(BaseModel):
     message: str
+    mode: Literal["full", "diagrams_only"] = "full"
+    generate_diagrams: bool = False
+    section_seed: dict[str, str] | None = None
 
 
 # ── Helper: detect if a thread is currently interrupted ──────────────────────
@@ -70,6 +73,9 @@ async def _stream_graph(
     thread_id: str,
     message: str,
     is_resume: bool,
+    mode: Literal["full", "diagrams_only"],
+    generate_diagrams: bool,
+    section_seed: dict[str, str] | None,
 ) -> AsyncGenerator[dict, None]:
     """
     Async generator that drives the LangGraph graph and yields SSE-compatible
@@ -97,10 +103,12 @@ async def _stream_graph(
                 "missing_context": [],
                 "requirements": [],
                 "rag_context": "",
-                "sections": {},
+                "sections": section_seed or {},
                 "mermaid_blocks": [],
                 "mermaid_errors": [],
                 "mermaid_correction_attempts": 0,
+                "generate_diagrams": generate_diagrams,
+                "diagrams_only": mode == "diagrams_only",
                 "is_complete": False,
                 "qa_gaps": [],
                 "final_document": "",
@@ -232,7 +240,13 @@ async def interact(
         if await request.is_disconnected():
             return
         async for event in _stream_graph(
-            app_state, thread_id, body.message, is_resume
+            app_state,
+            thread_id,
+            body.message,
+            is_resume,
+            body.mode,
+            body.generate_diagrams,
+            body.section_seed,
         ):
             if await request.is_disconnected():
                 logger.info("Client disconnected mid-stream for thread %s", thread_id)

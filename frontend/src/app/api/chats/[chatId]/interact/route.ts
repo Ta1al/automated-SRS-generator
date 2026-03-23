@@ -11,6 +11,8 @@ import { prisma } from "@/lib/prisma";
 
 const interactSchema = z.object({
   message: z.string().min(1),
+  generateDiagrams: z.boolean().optional(),
+  diagramsOnly: z.boolean().optional(),
   revisionTarget: z
     .object({
       title: z.string().min(1),
@@ -104,6 +106,8 @@ export async function POST(request: NextRequest, context: Context) {
     chatId: chat.id,
     message: parsed.data.message,
     revisionTarget: parsed.data.revisionTarget,
+    generateDiagrams: parsed.data.generateDiagrams,
+    diagramsOnly: parsed.data.diagramsOnly,
   });
 
   const runSummary = await getRunSummary(run.id);

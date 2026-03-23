@@ -66,6 +66,20 @@ def _fan_out_all_sections(state: SRSState) -> list[Send]:
     ]
 
 
+def _route_from_start(state: SRSState) -> Literal["retrieve_rag_context", "generate_mermaid"]:
+    """Support optional diagrams-only runs that bypass full drafting."""
+    if state.get("diagrams_only", False):
+        return "generate_mermaid"
+    return "retrieve_rag_context"
+
+
+def _route_after_section_4(state: SRSState) -> Literal["generate_mermaid", "finalize_document"]:
+    """Skip diagram generation during normal runs unless explicitly requested."""
+    if state.get("generate_diagrams", False):
+        return "generate_mermaid"
+    return "finalize_document"
+
+
 def _route_after_mermaid_validation(
     state: SRSState,
 ) -> Literal["correct_mermaid", "finalize_document"]:
@@ -125,8 +139,15 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None) -> StateGraph:
 
     # ── Wire edges ────────────────────────────────────────────────────────────
 
-    # Entry → elicitation
-    builder.add_edge(START, "retrieve_rag_context")
+    # Entry — either full draft flow or diagrams-only mode
+    builder.add_conditional_edges(
+        START,
+        _route_from_start,
+        {
+            "retrieve_rag_context": "retrieve_rag_context",
+            "generate_mermaid": "generate_mermaid",
+        },
+    )
     builder.add_edge("retrieve_rag_context", "elicit_requirements")
 
     # elicit_requirements → fan-out ALL five section writers in parallel
@@ -142,8 +163,15 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None) -> StateGraph:
     builder.add_edge("draft_section_3_nfr", "draft_section_4")
     builder.add_edge("draft_section_3_iface", "draft_section_4")
 
-    # Sequential post-fanin pipeline
-    builder.add_edge("draft_section_4", "generate_mermaid")
+    # Sequential post-fanin pipeline — diagrams are now optional
+    builder.add_conditional_edges(
+        "draft_section_4",
+        _route_after_section_4,
+        {
+            "generate_mermaid": "generate_mermaid",
+            "finalize_document": "finalize_document",
+        },
+    )
 
     # Mermaid pipeline with self-correction loop
     builder.add_edge("generate_mermaid", "validate_mermaid")

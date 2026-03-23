@@ -847,12 +847,14 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
   const [activeBackendNode, setActiveBackendNode] = useState<string | null>(null);
   const [selectedDraftPart, setSelectedDraftPart] = useState<DraftPart | null>(null);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [isGeneratingDiagrams, setIsGeneratingDiagrams] = useState(false);
   const [isExportingDocx, setIsExportingDocx] = useState(false);
   const [activeRun, setActiveRun] = useState<ActiveRunSummary | null>(null);
   const [retryPayload, setRetryPayload] = useState<{
     chatId: string;
     message: string;
     revisionTarget?: RevisionTarget;
+    options?: { generateDiagrams?: boolean; diagramsOnly?: boolean };
   } | null>(null);
   const runPollTimerRef = useRef<number | null>(null);
 
@@ -893,6 +895,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
 
         if (!run) {
           setIsSending(false);
+          setIsGeneratingDiagrams(false);
           setActiveBackendNode(null);
           setBackendStatuses([]);
 
@@ -927,6 +930,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
         }
 
         setIsSending(false);
+        setIsGeneratingDiagrams(false);
         setActiveBackendNode(null);
 
         if (run.status === "FAILED") {
@@ -953,6 +957,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
             : "Failed to fetch active generation status.";
         setError(message);
         setIsSending(false);
+        setIsGeneratingDiagrams(false);
       }
     },
     [stopRunPolling],
@@ -1078,6 +1083,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
         }
       } else {
         setActiveRun(null);
+        setIsGeneratingDiagrams(false);
       }
     } catch (caughtError) {
       const message =
@@ -1139,18 +1145,20 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
 
   async function handleRetry() {
     if (!retryPayload || isSending) return;
-    const { chatId, message, revisionTarget } = retryPayload;
+    const { chatId, message, revisionTarget, options } = retryPayload;
     setRetryPayload(null);
     setError("");
-    await sendToBackend(chatId, message, revisionTarget);
+    await sendToBackend(chatId, message, revisionTarget, options);
   }
 
   async function sendToBackend(
     chatId: string,
     messageText: string,
     revisionTarget?: RevisionTarget,
+    options?: { generateDiagrams?: boolean; diagramsOnly?: boolean },
   ) {
     setIsSending(true);
+    setIsGeneratingDiagrams(Boolean(options?.diagramsOnly));
     setError("");
     setRetryPayload(null);
     setBackendStatuses([]);
@@ -1172,8 +1180,17 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(
           revisionTarget
-            ? { message: messageText, revisionTarget }
-            : { message: messageText },
+            ? {
+                message: messageText,
+                revisionTarget,
+                generateDiagrams: options?.generateDiagrams,
+                diagramsOnly: options?.diagramsOnly,
+              }
+            : {
+                message: messageText,
+                generateDiagrams: options?.generateDiagrams,
+                diagramsOnly: options?.diagramsOnly,
+              },
         ),
       });
 
@@ -1203,9 +1220,33 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
       const message =
         caughtError instanceof Error ? caughtError.message : "Failed to send message.";
       setError(message);
-      setRetryPayload({ chatId, message: messageText, revisionTarget });
+      setRetryPayload({ chatId, message: messageText, revisionTarget, options });
       setIsSending(false);
+      setIsGeneratingDiagrams(false);
     }
+  }
+
+  async function handleGenerateDiagrams() {
+    const chatId = selectedChatIdRef.current;
+    if (!chatId || isSending || isGeneratingDiagrams) {
+      return;
+    }
+
+    if (hasGeneratedDiagrams) {
+      const confirmed = window.confirm(
+        "Diagrams have already been generated for this draft. Generate them again and replace the existing diagrams?",
+      );
+      if (!confirmed) {
+        return;
+      }
+    }
+
+    await sendToBackend(
+      chatId,
+      "Generate and append Mermaid diagrams for the current SRS draft.",
+      undefined,
+      { generateDiagrams: true, diagramsOnly: true },
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -1424,6 +1465,23 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
     () => documentText || buildDraftDocument(draftedSections),
     [documentText, draftedSections],
   );
+
+  const hasGeneratedDiagrams = useMemo(() => {
+    const stateHasMermaidBlocks =
+      !!stateJson &&
+      typeof stateJson === "object" &&
+      !Array.isArray(stateJson) &&
+      Array.isArray((stateJson as Record<string, unknown>).mermaid_blocks) &&
+      ((stateJson as Record<string, unknown>).mermaid_blocks as unknown[]).some(
+        (item) => typeof item === "string" && item.trim().length > 0,
+      );
+
+    if (stateHasMermaidBlocks) {
+      return true;
+    }
+
+    return /```mermaid\s*\n/i.test(resolvedDocumentText);
+  }, [stateJson, resolvedDocumentText]);
 
   const waitingOnLabel = useMemo(
     () => getWaitingOnLabel(backendStatuses, activeBackendNode),
@@ -1659,13 +1717,23 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
           <p className="mt-1 text-xs text-[color:var(--on-surface-variant)]">
             Click a section or requirement to send a targeted revision request through chat.
           </p>
-          <button
-            type="button"
-            onClick={() => setIsPreviewOpen(true)}
-            className="mt-3 rounded-md bg-[color:var(--surface-lowest)] px-3 py-1.5 text-xs font-medium text-[color:var(--foreground)] ring-1 ring-[color:var(--outline-variant)]/35 hover:bg-[color:var(--surface-low)]"
-          >
-            Open document preview
-          </button>
+          <div className="mt-3 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setIsPreviewOpen(true)}
+              className="rounded-md bg-[color:var(--surface-lowest)] px-3 py-1.5 text-xs font-medium text-[color:var(--foreground)] ring-1 ring-[color:var(--outline-variant)]/35 hover:bg-[color:var(--surface-low)]"
+            >
+              Open document preview
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleGenerateDiagrams()}
+              disabled={!selectedChatId || isSending || isGeneratingDiagrams || !draftSections.length}
+              className="rounded-md bg-[color:var(--surface-lowest)] px-3 py-1.5 text-xs font-medium text-[color:var(--foreground)] ring-1 ring-[color:var(--outline-variant)]/35 hover:bg-[color:var(--surface-low)] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isGeneratingDiagrams ? "Generating diagrams…" : "Generate diagrams"}
+            </button>
+          </div>
 
           <div className="mt-3 space-y-3">
             {draftSections.length === 0 ? (

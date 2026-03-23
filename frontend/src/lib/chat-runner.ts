@@ -20,9 +20,10 @@ type StatusEventRecord = BackendStatusEvent & {
 };
 
 type TimingMap = Map<string, number>;
+type RunMode = "full" | "diagrams_only";
 
 const DEFAULT_STAGE_MS = 45000;
-const ORDERED_STAGES = [
+const ORDERED_STAGES_FULL = [
   "retrieve_rag_context",
   "elicit_requirements",
   "evaluate_completeness",
@@ -38,6 +39,27 @@ const ORDERED_STAGES = [
   "validate_mermaid",
   "correct_mermaid",
   "qa_review",
+  "finalize_document",
+] as const;
+const ORDERED_STAGES_NO_DIAGRAMS = [
+  "retrieve_rag_context",
+  "elicit_requirements",
+  "evaluate_completeness",
+  "ask_clarifying_questions",
+  "classify_requirements",
+  "draft_section_1",
+  "draft_section_2",
+  "draft_section_3_iface",
+  "draft_section_3_fr",
+  "draft_section_3_nfr",
+  "draft_section_4",
+  "qa_review",
+  "finalize_document",
+] as const;
+const ORDERED_STAGES_DIAGRAMS_ONLY = [
+  "generate_mermaid",
+  "validate_mermaid",
+  "correct_mermaid",
   "finalize_document",
 ] as const;
 const PARALLEL_DRAFT_STAGES = [
@@ -103,8 +125,17 @@ function estimateRemainingMs(params: {
   finishedNodes: Set<string>;
   currentNode: string | null;
   currentNodeStarted: Date | null;
+  orderedStages: readonly string[];
+  includeParallelDraftStages: boolean;
 }) {
-  const { timingMap, finishedNodes, currentNode, currentNodeStarted } = params;
+  const {
+    timingMap,
+    finishedNodes,
+    currentNode,
+    currentNodeStarted,
+    orderedStages,
+    includeParallelDraftStages,
+  } = params;
   const now = Date.now();
   const parallelSet = new Set(PARALLEL_DRAFT_STAGES);
 
@@ -121,20 +152,22 @@ function estimateRemainingMs(params: {
     return estimate;
   };
 
-  const remainingParallel = PARALLEL_DRAFT_STAGES.filter((node) => !finishedNodes.has(node)).map((node) =>
-    getRemainingForNode(node),
-  );
+  const remainingParallel = includeParallelDraftStages
+    ? PARALLEL_DRAFT_STAGES.filter((node) => !finishedNodes.has(node)).map((node) =>
+        getRemainingForNode(node),
+      )
+    : [];
 
   let remaining = remainingParallel.length > 0 ? Math.max(...remainingParallel) : 0;
 
-  for (const node of ORDERED_STAGES) {
+  for (const node of orderedStages) {
     if (parallelSet.has(node as (typeof PARALLEL_DRAFT_STAGES)[number])) {
       continue;
     }
     remaining += getRemainingForNode(node);
   }
 
-  if (currentNode && !ORDERED_STAGES.includes(currentNode as (typeof ORDERED_STAGES)[number])) {
+  if (currentNode && !orderedStages.includes(currentNode)) {
     remaining += getRemainingForNode(currentNode);
   }
 
@@ -246,8 +279,26 @@ export async function startBackgroundChatRun(params: {
   chatId: string;
   message: string;
   revisionTarget?: RevisionTarget;
+  generateDiagrams?: boolean;
+  diagramsOnly?: boolean;
 }) {
-  const { runId, chatId, message, revisionTarget } = params;
+  const {
+    runId,
+    chatId,
+    message,
+    revisionTarget,
+    generateDiagrams = false,
+    diagramsOnly = false,
+  } = params;
+  const runMode: RunMode = diagramsOnly ? "diagrams_only" : "full";
+  const shouldGenerateDiagrams = diagramsOnly ? true : generateDiagrams;
+  const orderedStages =
+    runMode === "diagrams_only"
+      ? ORDERED_STAGES_DIAGRAMS_ONLY
+      : shouldGenerateDiagrams
+        ? ORDERED_STAGES_FULL
+        : ORDERED_STAGES_NO_DIAGRAMS;
+  const includeParallelDraftStages = runMode === "full";
   const backendMessage = buildBackendMessage(message, revisionTarget);
   const timingMap = await loadTimingMap();
   const statusEvents: StatusEventRecord[] = [];
@@ -262,6 +313,8 @@ export async function startBackgroundChatRun(params: {
       finishedNodes,
       currentNode: null,
       currentNodeStarted: null,
+      orderedStages,
+      includeParallelDraftStages,
     }),
   );
 
@@ -285,6 +338,7 @@ export async function startBackgroundChatRun(params: {
         title: true,
         currentDocument: true,
         backendThreadId: true,
+        stateJson: true,
       },
     });
 
@@ -292,9 +346,25 @@ export async function startBackgroundChatRun(params: {
       throw new Error("Chat not found.");
     }
 
+    const sectionSeed =
+      runMode === "diagrams_only" &&
+      chat.stateJson &&
+      typeof chat.stateJson === "object" &&
+      !Array.isArray(chat.stateJson) &&
+      (chat.stateJson as Record<string, unknown>).sections &&
+      typeof (chat.stateJson as Record<string, unknown>).sections === "object" &&
+      !Array.isArray((chat.stateJson as Record<string, unknown>).sections)
+        ? ((chat.stateJson as Record<string, unknown>).sections as Record<string, string>)
+        : undefined;
+
     const interactResponse = await backendFetch(`/api/sessions/${chat.backendThreadId}/interact`, {
       method: "POST",
-      body: JSON.stringify({ message: backendMessage }),
+      body: JSON.stringify({
+        message: backendMessage,
+        mode: runMode,
+        generate_diagrams: shouldGenerateDiagrams,
+        section_seed: sectionSeed,
+      }),
     });
 
     if (!interactResponse.ok) {
@@ -324,6 +394,8 @@ export async function startBackgroundChatRun(params: {
               finishedNodes,
               currentNode: activeNode,
               currentNodeStarted: activeNodeStarted,
+              orderedStages,
+              includeParallelDraftStages,
             }),
           );
 
@@ -367,6 +439,8 @@ export async function startBackgroundChatRun(params: {
             finishedNodes,
             currentNode: activeNode,
             currentNodeStarted: activeNodeStarted,
+            orderedStages,
+            includeParallelDraftStages,
           }),
         );
 
@@ -439,7 +513,9 @@ export async function startBackgroundChatRun(params: {
       });
     } else if (currentDocument || hasDraftSections) {
       persistedAssistantMessage =
-        "I updated the SRS draft. Review the sections in the right panel and select any part to request revisions.";
+        runMode === "diagrams_only"
+          ? "I generated diagrams for the current draft. Open document preview to review them."
+          : "I updated the SRS draft. Review the sections in the right panel and select any part to request revisions.";
     } else if (shouldPersistAssistantMessage(summary.assistantMessage)) {
       persistedAssistantMessage = summary.assistantMessage;
     }

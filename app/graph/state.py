@@ -79,6 +79,13 @@ class SRSState(TypedDict):
         mermaid_correction_attempts:
             Counter preventing infinite correction loops.
 
+        generate_diagrams:
+            When True, run Mermaid generation/validation before finalizing.
+            Default False for normal drafting runs.
+
+        diagrams_only:
+            When True, bypass drafting and generate diagrams from existing sections.
+
         is_complete:
             Boolean flag set by the QA reviewer when the document passes.
 
@@ -110,6 +117,8 @@ class SRSState(TypedDict):
     mermaid_blocks: list[str]
     mermaid_errors: list[str]
     mermaid_correction_attempts: int
+    generate_diagrams: bool
+    diagrams_only: bool
 
     # ── Quality assurance ─────────────────────────────────────────────────────
     is_complete: bool
