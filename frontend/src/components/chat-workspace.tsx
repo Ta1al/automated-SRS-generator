@@ -154,6 +154,18 @@ function buildDraftPreviewText(content: string) {
     .slice(0, 180);
 }
 
+function hasDraftPartBodyContent(content: string) {
+  const normalized = normalizeMarkdownForPreview(content);
+  const withoutHeadings = normalized
+    .replace(/^\s{0,3}#{1,6}\s+.*$/gm, "")
+    .replace(/^\s{0,3}[-*_]{3,}\s*$/gm, "")
+    .replace(/```[\s\S]*?```/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return withoutHeadings.length > 0;
+}
+
 function extractFirstMermaidChart(content: string) {
   const normalized = normalizeMarkdownForPreview(content);
   const match = normalized.match(/```mermaid\s*\n([\s\S]*?)\n```/i);
@@ -1757,13 +1769,14 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
                     {section.parts.map((part) => {
                       const isSelected = selectedDraftPart?.id === part.id;
                       const mermaidChart = extractFirstMermaidChart(part.content);
+                      const isTitleOnly = !hasDraftPartBodyContent(part.content);
 
                       return (
                         <button
                           key={part.id}
                           type="button"
                           onClick={() => setSelectedDraftPart(part)}
-                          disabled={questionMode !== null || isSending}
+                          disabled={questionMode !== null || isSending || isTitleOnly}
                           className={`block w-full rounded-xl border px-3 py-2 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                             isSelected
                               ? "bg-[color:var(--surface-low)] ring-[color:var(--primary)]/45"
@@ -1774,6 +1787,11 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
                           <p className="mt-1 max-h-16 overflow-hidden text-xs leading-relaxed text-[color:var(--on-surface-variant)]">
                             {part.preview}
                           </p>
+                          {isTitleOnly ? (
+                            <p className="mt-1 text-[11px] text-[color:var(--on-surface-variant)]">
+                              Add details before selecting this section.
+                            </p>
+                          ) : null}
                           {mermaidChart ? (
                             <div className="mt-2 pointer-events-none rounded-lg bg-[color:var(--surface-lowest)] p-2 ring-1 ring-[color:var(--outline-variant)]/35">
                               <MermaidBlock chart={mermaidChart} />
