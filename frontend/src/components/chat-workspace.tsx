@@ -156,6 +156,12 @@ function buildDraftPreviewText(content: string) {
     .slice(0, 180);
 }
 
+function extractFirstMermaidChart(content: string) {
+  const normalized = normalizeMarkdownForPreview(content);
+  const match = normalized.match(/```mermaid\s*\n([\s\S]*?)\n```/i);
+  return match?.[1]?.trim() || "";
+}
+
 function extractDraftParts(sectionKey: string, content: string): DraftPart[] {
   const trimmedContent = normalizeMarkdownForPreview(content).trim();
   if (!trimmedContent) {
@@ -1625,6 +1631,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
                   <div className="mt-2 space-y-2">
                     {section.parts.map((part) => {
                       const isSelected = selectedDraftPart?.id === part.id;
+                      const mermaidChart = extractFirstMermaidChart(part.content);
 
                       return (
                         <button
@@ -1642,6 +1649,11 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
                           <p className="mt-1 max-h-16 overflow-hidden text-xs leading-relaxed text-[color:var(--on-surface-variant)]">
                             {part.preview}
                           </p>
+                          {mermaidChart ? (
+                            <div className="mt-2 pointer-events-none rounded-lg bg-[color:var(--surface-lowest)] p-2 ring-1 ring-[color:var(--outline-variant)]/35">
+                              <MermaidBlock chart={mermaidChart} />
+                            </div>
+                          ) : null}
                         </button>
                       );
                     })}
@@ -1659,7 +1671,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
           <div className="flex h-[85vh] w-full max-w-5xl flex-col rounded-xl bg-[color:var(--surface-lowest)] shadow-xl">
             <div className="flex items-center justify-between border-b border-[color:var(--outline-variant)]/35 px-4 py-3">
               <h3 className="text-sm font-semibold">
-                {selectedDraftPart ? `Preview · ${selectedDraftPart.title}` : "Document preview"}
+                Document preview
               </h3>
               <div className="flex items-center gap-2">
                 <button
@@ -1682,7 +1694,6 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
             <div className="min-h-0 flex-1 overflow-auto px-4 py-3 text-sm text-[color:var(--foreground)]">
               <MarkdownContent
                 content={
-                  selectedDraftPart?.content ||
                   resolvedDocumentText ||
                   "The draft SRS document will appear here once sections are available."
                 }
