@@ -176,6 +176,14 @@ async def _stream_graph(
                             }
                         return  # Stop streaming; wait for user reply
 
+                    if isinstance(node_updates, dict):
+                        project_title = str(node_updates.get("project_title", "")).strip()
+                        if project_title:
+                            yield {
+                                "event": "project_title",
+                                "data": json.dumps({"project_title": project_title}),
+                            }
+
                     # Emit node progress status
                     yield {
                         "event": "status",

@@ -26,6 +26,7 @@ export async function GET(_request: NextRequest, context: Context) {
     select: {
       id: true,
       backendThreadId: true,
+      title: true,
     },
   });
 
@@ -65,6 +66,7 @@ export async function GET(_request: NextRequest, context: Context) {
     run: run
       ? {
           ...run,
+          chatTitle: chat.title,
           liveSections,
         }
       : null,

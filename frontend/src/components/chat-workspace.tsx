@@ -38,6 +38,7 @@ type ChatDetails = {
 
 type ActiveRunSummary = {
   id: string;
+  chatTitle?: string;
   status: "RUNNING" | "COMPLETED" | "FAILED" | "NEEDS_INPUT";
   currentNode: string | null;
   etaSeconds: number | null;
@@ -906,6 +907,14 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
         const payload = (await response.json()) as { run: ActiveRunSummary | null };
         const run = payload.run;
         setActiveRun(run);
+
+        if (run?.chatTitle && run.chatTitle.trim()) {
+          setChats((prev) =>
+            prev.map((chat) =>
+              chat.id === chatId ? { ...chat, title: run.chatTitle as string } : chat,
+            ),
+          );
+        }
 
         if (!run) {
           setIsSending(false);

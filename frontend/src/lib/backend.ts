@@ -12,6 +12,7 @@ export type BackendStatusEvent = {
 
 type SseConsumerOptions = {
   onEvent?: (eventName: string, data: unknown) => void;
+  onProjectTitle?: (payload: { projectTitle: string }) => void;
   onToken?: (payload: { content: string; node?: string }) => void;
   onStatus?: (payload: BackendStatusEvent) => void;
   onQuestion?: (payload: {
@@ -140,6 +141,7 @@ export async function consumeSseResponse(
   let dataLines: string[] = [];
   let assistantText = "";
   let finalDocument = "";
+  let projectTitle = "";
   let questionPrompt = "";
   let questions: ClarificationQuestion[] = [];
   const statuses: BackendStatusEvent[] = [];
@@ -169,6 +171,18 @@ export async function consumeSseResponse(
 
       assistantText += content;
       options.onToken?.({ content, node });
+    }
+
+    if (currentEventName === "project_title" && parsed && typeof parsed === "object") {
+      const nextTitle =
+        typeof (parsed as { project_title?: unknown }).project_title === "string"
+          ? (parsed as { project_title: string }).project_title.replace(/\s+/g, " ").trim().slice(0, 120)
+          : "";
+
+      if (nextTitle) {
+        projectTitle = nextTitle;
+        options.onProjectTitle?.({ projectTitle: nextTitle });
+      }
     }
 
     if (currentEventName === "status" && parsed && typeof parsed === "object") {
@@ -276,6 +290,7 @@ export async function consumeSseResponse(
   return {
     assistantMessage: normalizedAssistant,
     finalDocument,
+    projectTitle,
     questionPrompt,
     questions,
     statuses,

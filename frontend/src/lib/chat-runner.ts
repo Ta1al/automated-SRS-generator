@@ -257,7 +257,16 @@ function extractProjectTitleFromState(state: Record<string, unknown> | null) {
 }
 
 export async function getRunSummary(runId: string) {
-  const run = await prisma.chatRun.findUnique({ where: { id: runId } });
+  const run = await prisma.chatRun.findUnique({
+    where: { id: runId },
+    include: {
+      chat: {
+        select: {
+          title: true,
+        },
+      },
+    },
+  });
   if (!run) {
     return null;
   }
@@ -272,6 +281,7 @@ export async function getRunSummary(runId: string) {
   return {
     id: run.id,
     status: run.status,
+    chatTitle: run.chat.title,
     currentNode: run.currentNode,
     etaSeconds: run.etaSeconds,
     errorMessage: run.errorMessage,
@@ -417,8 +427,23 @@ export async function startBackgroundChatRun(params: {
 
     let activeNode: string | null = null;
     let activeNodeStarted: Date | null = null;
+    let streamedProjectTitle = "";
 
     const summary = await consumeSseResponse(interactResponse, {
+      onProjectTitle: ({ projectTitle }) => {
+        streamedProjectTitle = projectTitle;
+        prisma.chat.update({
+          where: { id: chat.id },
+          data: {
+            title: projectTitle,
+          },
+        }).catch((err) => {
+          console.error(
+            `[chat-runner] Failed to persist project title for chat ${chat.id}:`,
+            err,
+          );
+        });
+      },
       onToken: ({ node }) => {
         if (!node) {
           return;
@@ -567,9 +592,9 @@ export async function startBackgroundChatRun(params: {
     }
 
     const nextTitle =
-      chat.title === "New Chat"
-        ? generatedProjectTitle || message.slice(0, 60)
-        : chat.title;
+      streamedProjectTitle ||
+      generatedProjectTitle ||
+      (chat.title === "New Chat" ? message.slice(0, 60) : chat.title);
     const normalizedCurrentDocument = currentDocument || null;
 
     const chatUpdateData: {
