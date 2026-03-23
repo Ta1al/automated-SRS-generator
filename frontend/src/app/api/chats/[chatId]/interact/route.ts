@@ -3,24 +3,11 @@ import { Prisma } from "@prisma/client";
 import { z } from "zod";
 
 import { getSessionUser } from "@/lib/auth";
-import { backendFetch, consumeSseResponse } from "@/lib/backend";
+import {
+  getRunSummary,
+  startBackgroundChatRun,
+} from "@/lib/chat-runner";
 import { prisma } from "@/lib/prisma";
-
-function shouldPersistAssistantMessage(message: string) {
-  const trimmed = message.trim();
-  if (!trimmed) {
-    return false;
-  }
-
-  if (
-    (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
-    (trimmed.startsWith("[") && trimmed.endsWith("]"))
-  ) {
-    return false;
-  }
-
-  return true;
-}
 
 const interactSchema = z.object({
   message: z.string().min(1),
@@ -63,6 +50,30 @@ export async function POST(request: NextRequest, context: Context) {
     return NextResponse.json({ error: "Chat not found" }, { status: 404 });
   }
 
+  const existingRun = await prisma.chatRun.findFirst({
+    where: {
+      chatId: chat.id,
+      status: "RUNNING",
+    },
+    orderBy: {
+      startedAt: "desc",
+    },
+    select: {
+      id: true,
+    },
+  });
+
+  if (existingRun) {
+    const run = await getRunSummary(existingRun.id);
+    return NextResponse.json(
+      {
+        error: "A generation run is already in progress for this chat.",
+        run,
+      },
+      { status: 409 },
+    );
+  }
+
   await prisma.chatMessage.create({
     data: {
       chatId: chat.id,
@@ -71,172 +82,33 @@ export async function POST(request: NextRequest, context: Context) {
     },
   });
 
-  const backendMessage = parsed.data.revisionTarget
-    ? [
-        "Revise the existing SRS draft section below.",
-        `Target section: ${parsed.data.revisionTarget.title}`,
-        parsed.data.revisionTarget.sectionKey
-          ? `Section key: ${parsed.data.revisionTarget.sectionKey}`
-          : "",
-        "Current section text:",
-        parsed.data.revisionTarget.content,
-        "Requested change:",
-        parsed.data.message,
-        "Update the SRS consistently and preserve unaffected requirements unless the requested change requires broader edits.",
-      ]
-        .filter(Boolean)
-        .join("\n\n")
-    : parsed.data.message;
+  const initialRunData: {
+    chatId: string;
+    inputMessage: string;
+    revisionTarget?: Prisma.InputJsonValue;
+  } = {
+    chatId: chat.id,
+    inputMessage: parsed.data.message,
+  };
 
-  const interactResponse = await backendFetch(
-    `/api/sessions/${chat.backendThreadId}/interact`,
-    {
-      method: "POST",
-      body: JSON.stringify({ message: backendMessage }),
-    },
-  );
-
-  if (!interactResponse.ok) {
-    const errorBody = await interactResponse.text();
-    return NextResponse.json(
-      {
-        error: "Failed to interact with SRS backend.",
-        details: errorBody,
-      },
-      { status: 502 },
-    );
+  if (parsed.data.revisionTarget) {
+    initialRunData.revisionTarget = parsed.data.revisionTarget as Prisma.InputJsonValue;
   }
 
-  const encoder = new TextEncoder();
-  const stream = new ReadableStream({
-    start(controller) {
-      void (async () => {
-        let errorAlreadySent = false;
-
-        const sendEvent = (eventName: string, data: unknown) => {
-          if (eventName === "error") {
-            errorAlreadySent = true;
-          }
-
-          controller.enqueue(
-            encoder.encode(`event: ${eventName}\ndata: ${JSON.stringify(data)}\n\n`),
-          );
-        };
-
-        try {
-          const { assistantMessage, finalDocument, questionPrompt, questions, statuses } =
-            await consumeSseResponse(interactResponse, {
-              onEvent: sendEvent,
-            });
-
-          let latestState: Record<string, unknown> | null = null;
-          try {
-            const stateResponse = await backendFetch(`/api/sessions/${chat.backendThreadId}/state`);
-            if (stateResponse.ok) {
-              const payload = (await stateResponse.json()) as Record<string, unknown>;
-              latestState = payload;
-            }
-          } catch {
-          }
-
-          let currentDocument =
-            finalDocument ||
-            (typeof latestState?.final_document === "string" ? latestState.final_document : "") ||
-            chat.currentDocument;
-
-          if (!currentDocument) {
-            const documentResponse = await backendFetch(
-              `/api/sessions/${chat.backendThreadId}/document`,
-            );
-            if (documentResponse.ok) {
-              const documentPayload = await documentResponse.json();
-              currentDocument = documentPayload.document ?? null;
-            }
-          }
-
-          const hasDraftSections =
-            !!latestState &&
-            typeof latestState.sections === "object" &&
-            latestState.sections !== null &&
-            !Array.isArray(latestState.sections) &&
-            Object.keys(latestState.sections as Record<string, unknown>).length > 0;
-
-          let persistedAssistantMessage = "";
-          if (questions.length > 0) {
-            persistedAssistantMessage = assistantMessage;
-          } else if (currentDocument || hasDraftSections) {
-            persistedAssistantMessage =
-              "I updated the SRS draft. Review the sections in the right panel and select any part to request revisions.";
-          } else if (shouldPersistAssistantMessage(assistantMessage)) {
-            persistedAssistantMessage = assistantMessage;
-          }
-
-          if (persistedAssistantMessage) {
-            await prisma.chatMessage.create({
-              data: {
-                chatId: chat.id,
-                role: "ASSISTANT",
-                content: persistedAssistantMessage,
-              },
-            });
-          }
-
-          const nextTitle =
-            chat.title === "New Chat" ? parsed.data.message.slice(0, 60) : chat.title;
-
-          const normalizedCurrentDocument = currentDocument || null;
-
-          const chatUpdateData: {
-            title: string;
-            currentDocument: string | null;
-            stateJson?: Prisma.InputJsonValue;
-          } = {
-            title: nextTitle,
-            currentDocument: normalizedCurrentDocument,
-          };
-
-          if (latestState) {
-            chatUpdateData.stateJson = latestState as Prisma.InputJsonValue;
-          }
-
-          const updatedChat = await prisma.chat.update({
-            where: { id: chat.id },
-            data: chatUpdateData,
-          });
-
-          const messages = await prisma.chatMessage.findMany({
-            where: { chatId: chat.id },
-            orderBy: { createdAt: "asc" },
-          });
-
-          sendEvent("result", {
-            chat: updatedChat,
-            messages,
-            questionPrompt,
-            questions,
-            statuses,
-          });
-        } catch (caughtError) {
-          if (!errorAlreadySent) {
-            sendEvent("error", {
-              message:
-                caughtError instanceof Error
-                  ? caughtError.message
-                  : "Failed to interact with SRS backend.",
-            });
-          }
-        } finally {
-          controller.close();
-        }
-      })();
-    },
+  const run = await prisma.chatRun.create({
+    data: initialRunData,
   });
 
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "text/event-stream; charset=utf-8",
-      "Cache-Control": "no-cache, no-transform",
-      Connection: "keep-alive",
-    },
+  void startBackgroundChatRun({
+    runId: run.id,
+    chatId: chat.id,
+    message: parsed.data.message,
+    revisionTarget: parsed.data.revisionTarget,
+  });
+
+  const runSummary = await getRunSummary(run.id);
+
+  return NextResponse.json({
+    run: runSummary,
   });
 }

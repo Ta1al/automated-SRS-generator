@@ -12,6 +12,13 @@ enum MessageRole {
   ASSISTANT
 }
 
+enum ChatRunStatus {
+  RUNNING
+  COMPLETED
+  FAILED
+  NEEDS_INPUT
+}
+
 model User {
   id           String      @id @default(cuid())
   email        String      @unique
@@ -31,6 +38,7 @@ model Chat {
   currentDocument String?
   stateJson       Json?
   messages        ChatMessage[]
+  runs            ChatRun[]
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
@@ -46,4 +54,35 @@ model ChatMessage {
   createdAt DateTime    @default(now())
 
   @@index([chatId, createdAt])
+}
+
+model ChatRun {
+  id                 String        @id @default(cuid())
+  chatId             String
+  chat               Chat          @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  status             ChatRunStatus @default(RUNNING)
+  inputMessage       String
+  revisionTarget     Json?
+  currentNode        String?
+  currentNodeStarted DateTime?
+  statusEvents       Json?
+  questionPrompt     String?
+  questionsJson      Json?
+  etaSeconds         Int?
+  errorMessage       String?
+  startedAt          DateTime      @default(now())
+  completedAt        DateTime?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  @@index([chatId, startedAt(sort: Desc)])
+  @@index([chatId, status])
+}
+
+model StageTimingStat {
+  node          String   @id
+  sampleCount   Int      @default(0)
+  avgDurationMs Float    @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 }

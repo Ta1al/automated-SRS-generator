@@ -5,7 +5,6 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import {
-  consumeSseResponse,
   type BackendStatusEvent,
   type ClarificationQuestion,
   formatClarificationPrompt,
@@ -37,18 +36,15 @@ type ChatDetails = {
   };
 };
 
-type InteractResponse = {
-  chat: {
-    id: string;
-    title: string;
-    currentDocument: string | null;
-    stateJson: Record<string, unknown> | null;
-    updatedAt: string;
-  };
-  messages: ChatMessage[];
-  questionPrompt?: string;
-  questions?: ClarificationQuestion[];
-  statuses?: BackendStatusEvent[];
+type ActiveRunSummary = {
+  id: string;
+  status: "RUNNING" | "COMPLETED" | "FAILED" | "NEEDS_INPUT";
+  currentNode: string | null;
+  etaSeconds: number | null;
+  errorMessage: string | null;
+  questionPrompt: string | null;
+  questions: ClarificationQuestion[];
+  statuses: BackendStatusEvent[];
 };
 
 type QuestionMode = {
@@ -284,6 +280,29 @@ function getWaitingOnLabel(statuses: BackendStatusEvent[], activeNode: string | 
 function getStatusLabel(event: BackendStatusEvent) {
   const base = NODE_LABELS[event.node] || event.node.replaceAll("_", " ");
   return event.status === "finished" ? base : `${base} (${event.status})`;
+}
+
+function formatEtaLabel(seconds: number | null) {
+  if (seconds === null || Number.isNaN(seconds)) {
+    return "Estimating time remaining...";
+  }
+
+  if (seconds <= 30) {
+    return "Estimated remaining: under a minute";
+  }
+
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+
+  if (minutes <= 0) {
+    return `Estimated remaining: ~${remainder}s`;
+  }
+
+  if (remainder === 0) {
+    return `Estimated remaining: ~${minutes}m`;
+  }
+
+  return `Estimated remaining: ~${minutes}m ${remainder}s`;
 }
 
 function MarkdownContent({ content }: { content: string }) {
@@ -739,9 +758,11 @@ function QuestionBubble({
 function ReceivingBubble({
   waitingOn,
   statuses,
+  etaSeconds,
 }: {
   waitingOn: string;
   statuses: BackendStatusEvent[];
+  etaSeconds: number | null;
 }) {
   const recentStatuses = statuses.slice(-3);
 
@@ -754,6 +775,7 @@ function ReceivingBubble({
             Receiving SRS update
           </p>
           <p className="mt-1 text-sm leading-snug">Waiting on {waitingOn.toLowerCase()}.</p>
+          <p className="mt-1 text-xs text-[color:var(--on-surface-variant)]">{formatEtaLabel(etaSeconds)}</p>
         </div>
       </div>
 
@@ -826,11 +848,13 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
   const [selectedDraftPart, setSelectedDraftPart] = useState<DraftPart | null>(null);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [isExportingDocx, setIsExportingDocx] = useState(false);
+  const [activeRun, setActiveRun] = useState<ActiveRunSummary | null>(null);
   const [retryPayload, setRetryPayload] = useState<{
     chatId: string;
     message: string;
     revisionTarget?: RevisionTarget;
   } | null>(null);
+  const runPollTimerRef = useRef<number | null>(null);
 
   // Ref used to hold the latest selectedChatId inside the sendToBackend closure.
   const selectedChatIdRef = useRef(selectedChatId);
@@ -842,6 +866,97 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
   useEffect(() => {
     activeBackendNodeRef.current = activeBackendNode;
   }, [activeBackendNode]);
+
+  const stopRunPolling = useCallback(() => {
+    if (runPollTimerRef.current !== null) {
+      window.clearTimeout(runPollTimerRef.current);
+      runPollTimerRef.current = null;
+    }
+  }, []);
+
+  const pollActiveRun = useCallback(
+    async (chatId: string) => {
+      stopRunPolling();
+
+      try {
+        const response = await fetch(`/api/chats/${chatId}/runs/active`, {
+          cache: "no-store",
+        });
+
+        if (!response.ok) {
+          throw new Error("Failed to fetch active generation status.");
+        }
+
+        const payload = (await response.json()) as { run: ActiveRunSummary | null };
+        const run = payload.run;
+        setActiveRun(run);
+
+        if (!run) {
+          setIsSending(false);
+          setActiveBackendNode(null);
+          setBackendStatuses([]);
+
+          if (selectedChatIdRef.current === chatId) {
+            const detailsResponse = await fetch(`/api/chats/${chatId}/messages`, {
+              cache: "no-store",
+            });
+
+            if (detailsResponse.ok && selectedChatIdRef.current === chatId) {
+              const detailsPayload = (await detailsResponse.json()) as ChatDetails;
+              setMessages(detailsPayload.chat.messages);
+              setDocumentText(detailsPayload.chat.currentDocument || "");
+              setStateJson(detailsPayload.chat.stateJson || null);
+              setLiveSectionDrafts({});
+              setQuestionMode(null);
+              setSelectedDraftPart(null);
+            }
+          }
+
+          return;
+        }
+
+        setBackendStatuses(run.statuses || []);
+        setActiveBackendNode(run.currentNode || null);
+
+        if (run.status === "RUNNING") {
+          setIsSending(true);
+          runPollTimerRef.current = window.setTimeout(() => {
+            void pollActiveRun(chatId);
+          }, 2000);
+          return;
+        }
+
+        setIsSending(false);
+        setActiveBackendNode(null);
+
+        if (run.status === "FAILED") {
+          setError(run.errorMessage || "Failed to send message.");
+          setRetryPayload((prev) => prev);
+          return;
+        }
+
+        if (run.status === "NEEDS_INPUT" && run.questions.length > 0) {
+          setQuestionMode({
+            introPrompt:
+              run.questionPrompt || "I need a few clarifications before drafting the SRS.",
+            questions: run.questions,
+            currentIdx: 0,
+            answered: [],
+          });
+        }
+
+        await loadChatDetails(chatId);
+      } catch (caughtError) {
+        const message =
+          caughtError instanceof Error
+            ? caughtError.message
+            : "Failed to fetch active generation status.";
+        setError(message);
+        setIsSending(false);
+      }
+    },
+    [stopRunPolling],
+  );
 
   // Scroll-to-bottom ref
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -887,6 +1002,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
   }, [loadChats]);
 
   async function createChat() {
+    stopRunPolling();
     setError("");
 
     try {
@@ -907,6 +1023,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
       setQuestionMode(null);
       setActiveBackendNode(null);
       setSelectedDraftPart(null);
+      setActiveRun(null);
     } catch (caughtError) {
       const message =
         caughtError instanceof Error ? caughtError.message : "Failed to create chat.";
@@ -915,6 +1032,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
   }
 
   async function loadChatDetails(chatId: string) {
+    stopRunPolling();
     setError("");
 
     try {
@@ -934,6 +1052,33 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
       setQuestionMode(null);
       setActiveBackendNode(null);
       setSelectedDraftPart(null);
+
+      const runResponse = await fetch(`/api/chats/${chatId}/runs/active`, {
+        cache: "no-store",
+      });
+
+      if (runResponse.ok) {
+        const runPayload = (await runResponse.json()) as { run: ActiveRunSummary | null };
+        const run = runPayload.run;
+        setActiveRun(run);
+
+        if (run?.status === "RUNNING") {
+          setIsSending(true);
+          setBackendStatuses(run.statuses || []);
+          setActiveBackendNode(run.currentNode || null);
+          void pollActiveRun(chatId);
+        } else if (run?.status === "NEEDS_INPUT" && run.questions.length > 0) {
+          setQuestionMode({
+            introPrompt:
+              run.questionPrompt || "I need a few clarifications before drafting the SRS.",
+            questions: run.questions,
+            currentIdx: 0,
+            answered: [],
+          });
+        }
+      } else {
+        setActiveRun(null);
+      }
     } catch (caughtError) {
       const message =
         caughtError instanceof Error ? caughtError.message : "Failed to load messages.";
@@ -942,6 +1087,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
   }
 
   async function deleteChat(chatId: string) {
+    stopRunPolling();
     if (deletingChatId) {
       return;
     }
@@ -1010,6 +1156,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
     setBackendStatuses([]);
     setLiveSectionDrafts({});
     setActiveBackendNode(null);
+    setActiveRun(null);
 
     const optimisticMessage: ChatMessage = {
       id: `optimistic-${Date.now()}`,
@@ -1039,122 +1186,17 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
         throw new Error(responseError || "Failed to send message.");
       }
 
-      const summary = await consumeSseResponse(response, {
-        onStatus: (status) => {
-          if (activeBackendNodeRef.current === status.node) {
-            setActiveBackendNode(null);
-          }
-          setBackendStatuses((prev) => {
-            if (prev.some((item) => item.node === status.node && item.status === status.status)) {
-              return prev;
-            }
-            return [...prev, status];
-          });
-        },
-        onToken: ({ content, node }) => {
-          if (!content) return;
+      const payload = (await response.json()) as { run?: ActiveRunSummary | null };
+      const run = payload.run ?? null;
+      setActiveRun(run);
 
-          if (node === "ask_clarifying_questions") {
-            return;
-          }
-
-          if (node) {
-            setActiveBackendNode(node);
-          }
-
-          if (node && DRAFT_NODE_TO_SECTION_KEY[node]) {
-            const sectionKey = DRAFT_NODE_TO_SECTION_KEY[node];
-            setLiveSectionDrafts((prev) => ({
-              ...prev,
-              [sectionKey]: (prev[sectionKey] || "") + content,
-            }));
-          }
-        },
-        onQuestion: ({ prompt, questions }) => {
-          setActiveBackendNode(null);
-          setQuestionMode({
-            introPrompt: prompt,
-            questions,
-            currentIdx: 0,
-            answered: [],
-          });
-        },
-        onComplete: ({ document }) => {
-          setActiveBackendNode(null);
-          setDocumentText(document || "");
-          setLiveSectionDrafts({});
-        },
-      });
-
-      const payload = summary.result as InteractResponse | undefined;
-      if (!payload) {
-        throw new Error("Missing final interaction result.");
-      }
-
-      // When questions are active the saved ASSISTANT message mirrors what the
-      // virtual question bubbles already show — exclude it from the visible list
-      // so there's no duplication.  We keep the message in `messages` for
-      // history but will filter it in the render pass.
-      setMessages(payload.messages);
-      setDocumentText(payload.chat.currentDocument || summary.finalDocument || "");
-      setStateJson(payload.chat.stateJson || null);
-      setBackendStatuses(payload.statuses?.length ? payload.statuses : summary.statuses);
-      if (payload.chat.currentDocument || summary.finalDocument) {
-        setLiveSectionDrafts({});
-      }
-      setActiveBackendNode(null);
-
-      if (summary.questions.length) {
-        setQuestionMode((prev) => {
-          if (prev && prev.questions.length > 0) {
-            return prev;
-          }
-          return {
-            introPrompt: summary.questionPrompt || "",
-            questions: summary.questions,
-            currentIdx: 0,
-            answered: [],
-          };
-        });
+      if (run) {
+        setBackendStatuses(run.statuses || []);
+        setActiveBackendNode(run.currentNode || null);
+        await pollActiveRun(chatId);
       } else {
-        const assistantMessage =
-          payload.messages
-            .slice()
-            .reverse()
-            .find((message) => message.role === "ASSISTANT")?.content ?? "";
-        const parsedFallback = parseAssistantClarificationContent(assistantMessage);
-
-        if (parsedFallback) {
-          setQuestionMode({
-            introPrompt:
-              parsedFallback.prompt || "I need a few clarifications before drafting the SRS.",
-            questions: parsedFallback.questions,
-            currentIdx: 0,
-            answered: [],
-          });
-        } else {
-          setQuestionMode(null);
-        }
+        await loadChatDetails(chatId);
       }
-
-      setChats((prev) =>
-        prev
-          .map((chat) =>
-            chat.id === payload.chat.id
-              ? {
-                  ...chat,
-                  title: payload.chat.title,
-                  updatedAt: payload.chat.updatedAt,
-                  currentDocument: payload.chat.currentDocument,
-                  stateJson: payload.chat.stateJson,
-                }
-              : chat,
-          )
-          .sort(
-            (first, second) =>
-              new Date(second.updatedAt).getTime() - new Date(first.updatedAt).getTime(),
-          ),
-      );
     } catch (caughtError) {
       setMessages((prev) => prev.filter((message) => message.id !== optimisticMessage.id));
       setActiveBackendNode(null);
@@ -1162,7 +1204,6 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
         caughtError instanceof Error ? caughtError.message : "Failed to send message.";
       setError(message);
       setRetryPayload({ chatId, message: messageText, revisionTarget });
-    } finally {
       setIsSending(false);
     }
   }
@@ -1389,6 +1430,12 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
     [backendStatuses, activeBackendNode],
   );
 
+  useEffect(() => {
+    return () => {
+      stopRunPolling();
+    };
+  }, [stopRunPolling]);
+
   return (
     <div className="flex h-screen flex-col bg-[color:var(--surface)]">
       <header className="flex items-center justify-between border-b border-[color:var(--outline-variant)]/35 bg-[color:var(--surface-lowest)] px-4 py-3">
@@ -1536,7 +1583,11 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
             ) : null}
 
             {isSending ? (
-              <ReceivingBubble waitingOn={waitingOnLabel} statuses={backendStatuses} />
+              <ReceivingBubble
+                waitingOn={waitingOnLabel}
+                statuses={backendStatuses}
+                etaSeconds={activeRun?.etaSeconds ?? null}
+              />
             ) : null}
 
             {visibleMessages.length === 0 && questionMode === null ? (
