@@ -49,6 +49,13 @@ type ActiveRunSummary = {
   liveSections?: Record<string, string>;
 };
 
+type SectionStreamPayload = {
+  status?: "RUNNING" | "COMPLETED" | "FAILED" | "NEEDS_INPUT";
+  currentNode?: string | null;
+  etaSeconds?: number | null;
+  sections?: Record<string, string>;
+};
+
 type QuestionMode = {
   introPrompt: string;
   questions: ClarificationQuestion[];
@@ -872,6 +879,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
     options?: { generateDiagrams?: boolean; diagramsOnly?: boolean };
   } | null>(null);
   const runPollTimerRef = useRef<number | null>(null);
+  const sectionStreamRef = useRef<EventSource | null>(null);
 
   // Ref used to hold the latest selectedChatId inside the sendToBackend closure.
   const selectedChatIdRef = useRef(selectedChatId);
@@ -890,6 +898,66 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
       runPollTimerRef.current = null;
     }
   }, []);
+
+  const stopSectionStreaming = useCallback(() => {
+    if (sectionStreamRef.current) {
+      sectionStreamRef.current.close();
+      sectionStreamRef.current = null;
+    }
+  }, []);
+
+  const startSectionStreaming = useCallback(
+    (chatId: string) => {
+      stopSectionStreaming();
+
+      const stream = new EventSource(`/api/chats/${chatId}/runs/active/stream`);
+      sectionStreamRef.current = stream;
+
+      stream.addEventListener("sections", (event) => {
+        let payload: SectionStreamPayload = {};
+        try {
+          payload = JSON.parse((event as MessageEvent).data) as SectionStreamPayload;
+        } catch {
+          return;
+        }
+
+        if (payload.currentNode !== undefined) {
+          setActiveBackendNode(payload.currentNode || null);
+        }
+
+        if (payload.etaSeconds !== undefined) {
+          setActiveRun((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  etaSeconds: payload.etaSeconds ?? null,
+                  currentNode:
+                    payload.currentNode !== undefined
+                      ? (payload.currentNode ?? null)
+                      : prev.currentNode,
+                }
+              : prev,
+          );
+        }
+
+        if (payload.sections && typeof payload.sections === "object") {
+          setLiveSectionDrafts((prev) => ({
+            ...prev,
+            ...payload.sections,
+          }));
+        }
+      });
+
+      stream.addEventListener("done", () => {
+        stopSectionStreaming();
+      });
+
+      stream.addEventListener("error", () => {
+        stopSectionStreaming();
+      });
+    },
+    [stopSectionStreaming],
+  );
 
   const pollActiveRun = useCallback(
     async (chatId: string) => {
@@ -917,6 +985,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
         }
 
         if (!run) {
+          stopSectionStreaming();
           setIsSending(false);
           setIsGeneratingDiagrams(false);
           setActiveBackendNode(null);
@@ -943,9 +1012,17 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
 
         setBackendStatuses(run.statuses || []);
         setActiveBackendNode(run.currentNode || null);
-        setLiveSectionDrafts(run.liveSections || {});
+        if (run.liveSections && Object.keys(run.liveSections).length > 0) {
+          setLiveSectionDrafts((prev) => ({
+            ...prev,
+            ...run.liveSections,
+          }));
+        }
 
         if (run.status === "RUNNING") {
+          if (!sectionStreamRef.current) {
+            startSectionStreaming(chatId);
+          }
           setIsSending(true);
           runPollTimerRef.current = window.setTimeout(() => {
             void pollActiveRun(chatId);
@@ -953,6 +1030,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
           return;
         }
 
+        stopSectionStreaming();
         setIsSending(false);
         setIsGeneratingDiagrams(false);
         setActiveBackendNode(null);
@@ -984,7 +1062,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
         setIsGeneratingDiagrams(false);
       }
     },
-    [stopRunPolling],
+    [startSectionStreaming, stopRunPolling, stopSectionStreaming],
   );
 
   // Scroll-to-bottom ref
@@ -1032,6 +1110,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
 
   async function createChat() {
     stopRunPolling();
+    stopSectionStreaming();
     setError("");
 
     try {
@@ -1062,6 +1141,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
 
   async function loadChatDetails(chatId: string) {
     stopRunPolling();
+    stopSectionStreaming();
     setError("");
 
     try {
@@ -1096,6 +1176,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
           setBackendStatuses(run.statuses || []);
           setActiveBackendNode(run.currentNode || null);
           setLiveSectionDrafts(run.liveSections || {});
+          startSectionStreaming(chatId);
           void pollActiveRun(chatId);
         } else if (run?.status === "NEEDS_INPUT" && run.questions.length > 0) {
           setQuestionMode({
@@ -1237,6 +1318,9 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
       if (run) {
         setBackendStatuses(run.statuses || []);
         setActiveBackendNode(run.currentNode || null);
+        if (run.status === "RUNNING") {
+          startSectionStreaming(chatId);
+        }
         await pollActiveRun(chatId);
       } else {
         await loadChatDetails(chatId);
@@ -1518,8 +1602,9 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
   useEffect(() => {
     return () => {
       stopRunPolling();
+      stopSectionStreaming();
     };
-  }, [stopRunPolling]);
+  }, [stopRunPolling, stopSectionStreaming]);
 
   return (
     <div className="flex h-screen flex-col bg-[color:var(--surface)]">

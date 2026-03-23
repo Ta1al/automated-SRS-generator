@@ -27,6 +27,7 @@ export async function GET(_request: NextRequest, context: Context) {
       id: true,
       backendThreadId: true,
       title: true,
+      stateJson: true,
     },
   });
 
@@ -38,6 +39,28 @@ export async function GET(_request: NextRequest, context: Context) {
   const liveSections: Record<string, string> = {};
 
   if (run?.status === "RUNNING") {
+    const liveSectionsFromState =
+      chat.stateJson &&
+      typeof chat.stateJson === "object" &&
+      !Array.isArray(chat.stateJson) &&
+      (chat.stateJson as Record<string, unknown>).live_sections &&
+      typeof (chat.stateJson as Record<string, unknown>).live_sections === "object" &&
+      !Array.isArray((chat.stateJson as Record<string, unknown>).live_sections)
+        ? ((chat.stateJson as Record<string, unknown>).live_sections as Record<string, unknown>)
+        : null;
+
+    if (liveSectionsFromState) {
+      for (const [key, value] of Object.entries(liveSectionsFromState)) {
+        if (typeof value === "string") {
+          const trimmed = value.trim();
+          if (trimmed) {
+            liveSections[key] = trimmed;
+          }
+        }
+      }
+    }
+
+    if (Object.keys(liveSections).length === 0) {
     try {
       const stateResponse = await backendFetch(`/api/sessions/${chat.backendThreadId}/state`, {
         cache: "no-store",
@@ -59,6 +82,7 @@ export async function GET(_request: NextRequest, context: Context) {
         }
       }
     } catch {
+    }
     }
   }
 

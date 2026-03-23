@@ -73,6 +73,39 @@ const PARALLEL_DRAFT_STAGES = [
   "draft_section_3_fr",
   "draft_section_3_nfr",
 ] as const;
+const DRAFT_NODE_TO_SECTION_KEY: Record<string, string> = {
+  draft_section_1: "s1",
+  draft_section_2: "s2",
+  draft_section_3_iface: "s3_iface",
+  draft_section_3_fr: "s3_fr",
+  draft_section_3_nfr: "s3_nfr",
+  draft_section_4: "s4",
+};
+
+function extractLiveSectionsFromState(state: unknown): Record<string, string> {
+  if (!state || typeof state !== "object" || Array.isArray(state)) {
+    return {};
+  }
+
+  const raw = (state as Record<string, unknown>).live_sections;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return {};
+  }
+
+  const sections: Record<string, string> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof value !== "string") {
+      continue;
+    }
+
+    const trimmed = value.trim();
+    if (trimmed) {
+      sections[key] = trimmed;
+    }
+  }
+
+  return sections;
+}
 
 function shouldPersistAssistantMessage(message: string) {
   const trimmed = message.trim();
@@ -405,6 +438,42 @@ export async function startBackgroundChatRun(params: {
               .map(([key, value]) => [key, value as string]),
           )
         : undefined;
+    const liveSectionsByKey: Record<string, string> = {};
+    let stateJsonSnapshot: Record<string, unknown> =
+      chat.stateJson && typeof chat.stateJson === "object" && !Array.isArray(chat.stateJson)
+        ? { ...(chat.stateJson as Record<string, unknown>) }
+        : {};
+    let lastLiveSectionPersistMs = 0;
+
+    const persistLiveSections = async (force = false) => {
+      const now = Date.now();
+      if (!force && now - lastLiveSectionPersistMs < 500) {
+        return;
+      }
+
+      lastLiveSectionPersistMs = now;
+      stateJsonSnapshot = {
+        ...stateJsonSnapshot,
+        live_sections: { ...liveSectionsByKey },
+      };
+
+      await prisma.chat.update({
+        where: { id: chat.id },
+        data: {
+          stateJson: stateJsonSnapshot as Prisma.InputJsonValue,
+        },
+      });
+    };
+
+    await prisma.chat.update({
+      where: { id: chat.id },
+      data: {
+        stateJson: {
+          ...stateJsonSnapshot,
+          live_sections: {},
+        } as Prisma.InputJsonValue,
+      },
+    });
 
     const interactResponse = await backendFetch(`/api/sessions/${chat.backendThreadId}/interact`, {
       method: "POST",
@@ -444,7 +513,21 @@ export async function startBackgroundChatRun(params: {
           );
         });
       },
-      onToken: ({ node }) => {
+      onToken: ({ content, node }) => {
+        const targetSection =
+          (node ? DRAFT_NODE_TO_SECTION_KEY[node] || "" : "") ||
+          (node === "revise_selected_section" ? (revisionTarget?.sectionKey || "") : "");
+
+        if (targetSection && content) {
+          liveSectionsByKey[targetSection] = `${liveSectionsByKey[targetSection] || ""}${content}`;
+          persistLiveSections(false).catch((err) => {
+            console.error(
+              `[chat-runner] Failed to persist live section buffer for run ${runId}:`,
+              err,
+            );
+          });
+        }
+
         if (!node) {
           return;
         }
@@ -541,6 +624,13 @@ export async function startBackgroundChatRun(params: {
       },
     });
 
+    await persistLiveSections(true).catch((err) => {
+      console.error(
+        `[chat-runner] Failed to flush live section buffer for run ${runId}:`,
+        err,
+      );
+    });
+
     let latestState: Record<string, unknown> | null = null;
     try {
       const stateResponse = await backendFetch(`/api/sessions/${chat.backendThreadId}/state`);
@@ -607,7 +697,12 @@ export async function startBackgroundChatRun(params: {
     };
 
     if (latestState) {
-      chatUpdateData.stateJson = latestState as Prisma.InputJsonValue;
+      const bufferedLiveSections = extractLiveSectionsFromState(stateJsonSnapshot);
+      const mergedState = {
+        ...latestState,
+        live_sections: bufferedLiveSections,
+      };
+      chatUpdateData.stateJson = mergedState as Prisma.InputJsonValue;
     }
 
     await prisma.$transaction(async (tx) => {
@@ -646,6 +741,30 @@ export async function startBackgroundChatRun(params: {
       });
     });
   } catch (error) {
+    try {
+      const existingChat = await prisma.chat.findUnique({
+        where: { id: chatId },
+        select: { stateJson: true },
+      });
+      const stateSnapshot =
+        existingChat?.stateJson &&
+        typeof existingChat.stateJson === "object" &&
+        !Array.isArray(existingChat.stateJson)
+          ? { ...(existingChat.stateJson as Record<string, unknown>) }
+          : {};
+
+      await prisma.chat.update({
+        where: { id: chatId },
+        data: {
+          stateJson: {
+            ...stateSnapshot,
+            live_sections: {},
+          } as Prisma.InputJsonValue,
+        },
+      });
+    } catch {
+    }
+
     await prisma.chatRun.update({
       where: { id: runId },
       data: {
