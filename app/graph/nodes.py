@@ -310,22 +310,35 @@ async def elicit_requirements(state: SRSState) -> dict:
 
 
 async def evaluate_completeness(state: SRSState) -> dict:
-    """Identify missing information gaps using structured evaluation."""
+    """Identify unresolved major decisions after the initial draft is produced."""
+    if state.get("major_decisions_asked", False):
+        return {"missing_context": [], "qa_gaps": []}
+
     llm = _get_llm(temperature=0.0)
 
-    context_summary = state.get("document_buffer", "(no data yet)")
-    qa_gaps = state.get("qa_gaps", [])
-    extra = ""
-    if qa_gaps:
-        extra = "\n\nADDITIONAL GAPS IDENTIFIED BY QA REVIEWER:\n" + "\n".join(
-            f"- {g}" for g in qa_gaps
+    sections = state.get("sections", {})
+    current_draft = "\n\n".join(
+        filter(
+            None,
+            [
+                sections.get("s1", ""),
+                sections.get("s2", ""),
+                sections.get("s3_iface", ""),
+                sections.get("s3_fr", ""),
+                sections.get("s3_nfr", ""),
+                sections.get("s4", ""),
+            ],
         )
+    ).strip()
+
+    if not current_draft:
+        current_draft = state.get("document_buffer", "(no draft yet)")
 
     user_prompt = (
-        f"Current extracted context:\n{context_summary}"
+        "Current SRS draft (may be partial):\n"
+        f"{current_draft[:14000]}"
         f"\n\nConversation history covers {len(state.get('chat_history', []))} messages."
-        f"{extra}"
-        "\n\nIdentify ALL remaining gaps."
+        "\n\nIdentify only high-impact unanswered decisions using the required JSON format."
     )
 
     response = await _llm_invoke_with_retry(
@@ -410,6 +423,7 @@ async def ask_clarifying_questions(state: SRSState) -> dict:
         "document_buffer": state.get("document_buffer", "")
         + f"\n\n--- USER CLARIFICATION ---\n{answer_text}",
         "qa_gaps": [],
+        "major_decisions_asked": True,
     }
 
 

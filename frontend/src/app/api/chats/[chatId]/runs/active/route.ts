@@ -37,6 +37,7 @@ export async function GET(_request: NextRequest, context: Context) {
 
   const run = await getLatestNonTerminalRun(chat.id);
   const liveSections: Record<string, string> = {};
+  let inferredCurrentNode: string | null = null;
 
   if (run?.status === "RUNNING") {
     const liveSectionsFromState =
@@ -60,29 +61,34 @@ export async function GET(_request: NextRequest, context: Context) {
       }
     }
 
-    if (Object.keys(liveSections).length === 0) {
-    try {
-      const stateResponse = await backendFetch(`/api/sessions/${chat.backendThreadId}/state`, {
-        cache: "no-store",
-      });
+    if (Object.keys(liveSections).length === 0 || !run.currentNode) {
+      try {
+        const stateResponse = await backendFetch(`/api/sessions/${chat.backendThreadId}/state`, {
+          cache: "no-store",
+        });
 
-      if (stateResponse.ok) {
-        const statePayload = (await stateResponse.json()) as Record<string, unknown>;
-        const sections = statePayload.sections;
+        if (stateResponse.ok) {
+          const statePayload = (await stateResponse.json()) as Record<string, unknown>;
+          const sections = statePayload.sections;
+          const next = statePayload.next;
 
-        if (sections && typeof sections === "object" && !Array.isArray(sections)) {
-          for (const [key, value] of Object.entries(sections as Record<string, unknown>)) {
-            if (typeof value === "string") {
-              const trimmed = value.trim();
-              if (trimmed) {
-                liveSections[key] = trimmed;
+          if (Array.isArray(next) && next.length > 0 && typeof next[0] === "string") {
+            inferredCurrentNode = next[0];
+          }
+
+          if (sections && typeof sections === "object" && !Array.isArray(sections)) {
+            for (const [key, value] of Object.entries(sections as Record<string, unknown>)) {
+              if (typeof value === "string") {
+                const trimmed = value.trim();
+                if (trimmed) {
+                  liveSections[key] = trimmed;
+                }
               }
             }
           }
         }
+      } catch {
       }
-    } catch {
-    }
     }
   }
 
@@ -90,6 +96,7 @@ export async function GET(_request: NextRequest, context: Context) {
     run: run
       ? {
           ...run,
+          currentNode: run.currentNode || inferredCurrentNode,
           chatTitle: chat.title,
           liveSections,
         }

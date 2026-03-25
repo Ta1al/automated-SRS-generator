@@ -130,6 +130,7 @@ async def _stream_graph(
                 "revision_request": message,
                 "is_complete": False,
                 "qa_gaps": [],
+                "major_decisions_asked": False,
                 "final_document": "",
                 "project_title": "",
             }
@@ -162,9 +163,20 @@ async def _stream_graph(
 
                     if node_name == "__interrupt__":
                         # Graph paused — surface the questions to the client
-                        interrupts = node_updates if isinstance(node_updates, list) else []
+                        if isinstance(node_updates, (list, tuple)):
+                            interrupts = list(node_updates)
+                        elif node_updates is None:
+                            interrupts = []
+                        else:
+                            interrupts = [node_updates]
+
                         for interrupt_obj in interrupts:
-                            payload = getattr(interrupt_obj, "value", {})
+                            payload = getattr(interrupt_obj, "value", None)
+                            if payload is None and isinstance(interrupt_obj, dict):
+                                payload = interrupt_obj.get("value", interrupt_obj)
+                            if not isinstance(payload, dict):
+                                payload = {}
+
                             yield {
                                 "event": "question",
                                 "data": json.dumps(

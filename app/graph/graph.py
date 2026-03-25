@@ -1,10 +1,11 @@
 """
 LangGraph StateGraph definition for the SRS generator workflow.
 
-Optimised topology — critical path is 4 sequential LLM calls:
+Optimised topology — full flow with one major-decision clarification loop:
     START
       → retrieve_rag_context
       → elicit_requirements
+            → classify_requirements
       → fan-out (Send) — all 5 section writers run in parallel:
             draft_section_1
             draft_section_2
@@ -12,6 +13,13 @@ Optimised topology — critical path is 4 sequential LLM calls:
             draft_section_3_nfr
             draft_section_3_iface
       → fan-in → draft_section_4
+            → evaluate_completeness
+                ↙ [major decisions missing]     ↘ [ready to proceed]
+     ask_clarifying_questions         generate_mermaid / finalize_document
+                        ↓
+         classify_requirements
+                        ↓
+                 fan-out … (redraft with answers)
       → generate_mermaid      (3 diagrams generated via asyncio.gather internally)
       → validate_mermaid
         ↙ [errors & retries left]   ↘ [valid / budget exhausted]
@@ -31,6 +39,8 @@ from langgraph.types import Send
 
 from app.config import get_settings
 from app.graph.nodes import (
+    ask_clarifying_questions,
+    classify_requirements,
     correct_mermaid,
     draft_section_1,
     draft_section_2,
@@ -39,6 +49,7 @@ from app.graph.nodes import (
     draft_section_3_iface,
     draft_section_4,
     elicit_requirements,
+    evaluate_completeness,
     finalize_document,
     generate_mermaid,
     revise_selected_section,
@@ -85,6 +96,15 @@ def _route_after_section_4(state: SRSState) -> Literal["generate_mermaid", "fina
     return "finalize_document"
 
 
+def _route_after_evaluation(
+    state: SRSState,
+) -> Literal["ask_clarifying_questions", "generate_mermaid", "finalize_document"]:
+    """Ask major clarification questions once when key architectural decisions are missing."""
+    if state.get("missing_context", []):
+        return "ask_clarifying_questions"
+    return _route_after_section_4(state)
+
+
 def _route_after_mermaid_validation(
     state: SRSState,
 ) -> Literal["correct_mermaid", "finalize_document"]:
@@ -123,6 +143,9 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None) -> StateGraph:
     # ── Register nodes ────────────────────────────────────────────────────────
     builder.add_node("retrieve_rag_context", retrieve_rag_context)
     builder.add_node("elicit_requirements", elicit_requirements)
+    builder.add_node("evaluate_completeness", evaluate_completeness)
+    builder.add_node("ask_clarifying_questions", ask_clarifying_questions)
+    builder.add_node("classify_requirements", classify_requirements)
 
     # All five section writers run in parallel via Send fan-out
     builder.add_node("draft_section_1", draft_section_1)
@@ -158,10 +181,11 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None) -> StateGraph:
         },
     )
     builder.add_edge("retrieve_rag_context", "elicit_requirements")
+    builder.add_edge("elicit_requirements", "classify_requirements")
 
-    # elicit_requirements → fan-out ALL five section writers in parallel
+    # classify_requirements → fan-out ALL five section writers in parallel
     builder.add_conditional_edges(
-        "elicit_requirements",
+        "classify_requirements",
         _fan_out_all_sections,
     )
 
@@ -172,15 +196,21 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None) -> StateGraph:
     builder.add_edge("draft_section_3_nfr", "draft_section_4")
     builder.add_edge("draft_section_3_iface", "draft_section_4")
 
-    # Sequential post-fanin pipeline — diagrams are now optional
+    # Post-fanin: decide whether major clarifications are needed first
+    builder.add_edge("draft_section_4", "evaluate_completeness")
+
     builder.add_conditional_edges(
-        "draft_section_4",
-        _route_after_section_4,
+        "evaluate_completeness",
+        _route_after_evaluation,
         {
+            "ask_clarifying_questions": "ask_clarifying_questions",
             "generate_mermaid": "generate_mermaid",
             "finalize_document": "finalize_document",
         },
     )
+
+    # Resume after user answers: re-classify + re-draft once with enriched context
+    builder.add_edge("ask_clarifying_questions", "classify_requirements")
 
     # Mermaid pipeline with self-correction loop
     builder.add_edge("generate_mermaid", "validate_mermaid")

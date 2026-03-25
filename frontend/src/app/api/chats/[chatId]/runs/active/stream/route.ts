@@ -144,7 +144,9 @@ export async function GET(request: NextRequest, context: Context) {
               : null,
           );
 
-          if (run.status === ChatRunStatus.RUNNING && Object.keys(sections).length === 0) {
+          let inferredCurrentNode: string | null = null;
+
+          if (run.status === ChatRunStatus.RUNNING && (Object.keys(sections).length === 0 || !run.currentNode)) {
             try {
               const stateResponse = await backendFetch(`/api/sessions/${chat.backendThreadId}/state`, {
                 cache: "no-store",
@@ -153,6 +155,10 @@ export async function GET(request: NextRequest, context: Context) {
               if (stateResponse.ok) {
                 const payload = (await stateResponse.json()) as Record<string, unknown>;
                 sections = normalizeSections(payload.sections);
+                const next = payload.next;
+                if (Array.isArray(next) && next.length > 0 && typeof next[0] === "string") {
+                  inferredCurrentNode = next[0];
+                }
               }
             } catch {
             }
@@ -160,7 +166,7 @@ export async function GET(request: NextRequest, context: Context) {
 
           const snapshot = {
             status: run.status,
-            currentNode: run.currentNode,
+            currentNode: run.currentNode || inferredCurrentNode,
             etaSeconds: run.etaSeconds,
             sections,
           };

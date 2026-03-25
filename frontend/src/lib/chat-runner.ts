@@ -661,13 +661,31 @@ export async function startBackgroundChatRun(params: {
       !Array.isArray(latestState.sections) &&
       Object.keys(latestState.sections as Record<string, unknown>).length > 0;
 
-    const normalizedQuestions = normalizeQuestions(summary.questions);
+    let normalizedQuestions = normalizeQuestions(summary.questions);
+    let resolvedQuestionPrompt = summary.questionPrompt || "";
+    const stateNext = Array.isArray(latestState?.next) ? latestState.next : [];
+
+    if (
+      normalizedQuestions.length === 0 &&
+      stateNext.includes("ask_clarifying_questions")
+    ) {
+      const fallbackQuestions = Array.isArray(latestState?.missing_context)
+        ? (latestState?.missing_context as ClarificationQuestion[])
+        : [];
+      normalizedQuestions = normalizeQuestions(fallbackQuestions);
+
+      if (normalizedQuestions.length > 0) {
+        resolvedQuestionPrompt = formatClarificationPrompt({
+          questions: normalizedQuestions,
+        });
+      }
+    }
     const generatedProjectTitle = extractProjectTitleFromState(latestState);
 
     let persistedAssistantMessage = "";
     if (normalizedQuestions.length > 0) {
       persistedAssistantMessage = formatClarificationPrompt({
-        prompt: summary.questionPrompt,
+        prompt: resolvedQuestionPrompt,
         questions: normalizedQuestions,
       });
     } else if (currentDocument || hasDraftSections) {
@@ -729,7 +747,7 @@ export async function startBackgroundChatRun(params: {
           currentNode: null,
           currentNodeStarted: null,
           statusEvents: statusEvents as unknown as Prisma.InputJsonValue,
-          questionPrompt: summary.questionPrompt || null,
+          questionPrompt: resolvedQuestionPrompt || null,
           questionsJson:
             normalizedQuestions.length > 0
               ? (normalizedQuestions as unknown as Prisma.InputJsonValue)

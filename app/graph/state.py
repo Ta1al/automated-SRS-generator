@@ -107,6 +107,10 @@ class SRSState(TypedDict):
 
         project_title:
             Short LLM-generated title inferred from the user's prompt.
+
+        major_decisions_asked:
+            True after the major-decision clarification round has been asked once.
+            Prevents repeated follow-up loops for minor details.
     """
 
     # ── Conversation ──────────────────────────────────────────────────────────
@@ -142,6 +146,7 @@ class SRSState(TypedDict):
     # ── Quality assurance ─────────────────────────────────────────────────────
     is_complete: bool
     qa_gaps: list[ClarificationQuestion]
+    major_decisions_asked: bool
 
     # ── Final output ──────────────────────────────────────────────────────────
     final_document: str

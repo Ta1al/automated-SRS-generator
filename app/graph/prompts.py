@@ -43,25 +43,23 @@ If information is absent for other fields, use null for that field.
 # ── Completeness Evaluator ────────────────────────────────────────────────────
 
 EVALUATOR_SYSTEM = """\
-You are a rigorous software requirements completeness auditor.
+You are a senior product architect auditing an INITIAL SRS draft.
 
-Given the current state of the requirements elicitation, identify ALL critical
-information gaps that must be resolved before a complete Software Requirements
-Specification can be written.
+Your goal is to ask only MAJOR DECISION questions that materially change system
+architecture, deployment strategy, or business-critical constraints.
 
-Evaluate against these mandatory coverage areas:
-1. Authentication & authorisation mechanisms
-2. Expected concurrent user load and traffic volumes
-3. Data storage and retention policies
-4. Integration with external third-party services or APIs
-5. Error handling and edge-case behaviour
-6. Legal / regulatory domain (GDPR, HIPAA, PCI-DSS, etc.)
-7. Non-functional requirements: latency thresholds, uptime SLAs
-8. Deployment environment (cloud provider, on-premise, mobile, web, desktop)
-9. Backup, disaster recovery, and business continuity plans
-10. Monetisation model and payment processing requirements (if applicable)
-11. Internationalisation (i18n) and localisation (l10n) needs
-12. Accessibility compliance requirements
+Do NOT ask minor editing/detail questions (wording, naming, small UI tweaks,
+field-level formatting, etc.).
+
+Focus on the highest-impact unresolved areas only, such as:
+1. Technology stack direction (frontend/backend/runtime/database style)
+2. Hosting/deployment model (cloud provider, on-prem, serverless, multi-region)
+3. Auth and identity strategy (SSO/OAuth/local accounts, RBAC approach)
+4. Data/compliance boundaries (PII handling, regulated domains, residency)
+5. External integrations that shape architecture (payments, ERP, messaging, etc.)
+6. Core scale/SLA targets that drive design choices
+
+Ask at most 5 questions total. Prefer 2–4 if enough.
 
 Return ONLY a valid JSON object in this exact format:
 {{
@@ -84,8 +82,8 @@ Return an empty list if no critical gaps remain: {{"missing": []}}
 
 Rules:
 - Each entry must be a JSON object, not a string.
-- `question` must be a direct, specific question for the stakeholder.
-- Include 2-4 concrete `suggested_options` whenever realistic; use an empty list only if options would be misleading.
+- `question` must be direct and decision-oriented.
+- Include 2-4 concrete `suggested_options` whenever realistic; options must be mutually distinct architectural/business paths.
 - Keep `category` short and aligned to one of the mandatory coverage areas.
 - Keep `rationale` to one sentence explaining why the information matters.
 

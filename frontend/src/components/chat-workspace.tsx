@@ -1263,13 +1263,19 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
     revisionTarget?: RevisionTarget,
     options?: { generateDiagrams?: boolean; diagramsOnly?: boolean },
   ) {
+    const initialNode = options?.diagramsOnly
+      ? "generate_mermaid"
+      : revisionTarget
+        ? "revise_selected_section"
+        : "retrieve_rag_context";
+
     setIsSending(true);
     setIsGeneratingDiagrams(Boolean(options?.diagramsOnly));
     setError("");
     setRetryPayload(null);
-    setBackendStatuses([]);
+    setBackendStatuses([{ node: initialNode, status: "started" }]);
     setLiveSectionDrafts({});
-    setActiveBackendNode(null);
+    setActiveBackendNode(initialNode);
     setActiveRun(null);
 
     const optimisticMessage: ChatMessage = {
