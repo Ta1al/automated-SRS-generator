@@ -8,7 +8,7 @@ python-multipart==0.0.22
 langchain==0.3.19
 langchain-openai==0.3.7
 langgraph==1.0.10rc1
-langchain-core==1.2.11
+langchain-core==1.2.28
 langgraph-checkpoint-postgres==2.0.10
 
 # Database
