@@ -20,29 +20,16 @@ function applyTheme(theme: Theme) {
 }
 
 export function ThemeToggle({ size = "md" }: { size?: ToggleSize }) {
-  const [theme, setTheme] = useState<Theme>(() => {
-    if (typeof document !== "undefined") {
-      const htmlTheme = document.documentElement.getAttribute("data-theme");
-      if (htmlTheme === "light" || htmlTheme === "dark") {
-        return htmlTheme;
-      }
-    }
-
-    if (typeof window !== "undefined") {
-      const stored = window.localStorage.getItem(STORAGE_KEY);
-      if (stored === "light" || stored === "dark") {
-        return stored;
-      }
-      return getSystemTheme();
-    }
-
-    return "light";
-  });
+  // Keep server and first client render identical to avoid hydration mismatches.
+  const [theme, setTheme] = useState<Theme>("light");
 
   useEffect(() => {
     const stored = window.localStorage.getItem(STORAGE_KEY);
     const initialTheme = stored === "light" || stored === "dark" ? stored : getSystemTheme();
     applyTheme(initialTheme);
+    const initialSyncFrame = window.requestAnimationFrame(() => {
+      setTheme(initialTheme);
+    });
 
     const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
 
@@ -74,6 +61,7 @@ export function ThemeToggle({ size = "md" }: { size?: ToggleSize }) {
     window.addEventListener("storage", onStorageChange);
 
     return () => {
+      window.cancelAnimationFrame(initialSyncFrame);
       mediaQuery.removeEventListener("change", onSystemThemeChange);
       window.removeEventListener("storage", onStorageChange);
     };
