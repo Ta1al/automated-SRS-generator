@@ -1776,7 +1776,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
                 key={message.id}
                 className={`max-w-[85%] rounded-lg px-3 py-2 text-sm whitespace-pre-wrap ${
                   message.role === "USER"
-                    ? "ml-auto bg-[color:var(--primary)] text-white"
+                    ? "ml-auto bg-[color:var(--primary)] text-[color:var(--on-primary)]"
                     : "bg-[color:var(--surface-highest)]/80 text-[color:var(--foreground)] backdrop-blur"
                 }`}
               >
