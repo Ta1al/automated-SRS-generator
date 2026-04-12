@@ -333,14 +333,15 @@ export async function getLatestNonTerminalRun(chatId: string) {
   const run = await prisma.chatRun.findFirst({
     where: {
       chatId,
-      status: {
-        in: [ChatRunStatus.RUNNING, ChatRunStatus.NEEDS_INPUT],
-      },
     },
     orderBy: { startedAt: "desc" },
   });
 
   if (!run) {
+    return null;
+  }
+
+  if (run.status !== ChatRunStatus.RUNNING && run.status !== ChatRunStatus.NEEDS_INPUT) {
     return null;
   }
 
@@ -684,10 +685,9 @@ export async function startBackgroundChatRun(params: {
 
     let persistedAssistantMessage = "";
     if (normalizedQuestions.length > 0) {
-      persistedAssistantMessage = formatClarificationPrompt({
-        prompt: resolvedQuestionPrompt,
-        questions: normalizedQuestions,
-      });
+      persistedAssistantMessage =
+        resolvedQuestionPrompt ||
+        "I need a few clarifications before continuing. Please answer them in the clarification form.";
     } else if (currentDocument || hasDraftSections) {
       persistedAssistantMessage =
         runMode === "diagrams_only"

@@ -60,6 +60,8 @@ Focus on the highest-impact unresolved areas only, such as:
 6. Core scale/SLA targets that drive design choices
 
 Ask at most 5 questions total. Prefer 2–4 if enough.
+If the draft is sufficient to proceed with reasonable assumptions, return an empty list and do not ask follow-up questions.
+Questions are optional, not mandatory.
 
 Return ONLY a valid JSON object in this exact format:
 {{

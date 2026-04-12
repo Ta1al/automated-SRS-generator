@@ -321,6 +321,76 @@ class TestEvaluateCompleteness:
 
 
 # ════════════════════════════════════════════════════════════════════════════
+# Section 3a — Section 1 Completeness Backfill
+# ════════════════════════════════════════════════════════════════════════════
+
+
+class TestSectionOneCompleteness:
+    def test_backfills_empty_required_subsections(self):
+        from app.graph.nodes import _ensure_section_1_completeness
+
+        state: Any = {
+            "project_title": "FlappyBirdReplica",
+            "chat_history": [],
+        }
+
+        incomplete_markdown = """## 1. Introduction
+### 1.1 Purpose
+### 1.2 Scope
+### 1.3 Definitions, Acronyms, and Abbreviations
+| Term | Definition |
+| --- | --- |
+| Bird | Player avatar |
+"""
+
+        result = _ensure_section_1_completeness(incomplete_markdown, state)
+
+        assert "### 1.1 Purpose" in result
+        assert "### 1.2 Scope" in result
+        assert "### 1.4 References" in result
+        assert "### 1.5 Overview" in result
+        assert "The purpose of this SRS is to specify verifiable requirements" in result
+        assert "| Bird | Player avatar |" in result
+
+    def test_preserves_existing_non_empty_subsections(self):
+        from app.graph.nodes import _ensure_section_1_completeness
+
+        state: Any = {
+            "project_title": "FlappyBirdReplica",
+            "chat_history": [],
+        }
+
+        complete_markdown = """## 1. Introduction
+This section introduces the requirements baseline.
+
+### 1.1 Purpose
+This subsection defines verification goals and stakeholder alignment.
+
+### 1.2 Scope
+The scope includes browser gameplay, rendering, and score tracking.
+
+### 1.3 Definitions, Acronyms, and Abbreviations
+| Term | Definition |
+| --- | --- |
+| FPS | Frames per second |
+
+### 1.4 References
+- Existing project reference.
+
+### 1.5 Overview
+Section 2 provides context and Section 3 details requirements.
+"""
+
+        result = _ensure_section_1_completeness(complete_markdown, state)
+
+        assert "This subsection defines verification goals and stakeholder alignment." in result
+        assert "The scope includes browser gameplay, rendering, and score tracking." in result
+        assert "- Existing project reference." in result
+        assert "### 1.1 Purpose" in result
+        assert result.count("### 1.1 Purpose") == 1
+
+
+# ════════════════════════════════════════════════════════════════════════════
 # Section 3b — Mermaid Generation Resilience
 # ════════════════════════════════════════════════════════════════════════════
 

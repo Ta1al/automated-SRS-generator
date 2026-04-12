@@ -26,6 +26,7 @@ from langgraph.types import interrupt
 from app.config import get_settings
 from app.graph import prompts
 from app.graph.state import ClarificationQuestion, Requirement, SRSState
+from app.rag.mermaid_syntax import retrieve_mermaid_syntax
 from app.rag.vectorstore import retrieve
 from app.validation.mermaid import validate_mermaid_syntax
 
@@ -162,6 +163,79 @@ def _normalize_questions(raw_questions: Any) -> list[ClarificationQuestion]:
         )
 
     return normalized
+
+
+_HIGH_IMPACT_CATEGORIES = {
+    "technology",
+    "tech stack",
+    "stack",
+    "architecture",
+    "deployment",
+    "hosting",
+    "infrastructure",
+    "authentication",
+    "authorization",
+    "identity",
+    "security",
+    "privacy",
+    "compliance",
+    "legal",
+    "data",
+    "integrations",
+    "integration",
+    "scalability",
+    "performance",
+    "availability",
+    "sla",
+}
+
+_HIGH_IMPACT_KEYWORDS = (
+    "auth",
+    "oauth",
+    "sso",
+    "saml",
+    "rbac",
+    "deployment",
+    "hosting",
+    "cloud",
+    "on-prem",
+    "serverless",
+    "database",
+    "residency",
+    "pii",
+    "gdpr",
+    "hipaa",
+    "pci",
+    "integration",
+    "payment",
+    "throughput",
+    "latency",
+    "scal",
+    "concurrent",
+    "user count",
+    "capacity",
+    "load",
+    "availability",
+    "uptime",
+    "region",
+)
+
+
+def _is_high_impact_question(item: ClarificationQuestion) -> bool:
+    category = str(item.get("category", "")).strip().lower()
+    question = str(item.get("question", "")).strip().lower()
+    rationale = str(item.get("rationale", "")).strip().lower()
+
+    if category in _HIGH_IMPACT_CATEGORIES:
+        return True
+
+    haystack = f"{question} {rationale}"
+    return any(keyword in haystack for keyword in _HIGH_IMPACT_KEYWORDS)
+
+
+def _filter_major_questions(questions: list[ClarificationQuestion]) -> list[ClarificationQuestion]:
+    """Keep only high-impact clarification questions that materially affect architecture."""
+    return [item for item in questions if _is_high_impact_question(item)]
 
 
 def _normalize_project_title(value: Any) -> str:
@@ -353,6 +427,7 @@ async def evaluate_completeness(state: SRSState) -> dict:
     try:
         data = _parse_json(_ai_text(response))
         missing = _normalize_questions(data.get("missing", []))
+        missing = _filter_major_questions(missing)
     except (json.JSONDecodeError, ValueError, AttributeError):
         logger.warning("Evaluator returned non-JSON; treating as complete.")
         missing = []
@@ -387,37 +462,41 @@ async def ask_clarifying_questions(state: SRSState) -> dict:
     if not combined_questions:
         return {}
 
-    question_blocks: list[str] = []
-    for index, item in enumerate(combined_questions, start=1):
-        question_lines = [f"{index}. [{item.get('category', 'General')}] {item.get('question', '')}"]
-        options = item.get("suggested_options", [])
-        if options:
-            question_lines.append("   Suggested options:")
-            question_lines.extend(f"   - {option}" for option in options)
-        rationale = item.get("rationale", "")
-        if rationale:
-            question_lines.append(f"   Why this matters: {rationale}")
-        question_blocks.append("\n".join(question_lines))
-
-    formatted_questions = "\n\n".join(question_blocks)
     prompt_text = (
         "I drafted an initial SRS using the best available information. "
-        "To improve and complete it, I need a few more details:\n\n"
-        + formatted_questions
+        "Please answer the clarification form so I can finalize it accurately."
     )
 
     # interrupt() raises GraphInterrupt internally — LangGraph catches it,
     # saves state, and routes the payload back through the SSE stream.
-    human_answer: dict = interrupt(
-        {
-            "type": "clarification_needed",
-            "questions": combined_questions,
-            "prompt": prompt_text,
-        }
-    )
+    payload = {
+        "type": "clarification_needed",
+        "questions": combined_questions,
+        "prompt": prompt_text,
+    }
+    human_answer: dict = interrupt(payload)
+
+    # Require a non-empty clarification response before resuming workflow.
+    # This prevents downstream steps (including diagram generation) from
+    # running while major decision gaps are still unanswered.
+    answer_text = human_answer.get("message", "") if isinstance(human_answer, dict) else str(human_answer)
+    while not str(answer_text).strip():
+        reprompt = (
+            "Please answer the clarification questions before I continue with "
+            "the draft and diagram generation."
+        )
+        human_answer = interrupt(
+            {
+                "type": "clarification_needed",
+                "questions": combined_questions,
+                "prompt": reprompt,
+            }
+        )
+        answer_text = human_answer.get("message", "") if isinstance(human_answer, dict) else str(human_answer)
+
+    answer_text = str(answer_text).strip()
 
     # Merge the user's answer back into chat history
-    answer_text = human_answer.get("message", "") if isinstance(human_answer, dict) else str(human_answer)
     return {
         "chat_history": [HumanMessage(content=answer_text)],
         "document_buffer": state.get("document_buffer", "")
@@ -504,7 +583,9 @@ async def draft_section_1(state: SRSState) -> dict:
         ],
         node_name="draft_section_1",
     )
-    return {"sections": {"s1": _ai_text(response)}}
+    raw_section = _ai_text(response)
+    completed_section = _ensure_section_1_completeness(raw_section, state)
+    return {"sections": {"s1": completed_section}}
 
 
 # ── Node 7: Draft Section 2 ───────────────────────────────────────────────────
@@ -678,43 +759,71 @@ async def generate_mermaid(state: SRSState) -> dict:
 
     diagram_configs = [
         (
+            "flowchart",
             "a high-level system architecture (flowchart TD) diagram",
             prompts.MERMAID_ARCHITECTURE_PROMPT,
         ),
         (
+            "sequence",
             "a sequence diagram for the primary user workflow",
             prompts.MERMAID_SEQUENCE_PROMPT,
         ),
         (
+            "er",
             "an entity-relationship diagram for core data entities",
             prompts.MERMAID_ER_PROMPT,
         ),
     ]
 
-    blocks: list[str] = []
-    for idx, (diagram_label, diagram_prompt) in enumerate(diagram_configs):
+    async def _generate_one(
+        index: int,
+        diagram_kind: str,
+        diagram_label: str,
+        diagram_prompt: str,
+    ) -> str:
         system_prompt = prompts.MERMAID_SYSTEM.format(diagram_type=diagram_label)
-        try:
-            response = await _llm_invoke_with_retry(
-                llm,
-                [
-                    SystemMessage(content=system_prompt),
-                    HumanMessage(
-                        content=f"System context:\n{context}\n\nGenerate: {diagram_prompt}"
-                    ),
-                ],
-                node_name="generate_mermaid",
+        syntax_context = retrieve_mermaid_syntax(
+            diagram_type=diagram_kind,
+            query=f"{context}\n{diagram_prompt}",
+            top_k=3,
+        )
+        user_content = [f"System context:\n{context}"]
+        if syntax_context:
+            user_content.append(
+                "Mermaid syntax reference (follow strictly):\n"
+                f"{syntax_context}"
             )
-            raw = _ai_text(response)
-            # Strip markdown fences to get raw diagram code
-            code = _extract_mermaid_code(raw)
-        except Exception as exc:
+        user_content.append(f"Generate: {diagram_prompt}")
+
+        response = await _llm_invoke_with_retry(
+            llm,
+            [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content="\n\n".join(user_content)),
+            ],
+            node_name="generate_mermaid",
+        )
+        raw = _ai_text(response)
+        code = _extract_mermaid_code(raw)
+        return code or _fallback_mermaid_code(index)
+
+    generation_tasks = [
+        _generate_one(idx, diagram_kind, diagram_label, diagram_prompt)
+        for idx, (diagram_kind, diagram_label, diagram_prompt) in enumerate(diagram_configs)
+    ]
+    generation_results = await asyncio.gather(*generation_tasks, return_exceptions=True)
+
+    blocks: list[str] = []
+    for idx, result in enumerate(generation_results):
+        if isinstance(result, Exception):
             logger.exception(
-                "Mermaid generation failed for '%s'; using fallback diagram.",
-                diagram_label,
+                "Mermaid generation failed for diagram index %d; using fallback.",
+                idx,
+                exc_info=result,
             )
-            code = _fallback_mermaid_code(idx)
-        blocks.append(code)
+            blocks.append(_fallback_mermaid_code(idx))
+            continue
+        blocks.append(result)
 
     return {
         "mermaid_blocks": blocks,
@@ -729,10 +838,17 @@ async def generate_mermaid(state: SRSState) -> dict:
 async def validate_mermaid(state: SRSState) -> dict:
     """Run mmdc (or heuristic fallback) on each generated diagram block."""
     blocks = state.get("mermaid_blocks", [])
-    errors: list[str] = []
+    validation_tasks = [validate_mermaid_syntax(block) for block in blocks]
+    validation_results = await asyncio.gather(*validation_tasks, return_exceptions=True)
 
-    for block in blocks:
-        valid, error_msg = await validate_mermaid_syntax(block)
+    errors: list[str] = []
+    for result in validation_results:
+        if isinstance(result, Exception):
+            logger.exception("Unexpected Mermaid validation error.", exc_info=result)
+            errors.append("Unexpected Mermaid validator failure.")
+            continue
+
+        valid, error_msg = result
         errors.append("" if valid else error_msg)
 
     failed = sum(1 for e in errors if e)
@@ -750,10 +866,7 @@ async def correct_mermaid(state: SRSState) -> dict:
     errors = state.get("mermaid_errors", [])
     attempts = state.get("mermaid_correction_attempts", 0)
 
-    for i, (block, error) in enumerate(zip(blocks, errors)):
-        if not error:
-            continue  # Already valid
-
+    async def _correct_one(index: int, block: str, error: str) -> tuple[int, str | None]:
         correction_prompt = prompts.CORRECTOR_SYSTEM.format(
             original_code=f"```mermaid\n{block}\n```",
             error_message=error,
@@ -764,8 +877,24 @@ async def correct_mermaid(state: SRSState) -> dict:
             node_name="correct_mermaid",
         )
         corrected = _extract_mermaid_code(_ai_text(response))
-        if corrected:
-            blocks[i] = corrected
+        return index, corrected or None
+
+    correction_tasks = [
+        _correct_one(i, block, error)
+        for i, (block, error) in enumerate(zip(blocks, errors))
+        if error
+    ]
+
+    if correction_tasks:
+        correction_results = await asyncio.gather(*correction_tasks, return_exceptions=True)
+        for result in correction_results:
+            if isinstance(result, Exception):
+                logger.exception("Mermaid correction task failed.", exc_info=result)
+                continue
+
+            index, corrected = result
+            if corrected:
+                blocks[index] = corrected
 
     return {
         "mermaid_blocks": blocks,
@@ -857,6 +986,198 @@ async def finalize_document(state: SRSState) -> dict:
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
+
+
+_SECTION_1_REQUIRED_HEADINGS = [
+    "## 1. Introduction",
+    "### 1.1 Purpose",
+    "### 1.2 Scope",
+    "### 1.3 Definitions, Acronyms, and Abbreviations",
+    "### 1.4 References",
+    "### 1.5 Overview",
+]
+
+
+def _normalize_heading_title(value: str) -> str:
+    return re.sub(r"\s+", " ", value.strip().lower())
+
+
+_SECTION_1_TITLE_TO_HEADING = {
+    _normalize_heading_title(heading.split(" ", 1)[1]): heading
+    for heading in _SECTION_1_REQUIRED_HEADINGS
+}
+
+
+def _unwrap_markdown_fence(markdown: str) -> str:
+    stripped = str(markdown or "").strip()
+    fence_match = re.match(
+        r"^```(?:markdown|md)?\s*\n([\s\S]*?)\n```\s*$",
+        stripped,
+        flags=re.IGNORECASE,
+    )
+    if fence_match:
+        return fence_match.group(1).strip()
+    return stripped
+
+
+def _has_meaningful_markdown_body(lines: list[str]) -> bool:
+    for line in lines:
+        trimmed = line.strip()
+        if not trimmed:
+            continue
+
+        if re.match(r"^\s{0,3}[-*_]{3,}\s*$", trimmed):
+            continue
+
+        if re.match(r"^#{1,6}\s*$", trimmed):
+            continue
+
+        if re.match(r"^#{1,6}\s+", trimmed):
+            continue
+
+        normalized = re.sub(r"[`*_~|>#-]", " ", trimmed)
+        if re.search(r"[A-Za-z0-9]", normalized):
+            return True
+
+    return False
+
+
+def _resolve_project_name(state: SRSState) -> str:
+    explicit_title = _normalize_project_title(state.get("project_title", ""))
+    if explicit_title:
+        return explicit_title
+
+    for message in state.get("chat_history", []):
+        if not isinstance(message, HumanMessage):
+            continue
+
+        text = re.sub(r"\s+", " ", str(message.content or "")).strip()
+        if not text:
+            continue
+
+        text = re.sub(
+            r"^i\s+want\s+to\s+(?:build|make|create)\s+",
+            "",
+            text,
+            flags=re.IGNORECASE,
+        )
+        text = text.strip(" .")
+        if text:
+            return text[:80]
+
+    return "the system"
+
+
+def _section_1_fallback_content(state: SRSState) -> dict[str, list[str]]:
+    project_name = _resolve_project_name(state)
+    references = [
+        "- IEEE Std 830-1998: IEEE Recommended Practice for Software Requirements Specifications.",
+        "- ISO/IEC/IEEE 29148: Systems and software engineering - Life cycle processes - Requirements engineering.",
+        "- Project elicitation notes and stakeholder clarification responses captured in this session.",
+    ]
+
+    return {
+        "## 1. Introduction": [
+            (
+                f"This Software Requirements Specification (SRS) defines the functional, interface, "
+                f"quality, and verification requirements for {project_name}. "
+                "It serves as the contractual baseline for implementation, validation, and acceptance."
+            ),
+        ],
+        "### 1.1 Purpose": [
+            (
+                f"The purpose of this SRS is to specify verifiable requirements for {project_name} "
+                "so that engineering, QA, and stakeholders can implement and validate a consistent solution."
+            ),
+        ],
+        "### 1.2 Scope": [
+            (
+                f"The scope includes browser-based gameplay behavior, input handling, obstacle interaction, "
+                f"scoring logic, and performance expectations for {project_name}."
+            ),
+            "Out-of-scope features include unrelated platform expansion unless explicitly requested in later revisions.",
+        ],
+        "### 1.3 Definitions, Acronyms, and Abbreviations": [
+            "| Term | Definition |",
+            "| --- | --- |",
+            f"| {project_name} | Target software product defined by this SRS. |",
+            "| Player | End user interacting with gameplay controls. |",
+            "| Game loop | Continuous update and render cycle executed during runtime. |",
+            "| Obstacle | Dynamic object that the player must avoid or navigate. |",
+        ],
+        "### 1.4 References": references,
+        "### 1.5 Overview": [
+            (
+                "Section 2 describes the product context and constraints, Section 3 captures detailed functional "
+                "and quality requirements, and Section 4 defines the verification approach for acceptance."
+            ),
+        ],
+    }
+
+
+def _collect_section_1_blocks(markdown: str) -> dict[str, list[str]]:
+    blocks = {heading: [] for heading in _SECTION_1_REQUIRED_HEADINGS}
+    lines = markdown.splitlines()
+
+    current_heading: str | None = None
+    current_level: int | None = None
+
+    for line in lines:
+        stripped = line.strip()
+        heading_match = re.match(r"^(#{1,6})\s+(.+)$", stripped)
+
+        if heading_match:
+            level = len(heading_match.group(1))
+            title_key = _normalize_heading_title(heading_match.group(2))
+            mapped_heading = _SECTION_1_TITLE_TO_HEADING.get(title_key)
+
+            if current_heading is not None and current_level is not None and level <= current_level:
+                current_heading = None
+                current_level = None
+
+            if mapped_heading:
+                current_heading = mapped_heading
+                current_level = level
+                continue
+
+        if current_heading is not None:
+            blocks[current_heading].append(line)
+
+    return blocks
+
+
+def _ensure_section_1_completeness(markdown: str, state: SRSState) -> str:
+    source = _unwrap_markdown_fence(markdown).replace("\r\n", "\n").replace("\r", "\n")
+    existing_blocks = _collect_section_1_blocks(source)
+    fallback_blocks = _section_1_fallback_content(state)
+
+    missing_or_empty: list[str] = []
+    result_lines: list[str] = []
+
+    for heading in _SECTION_1_REQUIRED_HEADINGS:
+        result_lines.append(heading)
+
+        body_lines = [line.rstrip() for line in existing_blocks.get(heading, [])]
+        if _has_meaningful_markdown_body(body_lines):
+            # Trim leading/trailing blank lines while preserving internal formatting.
+            while body_lines and not body_lines[0].strip():
+                body_lines.pop(0)
+            while body_lines and not body_lines[-1].strip():
+                body_lines.pop()
+            result_lines.extend(body_lines)
+        else:
+            missing_or_empty.append(heading)
+            result_lines.extend(fallback_blocks[heading])
+
+        result_lines.append("")
+
+    if missing_or_empty:
+        logger.info(
+            "Section 1 fallback content inserted for headings: %s",
+            ", ".join(missing_or_empty),
+        )
+
+    return "\n".join(result_lines).strip()
 
 
 def _build_writing_context(state: SRSState) -> str:

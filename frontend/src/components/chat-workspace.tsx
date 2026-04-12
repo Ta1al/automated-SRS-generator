@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -59,8 +59,7 @@ type SectionStreamPayload = {
 type QuestionMode = {
   introPrompt: string;
   questions: ClarificationQuestion[];
-  currentIdx: number;
-  answered: string[];
+  answers: string[];
 };
 
 type DraftPart = {
@@ -166,12 +165,13 @@ function hasDraftPartBodyContent(content: string) {
   const normalized = normalizeMarkdownForPreview(content);
   const withoutHeadings = normalized
     .replace(/^\s{0,3}#{1,6}\s+.*$/gm, "")
+    .replace(/^\s{0,3}#{1,6}\s*$/gm, "")
     .replace(/^\s{0,3}[-*_]{3,}\s*$/gm, "")
     .replace(/```[\s\S]*?```/g, "")
     .replace(/\s+/g, " ")
     .trim();
 
-  return withoutHeadings.length > 0;
+  return /[A-Za-z0-9]/.test(withoutHeadings);
 }
 
 function extractFirstMermaidChart(content: string) {
@@ -729,50 +729,81 @@ function formatAssistantContent(content: string) {
   return content;
 }
 
-// ---------------------------------------------------------------------------
-// QuestionBubble
-// ---------------------------------------------------------------------------
-
-function QuestionBubble({
-  question,
-  number,
-  total,
+function ClarificationFormCard({
+  questionMode,
+  onAnswerChange,
   onOptionSelect,
+  onSubmit,
+  isSending,
 }: {
-  question: ClarificationQuestion;
-  number: number;
-  total: number;
-  onOptionSelect?: (opt: string) => void;
+  questionMode: QuestionMode;
+  onAnswerChange: (index: number, value: string) => void;
+  onOptionSelect: (index: number, value: string) => void;
+  onSubmit: () => void;
+  isSending: boolean;
 }) {
   return (
-    <div className="max-w-[85%] rounded-xl bg-[color:var(--surface-highest)]/80 px-4 py-3 text-sm text-[color:var(--foreground)] backdrop-blur">
-      <p className="mb-2 text-xs font-semibold text-[color:var(--on-surface-variant)] uppercase tracking-[0.14em]">
-        Question {number} of {total}
-        {question.category ? ` · ${question.category}` : ""}
-      </p>
-      <p className="font-medium leading-snug">{question.question}</p>
+    <div className="max-w-[90%] rounded-2xl bg-[color:var(--surface-highest)]/80 px-4 py-4 text-[color:var(--foreground)] ring-1 ring-[color:var(--outline-variant)]/35 backdrop-blur">
+      {questionMode.introPrompt ? (
+        <p className="mb-4 text-sm leading-relaxed">{questionMode.introPrompt}</p>
+      ) : null}
 
-      {question.suggested_options && question.suggested_options.length > 0 ? (
-        <div className="mt-3">
-          <p className="mb-1.5 text-xs text-[color:var(--on-surface-variant)]">Suggested answers — click to use:</p>
-          <div className="flex flex-wrap gap-1.5">
-            {question.suggested_options.map((opt) => (
-              <button
-                key={opt}
-                type="button"
-                onClick={() => onOptionSelect?.(opt)}
-                className="rounded-full bg-[color:var(--surface-lowest)] px-2.5 py-0.5 text-xs ring-1 ring-[color:var(--outline-variant)]/35 transition-colors hover:bg-[color:var(--surface-low)]"
-              >
-                {opt}
-              </button>
-            ))}
+      <div className="space-y-3">
+        {questionMode.questions.map((question, index) => (
+          <div
+            key={`${question.question}-${index}`}
+            className="rounded-xl bg-[color:var(--surface-lowest)] px-3 py-3 ring-1 ring-[color:var(--outline-variant)]/35"
+          >
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[color:var(--on-surface-variant)]">
+              Question {index + 1} of {questionMode.questions.length}
+              {question.category ? ` · ${question.category}` : ""}
+            </p>
+            <p className="mt-1 text-sm font-medium leading-snug">{question.question}</p>
+
+            {question.suggested_options && question.suggested_options.length > 0 ? (
+              <div className="mt-2">
+                <p className="mb-1 text-xs text-[color:var(--on-surface-variant)]">Suggested answers:</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {question.suggested_options.map((option, optionIndex) => (
+                    <button
+                      key={`${option}-${optionIndex}`}
+                      type="button"
+                      onClick={() => onOptionSelect(index, option)}
+                      className="rounded-full bg-[color:var(--surface-low)] px-2.5 py-0.5 text-xs ring-1 ring-[color:var(--outline-variant)]/35 transition-colors hover:bg-[color:var(--surface)]"
+                    >
+                      {option}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            <textarea
+              value={questionMode.answers[index] || ""}
+              onChange={(event) => onAnswerChange(index, event.target.value)}
+              placeholder="Type your answer..."
+              rows={3}
+              className="mt-3 w-full rounded-md bg-[color:var(--surface-low)] px-3 py-2 text-sm ring-1 ring-[color:var(--outline-variant)]/40 outline-none focus:ring-2 focus:ring-[color:var(--primary)]"
+              disabled={isSending}
+            />
+
+            {question.rationale ? (
+              <p className="mt-2 text-xs text-[color:var(--on-surface-variant)] italic">{question.rationale}</p>
+            ) : null}
           </div>
-        </div>
-      ) : null}
+        ))}
+      </div>
 
-      {question.rationale ? (
-        <p className="mt-2 text-xs text-[color:var(--on-surface-variant)] italic">{question.rationale}</p>
-      ) : null}
+      <div className="mt-4 flex justify-end">
+        <button
+          type="button"
+          onClick={onSubmit}
+          disabled={isSending}
+          className="rounded-md bg-[color:var(--primary)] px-4 py-2 text-sm text-white disabled:opacity-60"
+        >
+          {isSending ? "Sending..." : "Continue with answers"}
+        </button>
+      </div>
     </div>
   );
 }
@@ -1046,8 +1077,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
             introPrompt:
               run.questionPrompt || "I need a few clarifications before drafting the SRS.",
             questions: run.questions,
-            currentIdx: 0,
-            answered: [],
+            answers: run.questions.map(() => ""),
           });
         }
 
@@ -1183,8 +1213,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
             introPrompt:
               run.questionPrompt || "I need a few clarifications before drafting the SRS.",
             questions: run.questions,
-            currentIdx: 0,
-            answered: [],
+            answers: run.questions.map(() => ""),
           });
         }
       } else {
@@ -1349,6 +1378,11 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
       return;
     }
 
+    if (questionMode !== null) {
+      setError("Please answer all clarification questions before generating diagrams.");
+      return;
+    }
+
     if (hasGeneratedDiagrams) {
       const confirmed = window.confirm(
         "Diagrams have already been generated for this draft. Generate them again and replace the existing diagrams?",
@@ -1370,39 +1404,54 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
   // Form submit
   // ---------------------------------------------------------------------------
 
+  function handleClarificationAnswerChange(index: number, value: string) {
+    setQuestionMode((prev) => {
+      if (!prev) {
+        return prev;
+      }
+
+      const nextAnswers = [...prev.answers];
+      nextAnswers[index] = value;
+      return { ...prev, answers: nextAnswers };
+    });
+  }
+
+  async function submitClarificationAnswers() {
+    if (!questionMode || isSending) {
+      return;
+    }
+
+    const sanitizedAnswers = questionMode.answers.map((answer) => answer.trim());
+    const firstMissing = sanitizedAnswers.findIndex((answer) => !answer);
+    if (firstMissing >= 0) {
+      setError(`Please answer question ${firstMissing + 1} before continuing.`);
+      return;
+    }
+
+    const compiled = questionMode.questions
+      .map((question, index) => `Q: ${question.question}\nA: ${sanitizedAnswers[index]}`)
+      .join("\n\n");
+
+    const chatId = selectedChatIdRef.current;
+    if (!chatId) {
+      return;
+    }
+
+    setError("");
+    setQuestionMode(null);
+    await sendToBackend(chatId, compiled);
+  }
+
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    const inputValue = input.trim();
-    if (!inputValue) return;
-
     if (questionMode !== null) {
-      // Collect the answer for the current question.
-      const newAnswered = [...questionMode.answered, inputValue];
-      setInput("");
-
-      if (questionMode.currentIdx < questionMode.questions.length - 1) {
-        // More questions to go — just advance the index.
-        setQuestionMode({
-          ...questionMode,
-          currentIdx: questionMode.currentIdx + 1,
-          answered: newAnswered,
-        });
-        return;
-      }
-
-      // All questions answered — compile a combined reply and send to backend.
-      const compiled = questionMode.questions
-        .map((q, i) => `Q: ${q.question}\nA: ${newAnswered[i]}`)
-        .join("\n\n");
-
-      setQuestionMode(null);
-
-      const chatId = selectedChatIdRef.current;
-      if (!chatId || isSending) return;
-      await sendToBackend(chatId, compiled);
+      setError("Use the clarification form above to answer follow-up questions.");
       return;
     }
+
+    const inputValue = input.trim();
+    if (!inputValue) return;
 
     // Normal submit
     if (!selectedChatId || isSending) return;
@@ -1545,16 +1594,40 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
 
   const draftSections = useMemo(
     () =>
-      draftedSections.map((section) => ({
-        ...section,
-        title: formatSectionTitle(section.key),
-        parts: extractDraftParts(section.key, section.content),
-      })),
+      draftedSections.map((section) => {
+        const parts = extractDraftParts(section.key, section.content).filter((part) =>
+          hasDraftPartBodyContent(part.content),
+        );
+
+        return {
+          ...section,
+          title: formatSectionTitle(section.key),
+          parts,
+        };
+      }),
     [draftedSections],
   );
 
   const allDraftParts = useMemo(
     () => draftSections.flatMap((section) => section.parts),
+    [draftSections],
+  );
+
+  const shouldShowDraftingPlaceholders = useMemo(
+    () => isSending || activeRun?.status === "RUNNING",
+    [isSending, activeRun?.status],
+  );
+
+  const visibleDraftSections = useMemo(
+    () =>
+      draftSections.filter(
+        (section) => section.parts.length > 0 || shouldShowDraftingPlaceholders,
+      ),
+    [draftSections, shouldShowDraftingPlaceholders],
+  );
+
+  const hasRenderableDraftParts = useMemo(
+    () => draftSections.some((section) => section.parts.length > 0),
     [draftSections],
   );
 
@@ -1717,38 +1790,17 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
               </div>
             ))}
 
-            {/* One-by-one question mode */}
+            {/* Clarification form mode */}
             {questionMode !== null ? (
-              <>
-                {/* Intro prompt (if any) */}
-                {questionMode.introPrompt ? (
-                  <div className="max-w-[85%] rounded-lg bg-[color:var(--surface-highest)]/80 px-3 py-2 text-sm whitespace-pre-wrap text-[color:var(--foreground)] backdrop-blur">
-                    {questionMode.introPrompt}
-                  </div>
-                ) : null}
-
-                {/* Answered Q&A pairs so far */}
-                {questionMode.questions.slice(0, questionMode.currentIdx).map((q, i) => (
-                  <Fragment key={`qa-${i}`}>
-                    <QuestionBubble
-                      question={q}
-                      number={i + 1}
-                      total={questionMode.questions.length}
-                    />
-                    <div className="ml-auto max-w-[85%] rounded-lg bg-[color:var(--primary)] px-3 py-2 text-sm whitespace-pre-wrap text-white">
-                      {questionMode.answered[i]}
-                    </div>
-                  </Fragment>
-                ))}
-
-                {/* Current question */}
-                <QuestionBubble
-                  question={questionMode.questions[questionMode.currentIdx]}
-                  number={questionMode.currentIdx + 1}
-                  total={questionMode.questions.length}
-                  onOptionSelect={(opt) => setInput(opt)}
-                />
-              </>
+              <ClarificationFormCard
+                questionMode={questionMode}
+                onAnswerChange={handleClarificationAnswerChange}
+                onOptionSelect={handleClarificationAnswerChange}
+                onSubmit={() => {
+                  void submitClarificationAnswers();
+                }}
+                isSending={isSending}
+              />
             ) : null}
 
             {selectedDraftPart !== null && questionMode === null ? (
@@ -1796,20 +1848,20 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
                 onChange={(event) => setInput(event.target.value)}
                 placeholder={
                   questionMode !== null
-                    ? `Answer question ${questionMode.currentIdx + 1} of ${questionMode.questions.length}…`
+                    ? "Answer the clarification form above to continue..."
                     : selectedDraftPart !== null
                       ? `Describe how to revise \"${selectedDraftPart.title}\"...`
                       : "Describe the software you want to build..."
                 }
                 className="w-full rounded-md bg-[color:var(--surface-low)] px-3 py-2 text-sm ring-1 ring-[color:var(--outline-variant)]/40 outline-none focus:ring-2 focus:ring-[color:var(--primary)]"
-                disabled={!selectedChatId || isSending}
+                disabled={!selectedChatId || isSending || questionMode !== null}
               />
               <button
                 type="submit"
-                disabled={!selectedChatId || isSending || !input.trim()}
+                disabled={!selectedChatId || isSending || questionMode !== null || !input.trim()}
                 className="rounded-md bg-[color:var(--primary)] px-4 py-2 text-sm text-white disabled:opacity-60"
               >
-                {isSending ? "Sending..." : questionMode !== null ? "Answer" : "Send"}
+                {isSending ? "Sending..." : "Send"}
               </button>
             </div>
             {error ? (
@@ -1846,7 +1898,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
             <button
               type="button"
               onClick={() => void handleGenerateDiagrams()}
-              disabled={!selectedChatId || isSending || isGeneratingDiagrams || !draftSections.length}
+              disabled={!selectedChatId || isSending || isGeneratingDiagrams || !hasRenderableDraftParts || questionMode !== null}
               className="rounded-md bg-[color:var(--surface-lowest)] px-3 py-1.5 text-xs font-medium text-[color:var(--foreground)] ring-1 ring-[color:var(--outline-variant)]/35 hover:bg-[color:var(--surface-low)] disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isGeneratingDiagrams ? "Generating diagrams…" : "Generate diagrams"}
@@ -1854,52 +1906,52 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
           </div>
 
           <div className="mt-3 space-y-3">
-            {draftSections.length === 0 ? (
+            {visibleDraftSections.length === 0 ? (
               <div className="rounded-md bg-[color:var(--surface-lowest)] p-3 text-xs text-[color:var(--on-surface-variant)] ring-1 ring-[color:var(--outline-variant)]/35">
                 No drafted sections yet.
               </div>
             ) : (
-              draftSections.map((section) => (
+              visibleDraftSections.map((section) => (
                 <div key={section.key} className="rounded-md bg-[color:var(--surface-lowest)] p-3 ring-1 ring-[color:var(--outline-variant)]/35">
                   <h3 className="text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--on-surface-variant)]">
                     {section.title}
                   </h3>
 
                   <div className="mt-2 space-y-2">
-                    {section.parts.map((part) => {
-                      const isSelected = selectedDraftPart?.id === part.id;
-                      const mermaidChart = extractFirstMermaidChart(part.content);
-                      const isTitleOnly = !hasDraftPartBodyContent(part.content);
+                    {section.parts.length === 0 ? (
+                      <p className="text-xs text-[color:var(--on-surface-variant)]">
+                        Drafting content for this section...
+                      </p>
+                    ) : (
+                      section.parts.map((part, partIndex) => {
+                        const isSelected = selectedDraftPart?.id === part.id;
+                        const mermaidChart = extractFirstMermaidChart(part.content);
 
-                      return (
-                        <button
-                          key={part.id}
-                          type="button"
-                          onClick={() => setSelectedDraftPart(part)}
-                          disabled={questionMode !== null || isSending || isTitleOnly}
-                          className={`block w-full rounded-xl border px-3 py-2 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-                            isSelected
-                              ? "bg-[color:var(--surface-low)] ring-[color:var(--primary)]/45"
-                              : "bg-[color:var(--surface-low)] ring-[color:var(--outline-variant)]/30 hover:bg-[color:var(--surface-lowest)]"
-                          }`}
-                        >
-                          <p className="text-xs font-medium text-[color:var(--foreground)]">{part.title}</p>
-                          <p className="mt-1 max-h-16 overflow-hidden text-xs leading-relaxed text-[color:var(--on-surface-variant)]">
-                            {part.preview}
-                          </p>
-                          {isTitleOnly ? (
-                            <p className="mt-1 text-[11px] text-[color:var(--on-surface-variant)]">
-                              Add details before selecting this section.
+                        return (
+                          <button
+                            key={`${part.id}-${partIndex}`}
+                            type="button"
+                            onClick={() => setSelectedDraftPart(part)}
+                            disabled={questionMode !== null || isSending}
+                            className={`block w-full rounded-xl border px-3 py-2 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                              isSelected
+                                ? "bg-[color:var(--surface-low)] ring-[color:var(--primary)]/45"
+                                : "bg-[color:var(--surface-low)] ring-[color:var(--outline-variant)]/30 hover:bg-[color:var(--surface-lowest)]"
+                            }`}
+                          >
+                            <p className="text-xs font-medium text-[color:var(--foreground)]">{part.title}</p>
+                            <p className="mt-1 max-h-16 overflow-hidden text-xs leading-relaxed text-[color:var(--on-surface-variant)]">
+                              {part.preview}
                             </p>
-                          ) : null}
-                          {mermaidChart ? (
-                            <div className="mt-2 pointer-events-none rounded-lg bg-[color:var(--surface-lowest)] p-2 ring-1 ring-[color:var(--outline-variant)]/35">
-                              <MermaidBlock chart={mermaidChart} />
-                            </div>
-                          ) : null}
-                        </button>
-                      );
-                    })}
+                            {mermaidChart ? (
+                              <div className="mt-2 pointer-events-none rounded-lg bg-[color:var(--surface-lowest)] p-2 ring-1 ring-[color:var(--outline-variant)]/35">
+                                <MermaidBlock chart={mermaidChart} />
+                              </div>
+                            ) : null}
+                          </button>
+                        );
+                      })
+                    )}
                   </div>
                 </div>
               ))

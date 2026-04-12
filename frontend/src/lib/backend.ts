@@ -58,9 +58,13 @@ export function normalizeClarificationQuestions(rawQuestions: unknown): Clarific
     }
 
     const suggestedOptions = Array.isArray(candidate.suggested_options)
-      ? candidate.suggested_options
-          .map((option) => (typeof option === "string" ? option.trim() : ""))
-          .filter(Boolean)
+      ? Array.from(
+          new Set(
+            candidate.suggested_options
+              .map((option) => (typeof option === "string" ? option.trim() : ""))
+              .filter(Boolean),
+          ),
+        )
       : [];
 
     return [
