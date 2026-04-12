@@ -917,6 +917,11 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
     selectedChatIdRef.current = selectedChatId;
   }, [selectedChatId]);
 
+  const selectChat = useCallback((chatId: string | null) => {
+    selectedChatIdRef.current = chatId;
+    setSelectedChatId(chatId);
+  }, []);
+
   const activeBackendNodeRef = useRef(activeBackendNode);
   useEffect(() => {
     activeBackendNodeRef.current = activeBackendNode;
@@ -944,6 +949,10 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
       sectionStreamRef.current = stream;
 
       stream.addEventListener("sections", (event) => {
+        if (sectionStreamRef.current !== stream || selectedChatIdRef.current !== chatId) {
+          return;
+        }
+
         let payload: SectionStreamPayload = {};
         try {
           payload = JSON.parse((event as MessageEvent).data) as SectionStreamPayload;
@@ -979,10 +988,16 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
       });
 
       stream.addEventListener("done", () => {
+        if (sectionStreamRef.current !== stream) {
+          return;
+        }
         stopSectionStreaming();
       });
 
       stream.addEventListener("error", () => {
+        if (sectionStreamRef.current !== stream) {
+          return;
+        }
         stopSectionStreaming();
       });
     },
@@ -992,6 +1007,10 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
   const pollActiveRun = useCallback(
     async (chatId: string) => {
       stopRunPolling();
+
+      if (selectedChatIdRef.current !== chatId) {
+        return;
+      }
 
       try {
         const response = await fetch(`/api/chats/${chatId}/runs/active`, {
@@ -1006,6 +1025,11 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
 
         const payload = (await response.json()) as { run: ActiveRunSummary | null };
         const run = payload.run;
+
+        if (selectedChatIdRef.current !== chatId) {
+          return;
+        }
+
         setActiveRun(run);
 
         if (run?.chatTitle && run.chatTitle.trim()) {
@@ -1057,6 +1081,9 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
           }
           setIsSending(true);
           runPollTimerRef.current = window.setTimeout(() => {
+            if (selectedChatIdRef.current !== chatId) {
+              return;
+            }
             void pollActiveRun(chatId);
           }, 2000);
           return;
@@ -1082,8 +1109,16 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
           });
         }
 
+        if (selectedChatIdRef.current !== chatId) {
+          return;
+        }
+
         await loadChatDetails(chatId);
       } catch (caughtError) {
+        if (selectedChatIdRef.current !== chatId) {
+          return;
+        }
+
         const message =
           caughtError instanceof Error
             ? caughtError.message
@@ -1125,7 +1160,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
 
       if (nextChats.length > 0) {
         const initialId = selectedChatId ?? nextChats[0].id;
-        setSelectedChatId(initialId);
+        selectChat(initialId);
         await loadChatDetails(initialId);
       }
     } catch (caughtError) {
@@ -1137,7 +1172,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
     }
     // loadChatDetails is intentionally excluded to avoid re-fetch loops.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedChatId]);
+  }, [selectedChatId, selectChat]);
 
   useEffect(() => {
     void loadChats();
@@ -1157,8 +1192,9 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
       const payload = await response.json();
       const newChat = payload.chat as ChatListItem;
       setChats((prev) => [newChat, ...prev]);
-      setSelectedChatId(newChat.id);
+      selectChat(newChat.id);
       setMessages([]);
+      setIsSending(false);
       setDocumentText("");
       setStateJson(null);
       setBackendStatuses([]);
@@ -1167,6 +1203,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
       setActiveBackendNode(null);
       setSelectedDraftPart(null);
       setActiveRun(null);
+      setIsGeneratingDiagrams(false);
     } catch (caughtError) {
       const message =
         caughtError instanceof Error ? caughtError.message : "Failed to create chat.";
@@ -1188,9 +1225,17 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
       }
 
       const payload = (await response.json()) as ChatDetails;
+
+      if (selectedChatIdRef.current !== chatId) {
+        return;
+      }
+
       setMessages(payload.chat.messages);
       setDocumentText(payload.chat.currentDocument || "");
       setStateJson(payload.chat.stateJson || null);
+      setIsSending(false);
+      setIsGeneratingDiagrams(false);
+      setActiveRun(null);
       setBackendStatuses([]);
       setLiveSectionDrafts({});
       setQuestionMode(null);
@@ -1204,6 +1249,11 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
       if (runResponse.ok) {
         const runPayload = (await runResponse.json()) as { run: ActiveRunSummary | null };
         const run = runPayload.run;
+
+        if (selectedChatIdRef.current !== chatId) {
+          return;
+        }
+
         setActiveRun(run);
 
         if (run?.status === "RUNNING") {
@@ -1222,13 +1272,24 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
           });
         }
       } else {
+        if (selectedChatIdRef.current !== chatId) {
+          return;
+        }
+
         setActiveRun(null);
+        setIsSending(false);
         setIsGeneratingDiagrams(false);
       }
     } catch (caughtError) {
+      if (selectedChatIdRef.current !== chatId) {
+        return;
+      }
+
       const message =
         caughtError instanceof Error ? caughtError.message : "Failed to load messages.";
       setError(message);
+      setIsSending(false);
+      setIsGeneratingDiagrams(false);
     }
   }
 
@@ -1255,12 +1316,13 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
 
       if (selectedChatId === chatId) {
         const nextChat = remainingChats[0] ?? null;
-        setSelectedChatId(nextChat?.id ?? null);
+        selectChat(nextChat?.id ?? null);
 
         if (nextChat) {
           await loadChatDetails(nextChat.id);
         } else {
           setMessages([]);
+          setIsSending(false);
           setDocumentText("");
           setStateJson(null);
           setBackendStatuses([]);
@@ -1268,6 +1330,8 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
           setQuestionMode(null);
           setActiveBackendNode(null);
           setSelectedDraftPart(null);
+          setActiveRun(null);
+          setIsGeneratingDiagrams(false);
         }
       }
     } catch (caughtError) {
@@ -1730,7 +1794,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
                 >
                   <button
                     onClick={() => {
-                      setSelectedChatId(chat.id);
+                      selectChat(chat.id);
                       void loadChatDetails(chat.id);
                     }}
                     className={`min-w-0 flex-1 text-left ${isActive ? "text-white" : "text-[color:var(--foreground)]"}`}
