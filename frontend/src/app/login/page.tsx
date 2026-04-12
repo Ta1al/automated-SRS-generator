@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 
 import { ThemeToggle } from "@/components/theme-toggle";
 import { extractHttpErrorMessage } from "@/lib/http";
@@ -13,6 +13,11 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [isHydrated, setIsHydrated] = useState(false);
+
+  useEffect(() => {
+    setIsHydrated(true);
+  }, []);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -64,43 +69,53 @@ export default function LoginPage() {
           <h2 className="font-headline text-2xl font-semibold text-[color:var(--primary)]">Log in</h2>
           <p className="mt-2 text-sm text-[color:var(--on-surface-variant)]">Access your SRS workspace and continue where you left off.</p>
 
-          <form onSubmit={onSubmit} className="mt-6 space-y-4">
-            <label className="block text-sm font-medium text-[color:var(--on-surface-variant)]">
-              <span>Email</span>
-              <input
-                className="field-input mt-1 w-full rounded-xl px-3 py-2 ring-1 ring-[color:var(--outline-variant)]/50 outline-none"
-                type="email"
-                required
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                suppressHydrationWarning
-                autoComplete="email"
-              />
-            </label>
+          {isHydrated ? (
+            <form onSubmit={onSubmit} className="mt-6 space-y-4">
+              <label className="block text-sm font-medium text-[color:var(--on-surface-variant)]">
+                <span>Email</span>
+                <input
+                  className="field-input mt-1 w-full rounded-xl px-3 py-2 ring-1 ring-[color:var(--outline-variant)]/50 outline-none"
+                  type="email"
+                  required
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  autoComplete="email"
+                  data-lpignore="true"
+                  data-1p-ignore="true"
+                />
+              </label>
 
-            <label className="block text-sm font-medium text-[color:var(--on-surface-variant)]">
-              <span>Password</span>
-              <input
-                className="field-input mt-1 w-full rounded-xl px-3 py-2 ring-1 ring-[color:var(--outline-variant)]/50 outline-none"
-                type="password"
-                required
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                suppressHydrationWarning
-                autoComplete="current-password"
-              />
-            </label>
+              <label className="block text-sm font-medium text-[color:var(--on-surface-variant)]">
+                <span>Password</span>
+                <input
+                  className="field-input mt-1 w-full rounded-xl px-3 py-2 ring-1 ring-[color:var(--outline-variant)]/50 outline-none"
+                  type="password"
+                  required
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  autoComplete="current-password"
+                  data-lpignore="true"
+                  data-1p-ignore="true"
+                />
+              </label>
 
-            {error ? <p role="alert" className="error-banner rounded-xl px-3 py-2 text-sm">{error}</p> : null}
+              {error ? <p role="alert" className="error-banner rounded-xl px-3 py-2 text-sm">{error}</p> : null}
 
-            <button
-              type="submit"
-              disabled={isLoading}
-              className="w-full rounded-xl bg-[color:var(--primary)] px-3 py-2 text-sm font-semibold text-[color:var(--on-primary)] transition-transform hover:-translate-y-0.5 disabled:opacity-60"
-            >
-              {isLoading ? "Signing you in..." : "Login"}
-            </button>
-          </form>
+              <button
+                type="submit"
+                disabled={isLoading}
+                className="w-full rounded-xl bg-[color:var(--primary)] px-3 py-2 text-sm font-semibold text-[color:var(--on-primary)] transition-transform hover:-translate-y-0.5 disabled:opacity-60"
+              >
+                {isLoading ? "Signing you in..." : "Login"}
+              </button>
+            </form>
+          ) : (
+            <div aria-hidden="true" className="mt-6 space-y-4">
+              <div className="h-14 w-full rounded-xl bg-[color:var(--surface-low)]/70" />
+              <div className="h-14 w-full rounded-xl bg-[color:var(--surface-low)]/70" />
+              <div className="h-10 w-full rounded-xl bg-[color:var(--surface-low)]/70" />
+            </div>
+          )}
 
           <p className="mt-4 text-sm text-[color:var(--on-surface-variant)]">
             No account? <Link className="underline decoration-dotted underline-offset-4" href="/signup">Create one</Link>
