@@ -1,42 +1,124 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f8f9fa;
-  --foreground: #191c1d;
-  --surface: #f8f9fa;
-  --surface-container: #edeeef;
-  --surface-low: #f3f4f5;
-  --surface-lowest: #ffffff;
-  --surface-highest: #e1e3e4;
-  --outline-variant: #c4c6d0;
-  --primary: #000e24;
-  --primary-container: #00234b;
-  --on-primary: #ffffff;
-  --on-surface-variant: #43474e;
+  color-scheme: light;
+  --background: #f7f3ea;
+  --foreground: #1d2328;
+  --surface: #f7f3ea;
+  --surface-container: #ede5d6;
+  --surface-low: #f2ecdf;
+  --surface-lowest: #fffdf8;
+  --surface-highest: #e3d8c5;
+  --outline-variant: #c5b9a5;
+  --primary: #0f4f60;
+  --primary-container: #1d677a;
+  --on-primary: #f4fdff;
+  --on-surface-variant: #4a5a64;
+  --danger: #bc3f3f;
+  --danger-soft: #fde8e8;
+  --success: #1f7e48;
+  --shadow-color: rgba(10, 30, 38, 0.15);
+}
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --background: #0f161a;
+  --foreground: #e5edf1;
+  --surface: #0f161a;
+  --surface-container: #1b262d;
+  --surface-low: #142027;
+  --surface-lowest: #202d36;
+  --surface-highest: #2a3841;
+  --outline-variant: #4a5a66;
+  --primary: #9fd9e7;
+  --primary-container: #6fc8df;
+  --on-primary: #042b37;
+  --on-surface-variant: #adbec9;
+  --danger: #ff8f8f;
+  --danger-soft: rgba(123, 34, 34, 0.25);
+  --success: #90e5b5;
+  --shadow-color: rgba(0, 0, 0, 0.4);
+}
+
+* {
+  border-color: color-mix(in oklab, var(--outline-variant) 45%, transparent);
 }
 
 body {
-  background-color: var(--surface);
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 12% 12%, color-mix(in oklab, var(--primary) 18%, transparent), transparent 32%),
+    radial-gradient(circle at 88% 6%, color-mix(in oklab, var(--surface-highest) 80%, transparent), transparent 34%),
+    linear-gradient(180deg, color-mix(in oklab, var(--surface-lowest) 88%, transparent), var(--surface));
   color: var(--foreground);
-  font-family: var(--font-inter), Arial, Helvetica, sans-serif;
+  font-family: var(--font-space), "Segoe UI", sans-serif;
+  transition: background-color 220ms ease, color 220ms ease;
 }
 
 .font-headline,
 .font-label {
-  font-family: var(--font-inter), Arial, Helvetica, sans-serif;
+  font-family: var(--font-space), "Segoe UI", sans-serif;
 }
 
 .font-body {
-  font-family: var(--font-newsreader), Georgia, serif;
+  font-family: var(--font-newsreader), Cambria, serif;
 }
 
 .app-panel {
-  background: var(--surface-lowest);
-  border: 1px solid color-mix(in oklab, var(--outline-variant) 30%, transparent);
-  box-shadow: 0 12px 32px rgba(25, 28, 29, 0.06);
+  background: color-mix(in oklab, var(--surface-lowest) 94%, transparent);
+  border: 1px solid color-mix(in oklab, var(--outline-variant) 45%, transparent);
+  box-shadow: 0 14px 38px var(--shadow-color);
 }
 
 .app-glass {
-  background: color-mix(in oklab, var(--surface-highest) 80%, transparent);
+  background: color-mix(in oklab, var(--surface-highest) 72%, transparent);
   backdrop-filter: blur(12px);
+}
+
+.field-input {
+  background: color-mix(in oklab, var(--surface-low) 92%, transparent);
+  color: var(--foreground);
+  transition: box-shadow 150ms ease, background-color 150ms ease;
+}
+
+.field-input::placeholder {
+  color: color-mix(in oklab, var(--on-surface-variant) 76%, transparent);
+}
+
+.field-input:focus {
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--primary) 45%, transparent);
+}
+
+.error-banner {
+  border: 1px solid color-mix(in oklab, var(--danger) 45%, transparent);
+  background: color-mix(in oklab, var(--danger-soft) 90%, transparent);
+  color: color-mix(in oklab, var(--danger) 82%, black);
+}
+
+.status-pill {
+  border: 1px solid color-mix(in oklab, var(--outline-variant) 45%, transparent);
+  background: color-mix(in oklab, var(--surface-lowest) 88%, transparent);
+}
+
+.stagger-enter {
+  animation: fade-slide 320ms ease both;
+}
+
+@keyframes fade-slide {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 1ms !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
 }

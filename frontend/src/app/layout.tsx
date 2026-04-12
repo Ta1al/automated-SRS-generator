@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
-import { Inter, Newsreader } from "next/font/google";
+import { Newsreader, Space_Grotesk } from "next/font/google";
 import "./globals.css";
 
-const inter = Inter({
-  variable: "--font-inter",
+const space = Space_Grotesk({
+  variable: "--font-space",
   subsets: ["latin"],
 });
 
@@ -17,14 +17,33 @@ export const metadata: Metadata = {
   description: "Landing, authentication, and chat workspace for AI-driven SRS generation",
 };
 
+const themeInitScript = `
+(() => {
+  try {
+    const storageKey = "asg-theme";
+    const storedTheme = window.localStorage.getItem(storageKey);
+    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    const resolvedTheme = storedTheme === "dark" || storedTheme === "light"
+      ? storedTheme
+      : prefersDark
+        ? "dark"
+        : "light";
+    document.documentElement.setAttribute("data-theme", resolvedTheme);
+  } catch {
+    document.documentElement.setAttribute("data-theme", "light");
+  }
+})();
+`;
+
 export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body className={`${inter.variable} ${newsreader.variable} antialiased`}>
+    <html lang="en" suppressHydrationWarning>
+      <body className={`${space.variable} ${newsreader.variable} antialiased`}>
+        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
         {children}
       </body>
     </html>
