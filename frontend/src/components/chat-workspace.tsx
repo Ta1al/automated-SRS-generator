@@ -19,6 +19,9 @@ type ChatListItem = {
   currentDocument: string | null;
   stateJson: Record<string, unknown> | null;
   updatedAt: string;
+  _count?: {
+    messages: number;
+  };
 };
 
 type ChatMessage = {
@@ -1144,6 +1147,21 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
     [chats, selectedChatId],
   );
 
+  const existingEmptyChatId = useMemo(() => {
+    for (const chat of chats) {
+      const messageCount =
+        chat.id === selectedChatId ? messages.length : chat._count?.messages ?? 0;
+
+      if (messageCount === 0) {
+        return chat.id;
+      }
+    }
+
+    return null;
+  }, [chats, selectedChatId, messages.length]);
+
+  const hasExistingEmptyChat = existingEmptyChatId !== null;
+
   const loadChats = useCallback(async () => {
     setIsLoading(true);
     setError("");
@@ -1179,6 +1197,16 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
   }, [loadChats]);
 
   async function createChat() {
+    if (existingEmptyChatId) {
+      if (selectedChatId !== existingEmptyChatId) {
+        selectChat(existingEmptyChatId);
+        await loadChatDetails(existingEmptyChatId);
+      }
+
+      setError("You already have an empty chat. Continue it or delete it before creating another.");
+      return;
+    }
+
     stopRunPolling();
     stopSectionStreaming();
     setError("");
@@ -1190,7 +1218,13 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
       }
 
       const payload = await response.json();
-      const newChat = payload.chat as ChatListItem;
+      const createdChat = payload.chat as ChatListItem;
+      const newChat: ChatListItem = {
+        ...createdChat,
+        _count: {
+          messages: createdChat._count?.messages ?? 0,
+        },
+      };
       setChats((prev) => [newChat, ...prev]);
       selectChat(newChat.id);
       setMessages([]);
@@ -1229,6 +1263,22 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
       if (selectedChatIdRef.current !== chatId) {
         return;
       }
+
+      setChats((prev) =>
+        prev.map((chat) =>
+          chat.id === chatId
+            ? {
+                ...chat,
+                title: payload.chat.title,
+                currentDocument: payload.chat.currentDocument,
+                stateJson: payload.chat.stateJson,
+                _count: {
+                  messages: payload.chat.messages.length,
+                },
+              }
+            : chat,
+        ),
+      );
 
       setMessages(payload.chat.messages);
       setDocumentText(payload.chat.currentDocument || "");
@@ -1769,7 +1819,13 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
             <h2 className="text-sm font-semibold text-[color:var(--primary)]">Previous chats</h2>
             <button
               onClick={createChat}
-              className="rounded-md bg-[color:var(--primary)] px-2 py-1 text-xs text-white"
+              disabled={hasExistingEmptyChat}
+              title={
+                hasExistingEmptyChat
+                  ? "You already have an empty chat. Continue it or delete it before creating another."
+                  : "Create a new chat"
+              }
+              className="rounded-md bg-[color:var(--primary)] px-2 py-1 text-xs text-white disabled:cursor-not-allowed disabled:opacity-60"
             >
               New
             </button>
