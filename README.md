@@ -78,7 +78,7 @@ pip install -r requirements.txt
 
 ```powershell
 Copy-Item .env.example .env
-# Edit .env and set OPENROUTER_API_KEY
+# Edit .env and set OPENROUTER_API_KEY, MODEL_NAME, GUARDRAIL_MODEL_NAME
 # Optional DOCX metadata: DOCX_TITLE, DOCX_AUTHOR, DOCX_COMMENT
 ```
 

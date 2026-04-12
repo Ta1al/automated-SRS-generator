@@ -16,7 +16,15 @@ class Settings(BaseSettings):
 
     # LLM
     openrouter_api_key: str = Field(..., description="OpenRouter API key")
-    model_name: str = Field("openai/gpt-4o-mini", description="OpenRouter model slug")
+    model_name: str = Field(..., description="OpenRouter model slug")
+    guardrail_model_name: str = Field(
+        ...,
+        description="Lightweight OpenRouter model slug used only for guardrail classification",
+    )
+    guardrail_timeout_seconds: int = Field(
+        20,
+        description="Timeout in seconds for guardrail classifier model calls",
+    )
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     openrouter_referer: str = "https://github.com/automated-srs-generator"
 
