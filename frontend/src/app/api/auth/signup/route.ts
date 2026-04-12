@@ -7,6 +7,7 @@ import {
   createSessionToken,
   getSessionCookieOptions,
 } from "@/lib/auth";
+import { readJsonBody, routeErrorResponse } from "@/lib/api-route";
 import { prisma } from "@/lib/prisma";
 
 const signupSchema = z.object({
@@ -16,38 +17,42 @@ const signupSchema = z.object({
 });
 
 export async function POST(request: NextRequest) {
-  const body = await request.json();
-  const parsed = signupSchema.safeParse(body);
+  try {
+    const body = await readJsonBody(request);
+    const parsed = signupSchema.safeParse(body);
 
-  if (!parsed.success) {
-    return NextResponse.json({ error: "Invalid signup payload." }, { status: 400 });
+    if (!parsed.success) {
+      return NextResponse.json({ error: "Invalid signup payload." }, { status: 400 });
+    }
+
+    const { email, password, name } = parsed.data;
+
+    const existing = await prisma.user.findUnique({ where: { email } });
+    if (existing) {
+      return NextResponse.json({ error: "Email already in use." }, { status: 409 });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 12);
+    const user = await prisma.user.create({
+      data: {
+        email,
+        name,
+        passwordHash,
+      },
+    });
+
+    const token = await createSessionToken({ userId: user.id, email: user.email });
+    const response = NextResponse.json({
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+      },
+    });
+
+    response.cookies.set(COOKIE_NAME, token, await getSessionCookieOptions());
+    return response;
+  } catch (error) {
+    return routeErrorResponse(error, "Failed to sign up.");
   }
-
-  const { email, password, name } = parsed.data;
-
-  const existing = await prisma.user.findUnique({ where: { email } });
-  if (existing) {
-    return NextResponse.json({ error: "Email already in use." }, { status: 409 });
-  }
-
-  const passwordHash = await bcrypt.hash(password, 12);
-  const user = await prisma.user.create({
-    data: {
-      email,
-      name,
-      passwordHash,
-    },
-  });
-
-  const token = await createSessionToken({ userId: user.id, email: user.email });
-  const response = NextResponse.json({
-    user: {
-      id: user.id,
-      email: user.email,
-      name: user.name,
-    },
-  });
-
-  response.cookies.set(COOKIE_NAME, token, await getSessionCookieOptions());
-  return response;
 }

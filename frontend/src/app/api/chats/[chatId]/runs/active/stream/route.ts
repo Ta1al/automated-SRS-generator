@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { ChatRunStatus } from "@prisma/client";
 
 import { getSessionUser } from "@/lib/auth";
+import { routeErrorResponse } from "@/lib/api-route";
 import { backendFetch } from "@/lib/backend";
 import { prisma } from "@/lib/prisma";
 
@@ -41,39 +42,46 @@ async function sleep(ms: number) {
 }
 
 export async function GET(request: NextRequest, context: Context) {
-  const session = await getSessionUser();
-  if (!session) {
-    return new Response(toSseEvent("error", { message: "Unauthorized" }), {
-      status: 401,
-      headers: {
-        "Content-Type": "text/event-stream; charset=utf-8",
-        "Cache-Control": "no-cache, no-transform",
-        Connection: "keep-alive",
+  let chat: { id: string; backendThreadId: string };
+  try {
+    const session = await getSessionUser();
+    if (!session) {
+      return new Response(toSseEvent("error", { message: "Unauthorized" }), {
+        status: 401,
+        headers: {
+          "Content-Type": "text/event-stream; charset=utf-8",
+          "Cache-Control": "no-cache, no-transform",
+          Connection: "keep-alive",
+        },
+      });
+    }
+
+    const { chatId } = await context.params;
+    const resolvedChat = await prisma.chat.findFirst({
+      where: {
+        id: chatId,
+        userId: session.userId,
+      },
+      select: {
+        id: true,
+        backendThreadId: true,
       },
     });
-  }
 
-  const { chatId } = await context.params;
-  const chat = await prisma.chat.findFirst({
-    where: {
-      id: chatId,
-      userId: session.userId,
-    },
-    select: {
-      id: true,
-      backendThreadId: true,
-    },
-  });
+    if (!resolvedChat) {
+      return new Response(toSseEvent("error", { message: "Chat not found" }), {
+        status: 404,
+        headers: {
+          "Content-Type": "text/event-stream; charset=utf-8",
+          "Cache-Control": "no-cache, no-transform",
+          Connection: "keep-alive",
+        },
+      });
+    }
 
-  if (!chat) {
-    return new Response(toSseEvent("error", { message: "Chat not found" }), {
-      status: 404,
-      headers: {
-        "Content-Type": "text/event-stream; charset=utf-8",
-        "Cache-Control": "no-cache, no-transform",
-        Connection: "keep-alive",
-      },
-    });
+    chat = resolvedChat;
+  } catch (error) {
+    return routeErrorResponse(error, "Failed to initialize section stream.");
   }
 
   const encoder = new TextEncoder();

@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { z } from "zod";
 
 import { getSessionUser } from "@/lib/auth";
+import { readJsonBody, routeErrorResponse } from "@/lib/api-route";
 import {
   getRunSummary,
   startBackgroundChatRun,
@@ -37,90 +38,94 @@ function formatStoredUserMessage(message: string, revisionTarget?: { title: stri
 }
 
 export async function POST(request: NextRequest, context: Context) {
-  const session = await getSessionUser();
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  try {
+    const session = await getSessionUser();
+    if (!session) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
-  const body = await request.json();
-  const parsed = interactSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json({ error: "Invalid message" }, { status: 400 });
-  }
+    const body = await readJsonBody(request);
+    const parsed = interactSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json({ error: "Invalid message" }, { status: 400 });
+    }
 
-  const { chatId } = await context.params;
-  const chat = await prisma.chat.findFirst({
-    where: {
-      id: chatId,
-      userId: session.userId,
-    },
-  });
-
-  if (!chat) {
-    return NextResponse.json({ error: "Chat not found" }, { status: 404 });
-  }
-
-  const existingRun = await prisma.chatRun.findFirst({
-    where: {
-      chatId: chat.id,
-      status: "RUNNING",
-    },
-    orderBy: {
-      startedAt: "desc",
-    },
-    select: {
-      id: true,
-    },
-  });
-
-  if (existingRun) {
-    const run = await getRunSummary(existingRun.id);
-    return NextResponse.json(
-      {
-        error: "A generation run is already in progress for this chat.",
-        run,
+    const { chatId } = await context.params;
+    const chat = await prisma.chat.findFirst({
+      where: {
+        id: chatId,
+        userId: session.userId,
       },
-      { status: 409 },
-    );
-  }
+    });
 
-  await prisma.chatMessage.create({
-    data: {
+    if (!chat) {
+      return NextResponse.json({ error: "Chat not found" }, { status: 404 });
+    }
+
+    const existingRun = await prisma.chatRun.findFirst({
+      where: {
+        chatId: chat.id,
+        status: "RUNNING",
+      },
+      orderBy: {
+        startedAt: "desc",
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (existingRun) {
+      const run = await getRunSummary(existingRun.id);
+      return NextResponse.json(
+        {
+          error: "A generation run is already in progress for this chat.",
+          run,
+        },
+        { status: 409 },
+      );
+    }
+
+    await prisma.chatMessage.create({
+      data: {
+        chatId: chat.id,
+        role: "USER",
+        content: formatStoredUserMessage(parsed.data.message, parsed.data.revisionTarget),
+      },
+    });
+
+    const initialRunData: {
+      chatId: string;
+      inputMessage: string;
+      revisionTarget?: Prisma.InputJsonValue;
+    } = {
       chatId: chat.id,
-      role: "USER",
-      content: formatStoredUserMessage(parsed.data.message, parsed.data.revisionTarget),
-    },
-  });
+      inputMessage: parsed.data.message,
+    };
 
-  const initialRunData: {
-    chatId: string;
-    inputMessage: string;
-    revisionTarget?: Prisma.InputJsonValue;
-  } = {
-    chatId: chat.id,
-    inputMessage: parsed.data.message,
-  };
+    if (parsed.data.revisionTarget) {
+      initialRunData.revisionTarget = parsed.data.revisionTarget as Prisma.InputJsonValue;
+    }
 
-  if (parsed.data.revisionTarget) {
-    initialRunData.revisionTarget = parsed.data.revisionTarget as Prisma.InputJsonValue;
+    const run = await prisma.chatRun.create({
+      data: initialRunData,
+    });
+
+    void startBackgroundChatRun({
+      runId: run.id,
+      chatId: chat.id,
+      message: parsed.data.message,
+      revisionTarget: parsed.data.revisionTarget,
+      generateDiagrams: parsed.data.generateDiagrams,
+      diagramsOnly: parsed.data.diagramsOnly,
+    });
+
+    const runSummary = await getRunSummary(run.id);
+
+    return NextResponse.json({
+      run: runSummary,
+    });
+  } catch (error) {
+    return routeErrorResponse(error, "Failed to start chat generation.");
   }
-
-  const run = await prisma.chatRun.create({
-    data: initialRunData,
-  });
-
-  void startBackgroundChatRun({
-    runId: run.id,
-    chatId: chat.id,
-    message: parsed.data.message,
-    revisionTarget: parsed.data.revisionTarget,
-    generateDiagrams: parsed.data.generateDiagrams,
-    diagramsOnly: parsed.data.diagramsOnly,
-  });
-
-  const runSummary = await getRunSummary(run.id);
-
-  return NextResponse.json({
-    run: runSummary,
-  });
 }
