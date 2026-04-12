@@ -4,6 +4,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 
+import { ThemeToggle } from "@/components/theme-toggle";
+import { extractHttpErrorMessage } from "@/lib/http";
+
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
@@ -26,8 +29,7 @@ export default function LoginPage() {
       });
 
       if (!response.ok) {
-        const payload = await response.json();
-        throw new Error(payload.error || "Login failed.");
+        throw new Error(await extractHttpErrorMessage(response, "Login failed."));
       }
 
       router.push("/chat");
@@ -42,50 +44,68 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-md items-center px-6">
-      <div className="app-panel w-full rounded-xl p-8">
-        <h1 className="font-headline text-2xl font-semibold text-[color:var(--primary)]">Login</h1>
-        <p className="mt-2 text-sm text-[color:var(--on-surface-variant)]">Continue your SRS session.</p>
+    <div className="relative mx-auto flex min-h-screen w-full max-w-6xl items-center px-6 py-10">
+      <div className="absolute top-6 right-6">
+        <ThemeToggle size="sm" />
+      </div>
 
-        <form onSubmit={onSubmit} className="mt-6 space-y-4">
-          <label className="block text-sm font-medium text-[color:var(--on-surface-variant)]">
-            <span>Email</span>
-            <input
-              className="mt-1 w-full rounded-md bg-[color:var(--surface-low)] px-3 py-2 ring-1 ring-[color:var(--outline-variant)]/40 outline-none focus:ring-2 focus:ring-[color:var(--primary)]"
-              type="email"
-              required
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              suppressHydrationWarning
-            />
-          </label>
+      <div className="grid w-full gap-6 md:grid-cols-[1.1fr_1fr]">
+        <section className="hidden rounded-3xl border border-[color:var(--outline-variant)]/30 bg-[color:var(--surface-lowest)]/70 p-10 shadow-[0_20px_45px_var(--shadow-color)] backdrop-blur md:block">
+          <p className="text-xs font-semibold tracking-[0.22em] text-[color:var(--on-surface-variant)] uppercase">Welcome Back</p>
+          <h1 className="mt-5 font-headline text-4xl font-semibold leading-tight text-[color:var(--primary)]">
+            Continue refining your SRS drafts.
+          </h1>
+          <p className="mt-4 font-body text-lg text-[color:var(--on-surface-variant)]">
+            Your latest chats, section revisions, and generated diagrams will be ready as soon as you sign in.
+          </p>
+        </section>
 
-          <label className="block text-sm font-medium text-[color:var(--on-surface-variant)]">
-            <span>Password</span>
-            <input
-              className="mt-1 w-full rounded-md bg-[color:var(--surface-low)] px-3 py-2 ring-1 ring-[color:var(--outline-variant)]/40 outline-none focus:ring-2 focus:ring-[color:var(--primary)]"
-              type="password"
-              required
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              suppressHydrationWarning
-            />
-          </label>
+        <div className="app-panel w-full rounded-3xl p-8 md:p-10">
+          <h2 className="font-headline text-2xl font-semibold text-[color:var(--primary)]">Log in</h2>
+          <p className="mt-2 text-sm text-[color:var(--on-surface-variant)]">Access your SRS workspace and continue where you left off.</p>
 
-          {error ? <p className="text-sm text-red-600">{error}</p> : null}
+          <form onSubmit={onSubmit} className="mt-6 space-y-4">
+            <label className="block text-sm font-medium text-[color:var(--on-surface-variant)]">
+              <span>Email</span>
+              <input
+                className="field-input mt-1 w-full rounded-xl px-3 py-2 ring-1 ring-[color:var(--outline-variant)]/50 outline-none"
+                type="email"
+                required
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                suppressHydrationWarning
+                autoComplete="email"
+              />
+            </label>
 
-          <button
-            type="submit"
-            disabled={isLoading}
-            className="w-full rounded-md bg-[color:var(--primary)] px-3 py-2 text-white disabled:opacity-60"
-          >
-            {isLoading ? "Logging in..." : "Login"}
-          </button>
-        </form>
+            <label className="block text-sm font-medium text-[color:var(--on-surface-variant)]">
+              <span>Password</span>
+              <input
+                className="field-input mt-1 w-full rounded-xl px-3 py-2 ring-1 ring-[color:var(--outline-variant)]/50 outline-none"
+                type="password"
+                required
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                suppressHydrationWarning
+                autoComplete="current-password"
+              />
+            </label>
 
-        <p className="mt-4 text-sm text-[color:var(--on-surface-variant)]">
-          No account? <Link className="underline" href="/signup">Create one</Link>
-        </p>
+            {error ? <p role="alert" className="error-banner rounded-xl px-3 py-2 text-sm">{error}</p> : null}
+
+            <button
+              type="submit"
+              disabled={isLoading}
+              className="w-full rounded-xl bg-[color:var(--primary)] px-3 py-2 text-sm font-semibold text-[color:var(--on-primary)] transition-transform hover:-translate-y-0.5 disabled:opacity-60"
+            >
+              {isLoading ? "Signing you in..." : "Login"}
+            </button>
+          </form>
+
+          <p className="mt-4 text-sm text-[color:var(--on-surface-variant)]">
+            No account? <Link className="underline decoration-dotted underline-offset-4" href="/signup">Create one</Link>
+          </p>
+        </div>
       </div>
     </div>
   );
