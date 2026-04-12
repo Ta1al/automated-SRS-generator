@@ -10,6 +10,8 @@ import {
   formatClarificationPrompt,
   normalizeClarificationQuestions,
 } from "@/lib/backend";
+import { ThemeToggle } from "@/components/theme-toggle";
+import { extractHttpErrorMessage } from "@/lib/http";
 
 type ChatListItem = {
   id: string;
@@ -94,33 +96,25 @@ const PARALLEL_DRAFT_NODES = new Set([
   "draft_section_3_fr",
   "draft_section_3_nfr",
 ]);
-const DRAFT_NODE_TO_SECTION_KEY: Record<string, string> = {
-  draft_section_1: "s1",
-  draft_section_2: "s2",
-  draft_section_3_iface: "s3_iface",
-  draft_section_3_fr: "s3_fr",
-  draft_section_3_nfr: "s3_nfr",
-  draft_section_4: "s4",
-};
 
 const NODE_LABELS: Record<string, string> = {
-  retrieve_rag_context: "Retrieved compliance context",
-  elicit_requirements: "the initial product outline",
-  evaluate_completeness: "Audited brief for missing requirements",
-  ask_clarifying_questions: "Prepared follow-up questions",
-  classify_requirements: "Classified requirements",
-  draft_section_3_fr: "Drafted functional requirements",
-  draft_section_3_nfr: "Drafted non-functional requirements",
-  draft_section_3_iface: "Drafted interface requirements",
-  draft_section_1: "Drafted introduction",
-  draft_section_2: "Drafted product overview",
-  draft_section_4: "Built verification matrix",
-  revise_selected_section: "Revised selected section",
-  generate_mermaid: "Generated diagrams",
-  validate_mermaid: "Validated diagrams",
-  correct_mermaid: "Corrected diagram syntax",
-  qa_review: "Ran QA review",
-  finalize_document: "Assembled the final document",
+  retrieve_rag_context: "retrieving standards context",
+  elicit_requirements: "distilling your initial brief",
+  evaluate_completeness: "checking requirement completeness",
+  ask_clarifying_questions: "preparing clarification prompts",
+  classify_requirements: "classifying requirement types",
+  draft_section_3_fr: "drafting functional requirements",
+  draft_section_3_nfr: "drafting non-functional requirements",
+  draft_section_3_iface: "drafting external interface requirements",
+  draft_section_1: "drafting the introduction",
+  draft_section_2: "drafting product overview",
+  draft_section_4: "building the verification matrix",
+  revise_selected_section: "revising the selected section",
+  generate_mermaid: "generating diagrams",
+  validate_mermaid: "validating diagram syntax",
+  correct_mermaid: "repairing diagram syntax",
+  qa_review: "running a quality review",
+  finalize_document: "assembling the final SRS",
 };
 
 function formatSectionTitle(key: string) {
@@ -264,7 +258,7 @@ function getWaitingOnLabel(statuses: BackendStatusEvent[], activeNode: string | 
   }
 
   if (statuses.length === 0) {
-    return "Submitting your request";
+    return "starting your generation run";
   }
 
   const finishedNodes = new Set(
@@ -273,13 +267,13 @@ function getWaitingOnLabel(statuses: BackendStatusEvent[], activeNode: string | 
   const latest = statuses[statuses.length - 1];
 
   if (latest.node === "elicit_requirements") {
-    return "Drafting the core requirements sections";
+    return "drafting core requirements sections";
   }
 
   if (PARALLEL_DRAFT_NODES.has(latest.node)) {
     const completedCount = [...PARALLEL_DRAFT_NODES].filter((node) => finishedNodes.has(node)).length;
     return completedCount < PARALLEL_DRAFT_NODES.size
-      ? `Drafting sections in parallel (${completedCount}/${PARALLEL_DRAFT_NODES.size})`
+      ? `drafting sections in parallel (${completedCount}/${PARALLEL_DRAFT_NODES.size})`
       : NODE_LABELS.draft_section_4;
   }
 
@@ -306,25 +300,25 @@ function getStatusLabel(event: BackendStatusEvent) {
 
 function formatEtaLabel(seconds: number | null) {
   if (seconds === null || Number.isNaN(seconds)) {
-    return "Estimating time remaining...";
+    return "Calibrating remaining time from live node timings...";
   }
 
   if (seconds <= 30) {
-    return "Estimated remaining: under a minute";
+    return "Almost there: under a minute remaining.";
   }
 
   const minutes = Math.floor(seconds / 60);
   const remainder = seconds % 60;
 
   if (minutes <= 0) {
-    return `Estimated remaining: ~${remainder}s`;
+    return `Approx. remaining: ${remainder}s`;
   }
 
   if (remainder === 0) {
-    return `Estimated remaining: ~${minutes}m`;
+    return `Approx. remaining: ${minutes}m`;
   }
 
-  return `Estimated remaining: ~${minutes}m ${remainder}s`;
+  return `Approx. remaining: ${minutes}m ${remainder}s`;
 }
 
 function MarkdownContent({ content }: { content: string }) {
@@ -820,24 +814,29 @@ function ReceivingBubble({
   const recentStatuses = statuses.slice(-3);
 
   return (
-    <div className="max-w-[85%] rounded-2xl bg-[color:var(--surface-highest)]/80 px-4 py-3 text-[color:var(--foreground)] backdrop-blur">
+    <div
+      className="max-w-[85%] rounded-2xl bg-[color:var(--surface-highest)]/78 px-4 py-3 text-[color:var(--foreground)] ring-1 ring-[color:var(--outline-variant)]/30 backdrop-blur"
+      aria-live="polite"
+    >
       <div className="flex items-start gap-3">
-        <span className="mt-0.5 h-4 w-4 animate-spin rounded-full border-2 border-black/15 border-t-black" />
+        <span className="mt-0.5 h-4 w-4 animate-spin rounded-full border-2 border-[color:var(--outline-variant)]/50 border-t-[color:var(--primary)]" />
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[color:var(--on-surface-variant)]">
-            Receiving SRS update
+            SRS generation in progress
           </p>
-          <p className="mt-1 text-sm leading-snug">Waiting on {waitingOn.toLowerCase()}.</p>
+          <p className="mt-1 text-sm leading-snug">
+            Now {waitingOn}.
+          </p>
           <p className="mt-1 text-xs text-[color:var(--on-surface-variant)]">{formatEtaLabel(etaSeconds)}</p>
         </div>
       </div>
 
       {recentStatuses.length > 0 ? (
         <div className="mt-3 flex flex-wrap gap-2">
-          {recentStatuses.map((status) => (
+          {recentStatuses.map((status, index) => (
             <span
-              key={`${status.node}-${status.status}`}
-              className="rounded-full bg-[color:var(--surface-lowest)] px-2.5 py-1 text-[11px] text-[color:var(--on-surface-variant)] ring-1 ring-[color:var(--outline-variant)]/35"
+              key={`${status.node}-${status.status}-${index}`}
+              className="status-pill rounded-full px-2.5 py-1 text-[11px] text-[color:var(--on-surface-variant)]"
             >
               {getStatusLabel(status)}
             </span>
@@ -1000,7 +999,9 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
         });
 
         if (!response.ok) {
-          throw new Error("Failed to fetch active generation status.");
+          throw new Error(
+            await extractHttpErrorMessage(response, "Failed to fetch active generation status."),
+          );
         }
 
         const payload = (await response.json()) as { run: ActiveRunSummary | null };
@@ -1067,7 +1068,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
         setActiveBackendNode(null);
 
         if (run.status === "FAILED") {
-          setError(run.errorMessage || "Failed to send message.");
+          setError(run.errorMessage || "Generation failed. Please retry your request.");
           setRetryPayload((prev) => prev);
           return;
         }
@@ -1086,12 +1087,14 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
         const message =
           caughtError instanceof Error
             ? caughtError.message
-            : "Failed to fetch active generation status.";
+            : "Failed to refresh active generation status.";
         setError(message);
         setIsSending(false);
         setIsGeneratingDiagrams(false);
       }
     },
+    // loadChatDetails is intentionally excluded to keep polling callback stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [startSectionStreaming, stopRunPolling, stopSectionStreaming],
   );
 
@@ -1113,7 +1116,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
     try {
       const response = await fetch("/api/chats", { cache: "no-store" });
       if (!response.ok) {
-        throw new Error("Failed to load chats.");
+        throw new Error(await extractHttpErrorMessage(response, "Failed to load chats."));
       }
 
       const payload = await response.json();
@@ -1132,6 +1135,8 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
     } finally {
       setIsLoading(false);
     }
+    // loadChatDetails is intentionally excluded to avoid re-fetch loops.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedChatId]);
 
   useEffect(() => {
@@ -1146,7 +1151,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
     try {
       const response = await fetch("/api/chats", { method: "POST" });
       if (!response.ok) {
-        throw new Error("Failed to create chat.");
+        throw new Error(await extractHttpErrorMessage(response, "Failed to create chat."));
       }
 
       const payload = await response.json();
@@ -1179,7 +1184,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
         cache: "no-store",
       });
       if (!response.ok) {
-        throw new Error("Failed to load messages.");
+        throw new Error(await extractHttpErrorMessage(response, "Failed to load messages."));
       }
 
       const payload = (await response.json()) as ChatDetails;
@@ -1242,7 +1247,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
       });
 
       if (!response.ok) {
-        throw new Error("Failed to delete chat.");
+        throw new Error(await extractHttpErrorMessage(response, "Failed to delete chat."));
       }
 
       const remainingChats = chats.filter((chat) => chat.id !== chatId);
@@ -1338,12 +1343,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
       });
 
       if (!response.ok) {
-        const payload = await response.json().catch(() => null);
-        const responseError =
-          payload && typeof payload === "object" && "error" in payload
-            ? String((payload as { error?: unknown }).error || "")
-            : "";
-        throw new Error(responseError || "Failed to send message.");
+        throw new Error(await extractHttpErrorMessage(response, "Failed to send message."));
       }
 
       const payload = (await response.json()) as { run?: ActiveRunSummary | null };
@@ -1379,7 +1379,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
     }
 
     if (questionMode !== null) {
-      setError("Please answer all clarification questions before generating diagrams.");
+      setError("Please answer the clarification questions before generating diagrams.");
       return;
     }
 
@@ -1424,7 +1424,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
     const sanitizedAnswers = questionMode.answers.map((answer) => answer.trim());
     const firstMissing = sanitizedAnswers.findIndex((answer) => !answer);
     if (firstMissing >= 0) {
-      setError(`Please answer question ${firstMissing + 1} before continuing.`);
+      setError(`Please answer question ${firstMissing + 1} to continue.`);
       return;
     }
 
@@ -1446,7 +1446,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
     event.preventDefault();
 
     if (questionMode !== null) {
-      setError("Use the clarification form above to answer follow-up questions.");
+      setError("Use the clarification form above to answer the follow-up questions.");
       return;
     }
 
@@ -1498,12 +1498,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
           "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         )
       ) {
-        const payload = await response.json().catch(() => null);
-        const responseError =
-          payload && typeof payload === "object" && "error" in payload
-            ? String((payload as { error?: unknown }).error || "")
-            : "";
-        throw new Error(responseError || "Failed to export DOCX.");
+        throw new Error(await extractHttpErrorMessage(response, "Failed to export DOCX."));
       }
 
       const blob = await response.blob();
@@ -1686,23 +1681,26 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
   }, [stopRunPolling, stopSectionStreaming]);
 
   return (
-    <div className="flex h-screen flex-col bg-[color:var(--surface)]">
-      <header className="flex items-center justify-between border-b border-[color:var(--outline-variant)]/35 bg-[color:var(--surface-lowest)] px-4 py-3">
+    <div className="flex h-dvh min-h-[640px] flex-col bg-[color:var(--surface)]">
+      <header className="flex items-center justify-between border-b border-[color:var(--outline-variant)]/35 bg-[color:var(--surface-lowest)]/92 px-4 py-3 backdrop-blur">
         <div>
           <h1 className="font-headline text-lg font-semibold text-[color:var(--primary)]">SRS Chat Workspace</h1>
           <p className="text-xs text-[color:var(--on-surface-variant)]">{userEmail}</p>
         </div>
-        <button
-          onClick={onLogout}
-          className="rounded-md px-3 py-1.5 text-sm ring-1 ring-[color:var(--outline-variant)]/50"
-        >
-          Logout
-        </button>
+        <div className="flex items-center gap-2">
+          <ThemeToggle size="sm" />
+          <button
+            onClick={onLogout}
+            className="rounded-full px-3 py-1.5 text-sm ring-1 ring-[color:var(--outline-variant)]/50 transition-colors hover:bg-[color:var(--surface-low)]"
+          >
+            Logout
+          </button>
+        </div>
       </header>
 
-      <div className="grid min-h-0 flex-1 grid-cols-[260px_1fr_420px]">
+      <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[260px_1fr_420px]">
         {/* ── Sidebar: chat list ── */}
-        <aside className="flex min-h-0 flex-col border-r border-[color:var(--outline-variant)]/35 bg-[color:var(--surface-low)]">
+        <aside className="order-2 flex min-h-0 max-h-[32dvh] flex-col border-r border-[color:var(--outline-variant)]/35 bg-[color:var(--surface-low)] lg:order-1 lg:max-h-none">
           <div className="flex items-center justify-between p-3">
             <h2 className="text-sm font-semibold text-[color:var(--primary)]">Previous chats</h2>
             <button
@@ -1714,9 +1712,9 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
           </div>
 
           <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
-            {isLoading ? <p className="px-1 text-sm text-[color:var(--on-surface-variant)]">Loading...</p> : null}
+            {isLoading ? <p className="px-1 text-sm text-[color:var(--on-surface-variant)]">Loading your chats...</p> : null}
             {chats.length === 0 && !isLoading ? (
-              <p className="px-1 text-sm text-[color:var(--on-surface-variant)]">No chats yet. Create one.</p>
+              <p className="px-1 text-sm text-[color:var(--on-surface-variant)]">No chats yet. Create a chat to generate your first SRS draft.</p>
             ) : null}
 
             {chats.map((chat) => {
@@ -1763,7 +1761,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
         </aside>
 
         {/* ── Main chat area ── */}
-        <main className="flex min-h-0 flex-col border-r border-[color:var(--outline-variant)]/35 bg-[color:var(--surface-lowest)]">
+        <main className="order-1 flex min-h-[44dvh] flex-col border-r border-[color:var(--outline-variant)]/35 bg-[color:var(--surface-lowest)] lg:order-2 lg:min-h-0">
           <div className="border-b border-[color:var(--outline-variant)]/35 px-4 py-3">
             <h2 className="text-sm font-semibold text-[color:var(--primary)]">Interactive Generation</h2>
             <p className="text-xs text-[color:var(--on-surface-variant)]">
@@ -1819,7 +1817,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
             ) : null}
 
             {visibleMessages.length === 0 && questionMode === null ? (
-              <p className="text-sm text-[color:var(--on-surface-variant)]">Start by asking about your product idea.</p>
+              <p className="text-sm text-[color:var(--on-surface-variant)]">Start with one paragraph about your product goals, users, and constraints.</p>
             ) : null}
 
             <div ref={messagesEndRef} />
@@ -1848,12 +1846,12 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
                 onChange={(event) => setInput(event.target.value)}
                 placeholder={
                   questionMode !== null
-                    ? "Answer the clarification form above to continue..."
+                    ? "Answer the clarification form above to continue."
                     : selectedDraftPart !== null
-                      ? `Describe how to revise \"${selectedDraftPart.title}\"...`
-                      : "Describe the software you want to build..."
+                      ? `Describe how to improve \"${selectedDraftPart.title}\".`
+                      : "Describe the software you want to build, including users and goals."
                 }
-                className="w-full rounded-md bg-[color:var(--surface-low)] px-3 py-2 text-sm ring-1 ring-[color:var(--outline-variant)]/40 outline-none focus:ring-2 focus:ring-[color:var(--primary)]"
+                className="field-input w-full rounded-md px-3 py-2 text-sm ring-1 ring-[color:var(--outline-variant)]/40 outline-none"
                 disabled={!selectedChatId || isSending || questionMode !== null}
               />
               <button
@@ -1861,17 +1859,17 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
                 disabled={!selectedChatId || isSending || questionMode !== null || !input.trim()}
                 className="rounded-md bg-[color:var(--primary)] px-4 py-2 text-sm text-white disabled:opacity-60"
               >
-                {isSending ? "Sending..." : "Send"}
+                {isSending ? "Sending request..." : "Send"}
               </button>
             </div>
             {error ? (
-              <div className="mt-2 flex items-center gap-2">
-                <p className="text-sm text-red-600">{error}</p>
+              <div role="alert" className="error-banner mt-2 flex items-center justify-between gap-2 rounded-xl px-3 py-2">
+                <p className="text-sm">{error}</p>
                 {retryPayload && !isSending ? (
                   <button
                     type="button"
                     onClick={() => void handleRetry()}
-                    className="rounded-md border border-red-300 px-2.5 py-1 text-xs text-red-700 transition-colors hover:bg-red-50"
+                    className="rounded-md border border-[color:var(--danger)]/40 px-2.5 py-1 text-xs font-semibold transition-colors hover:bg-[color:var(--surface-lowest)]"
                   >
                     Retry
                   </button>
@@ -1882,10 +1880,10 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
         </main>
 
         {/* ── Right sidebar: document / state ── */}
-        <aside className="min-h-0 overflow-y-auto bg-[color:var(--surface-container)] p-4">
+        <aside className="order-3 min-h-0 max-h-[35dvh] overflow-y-auto border-t border-[color:var(--outline-variant)]/30 bg-[color:var(--surface-container)] p-4 lg:max-h-none lg:border-t-0">
           <h2 className="text-sm font-semibold text-[color:var(--primary)]">SRS draft</h2>
           <p className="mt-1 text-xs text-[color:var(--on-surface-variant)]">
-            Click a section or requirement to send a targeted revision request through chat.
+            Select a section to request focused revisions through chat.
           </p>
           <div className="mt-3 flex items-center gap-2">
             <button
@@ -1893,7 +1891,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
               onClick={() => setIsPreviewOpen(true)}
               className="rounded-md bg-[color:var(--surface-lowest)] px-3 py-1.5 text-xs font-medium text-[color:var(--foreground)] ring-1 ring-[color:var(--outline-variant)]/35 hover:bg-[color:var(--surface-low)]"
             >
-              Open document preview
+              Open preview
             </button>
             <button
               type="button"
@@ -1901,14 +1899,14 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
               disabled={!selectedChatId || isSending || isGeneratingDiagrams || !hasRenderableDraftParts || questionMode !== null}
               className="rounded-md bg-[color:var(--surface-lowest)] px-3 py-1.5 text-xs font-medium text-[color:var(--foreground)] ring-1 ring-[color:var(--outline-variant)]/35 hover:bg-[color:var(--surface-low)] disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {isGeneratingDiagrams ? "Generating diagrams…" : "Generate diagrams"}
+              {isGeneratingDiagrams ? "Generating diagrams..." : "Generate diagrams"}
             </button>
           </div>
 
           <div className="mt-3 space-y-3">
             {visibleDraftSections.length === 0 ? (
               <div className="rounded-md bg-[color:var(--surface-lowest)] p-3 text-xs text-[color:var(--on-surface-variant)] ring-1 ring-[color:var(--outline-variant)]/35">
-                No drafted sections yet.
+                Drafted sections will appear here once generation starts.
               </div>
             ) : (
               visibleDraftSections.map((section) => (
@@ -1920,7 +1918,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
                   <div className="mt-2 space-y-2">
                     {section.parts.length === 0 ? (
                       <p className="text-xs text-[color:var(--on-surface-variant)]">
-                        Drafting content for this section...
+                        Draft in progress for this section...
                       </p>
                     ) : (
                       section.parts.map((part, partIndex) => {
