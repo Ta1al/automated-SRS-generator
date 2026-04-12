@@ -81,6 +81,7 @@ const DRAFT_NODE_TO_SECTION_KEY: Record<string, string> = {
   draft_section_3_nfr: "s3_nfr",
   draft_section_4: "s4",
 };
+const MESSAGE_GUARD_NODE = "message_guard";
 
 function extractLiveSectionsFromState(state: unknown): Record<string, string> {
   if (!state || typeof state !== "object" || Array.isArray(state)) {
@@ -498,6 +499,7 @@ export async function startBackgroundChatRun(params: {
     let activeNode: string | null = null;
     let activeNodeStarted: Date | null = null;
     let streamedProjectTitle = "";
+    let sawGuardrailRedirect = false;
 
     const summary = await consumeSseResponse(interactResponse, {
       onProjectTitle: ({ projectTitle }) => {
@@ -515,6 +517,10 @@ export async function startBackgroundChatRun(params: {
         });
       },
       onToken: ({ content, node }) => {
+        if (node === MESSAGE_GUARD_NODE) {
+          sawGuardrailRedirect = true;
+        }
+
         const targetSection =
           (node ? DRAFT_NODE_TO_SECTION_KEY[node] || "" : "") ||
           (node === "revise_selected_section" ? (revisionTarget?.sectionKey || "") : "");
@@ -529,7 +535,7 @@ export async function startBackgroundChatRun(params: {
           });
         }
 
-        if (!node) {
+        if (!node || node === MESSAGE_GUARD_NODE) {
           return;
         }
 
@@ -633,21 +639,27 @@ export async function startBackgroundChatRun(params: {
     });
 
     let latestState: Record<string, unknown> | null = null;
-    try {
-      const stateResponse = await backendFetch(`/api/sessions/${chat.backendThreadId}/state`);
-      if (stateResponse.ok) {
-        const payload = (await stateResponse.json()) as Record<string, unknown>;
-        latestState = payload;
+    if (!sawGuardrailRedirect) {
+      try {
+        const stateResponse = await backendFetch(`/api/sessions/${chat.backendThreadId}/state`);
+        if (stateResponse.ok) {
+          const payload = (await stateResponse.json()) as Record<string, unknown>;
+          latestState = payload;
+        }
+      } catch {
       }
-    } catch {
     }
 
-    let currentDocument =
-      summary.finalDocument ||
-      (typeof latestState?.final_document === "string" ? latestState.final_document : "") ||
-      chat.currentDocument;
+    let currentDocument = chat.currentDocument;
 
-    if (!currentDocument) {
+    if (!sawGuardrailRedirect) {
+      currentDocument =
+        summary.finalDocument ||
+        (typeof latestState?.final_document === "string" ? latestState.final_document : "") ||
+        chat.currentDocument;
+    }
+
+    if (!sawGuardrailRedirect && !currentDocument) {
       const documentResponse = await backendFetch(`/api/sessions/${chat.backendThreadId}/document`);
       if (documentResponse.ok) {
         const documentPayload = await documentResponse.json();
@@ -684,7 +696,9 @@ export async function startBackgroundChatRun(params: {
     const generatedProjectTitle = extractProjectTitleFromState(latestState);
 
     let persistedAssistantMessage = "";
-    if (normalizedQuestions.length > 0) {
+    if (sawGuardrailRedirect && shouldPersistAssistantMessage(summary.assistantMessage)) {
+      persistedAssistantMessage = summary.assistantMessage;
+    } else if (normalizedQuestions.length > 0) {
       persistedAssistantMessage =
         resolvedQuestionPrompt ||
         "I need a few clarifications before continuing. Please answer them in the clarification form.";
