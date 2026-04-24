@@ -7,7 +7,7 @@ export default function Home() {
     <div className="min-h-screen text-[color:var(--foreground)]">
       <header className="sticky top-0 z-40 border-b border-[color:var(--outline-variant)]/35 bg-[color:var(--surface-lowest)]/88 px-6 py-4 backdrop-blur-lg">
         <div className="mx-auto flex w-full max-w-6xl items-center justify-between">
-          <h1 className="font-headline text-xl font-bold tracking-tight text-[color:var(--primary)]">Proscript Ledger</h1>
+          <h1 className="font-headline text-xl font-bold tracking-tight text-[color:var(--primary)]">ASG</h1>
           <div className="flex items-center gap-2">
             <ThemeToggle size="sm" />
             <Link className="rounded-full border border-[color:var(--outline-variant)]/65 px-4 py-2 text-sm font-medium transition-colors hover:bg-[color:var(--surface-low)]" href="/login">Login</Link>
