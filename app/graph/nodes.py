@@ -15,6 +15,7 @@ import json
 import logging
 import re
 from collections import Counter
+from difflib import SequenceMatcher
 from typing import Any
 
 import httpx
@@ -746,6 +747,39 @@ async def revise_selected_section(state: SRSState) -> dict:
     )
     revised_section = _ai_text(response).strip() or current_text
 
+    # If the model returns something too close to the original section,
+    # perform one stricter retry to force an observable revision.
+    if requested_change and not _is_material_revision(current_text, revised_section, requested_change):
+        stricter_prompt = "\n\n".join(
+            [
+                *prompt_parts,
+                (
+                    "IMPORTANT: The previous revision did not materially change the section. "
+                    "Apply the requested change concretely. Make multiple explicit edits, "
+                    "and ensure the updated section text reflects the request in a verifiable way."
+                ),
+            ]
+        )
+
+        retry_response = await _llm_invoke_with_retry(
+            llm,
+            [
+                SystemMessage(content=prompts.REVISE_SECTION_SYSTEM),
+                HumanMessage(content=stricter_prompt),
+            ],
+            node_name="revise_selected_section",
+            max_attempts=2,
+        )
+        retry_candidate = _ai_text(retry_response).strip()
+        if retry_candidate:
+            revised_section = retry_candidate
+
+        if not _is_material_revision(current_text, revised_section, requested_change):
+            logger.warning(
+                "Revision output remained very similar for section '%s'; using best-effort revised text.",
+                target_key,
+            )
+
     return {"sections": {target_key: revised_section}}
 
 
@@ -805,7 +839,17 @@ async def generate_mermaid(state: SRSState) -> dict:
         )
         raw = _ai_text(response)
         code = _extract_mermaid_code(raw)
-        return code or _fallback_mermaid_code(index)
+        if not code:
+            return _fallback_mermaid_code(index)
+
+        if not _looks_like_expected_mermaid(index, code):
+            logger.warning(
+                "Generated Mermaid diagram index %d had unexpected type; using fallback.",
+                index,
+            )
+            return _fallback_mermaid_code(index)
+
+        return code
 
     generation_tasks = [
         _generate_one(idx, diagram_kind, diagram_label, diagram_prompt)
@@ -865,8 +909,15 @@ async def correct_mermaid(state: SRSState) -> dict:
     blocks = list(state.get("mermaid_blocks", []))
     errors = state.get("mermaid_errors", [])
     attempts = state.get("mermaid_correction_attempts", 0)
+    settings = get_settings()
+    is_final_correction_round = attempts >= (settings.max_mermaid_retries - 1)
 
     async def _correct_one(index: int, block: str, error: str) -> tuple[int, str | None]:
+        if is_final_correction_round:
+            # Last correction round: force a known-valid fallback to avoid
+            # omitting diagrams after retry budget exhaustion.
+            return index, _fallback_mermaid_code(index)
+
         correction_prompt = prompts.CORRECTOR_SYSTEM.format(
             original_code=f"```mermaid\n{block}\n```",
             error_message=error,
@@ -877,7 +928,17 @@ async def correct_mermaid(state: SRSState) -> dict:
             node_name="correct_mermaid",
         )
         corrected = _extract_mermaid_code(_ai_text(response))
-        return index, corrected or None
+        if not corrected:
+            return index, _fallback_mermaid_code(index)
+
+        if not _looks_like_expected_mermaid(index, corrected):
+            logger.warning(
+                "Corrected Mermaid diagram index %d had unexpected type; using fallback.",
+                index,
+            )
+            return index, _fallback_mermaid_code(index)
+
+        return index, corrected
 
     correction_tasks = [
         _correct_one(i, block, error)
@@ -959,9 +1020,16 @@ async def finalize_document(state: SRSState) -> dict:
     ]
 
     diagrams_md = ""
-    for title, block, error in zip(diagram_titles, blocks, errors):
+    for index, title in enumerate(diagram_titles):
+        block = blocks[index] if index < len(blocks) else _fallback_mermaid_code(index)
+        error = errors[index] if index < len(errors) else ""
+
         if error:
-            diagrams_md += f"\n\n> ⚠️ *{title} could not be validated and has been omitted.*\n"
+            fallback_block = _fallback_mermaid_code(index)
+            diagrams_md += (
+                f"\n\n> ⚠️ *{title} failed validation; a fallback diagram was inserted.*\n"
+                f"\n\n### {title}\n\n```mermaid\n{fallback_block}\n```\n"
+            )
         else:
             diagrams_md += f"\n\n### {title}\n\n```mermaid\n{block}\n```\n"
 
@@ -1228,6 +1296,45 @@ def _extract_mermaid_code(text: str) -> str:
         return match.group(1).strip()
     # If no fence, return stripped text as-is (might be raw code)
     return text.strip()
+
+
+def _normalize_for_revision_comparison(value: str) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip().lower())
+
+
+def _is_material_revision(original: str, revised: str, requested_change: str) -> bool:
+    original_norm = _normalize_for_revision_comparison(original)
+    revised_norm = _normalize_for_revision_comparison(revised)
+    if not revised_norm:
+        return False
+    if original_norm == revised_norm:
+        return False
+
+    similarity = SequenceMatcher(None, original_norm, revised_norm).ratio()
+    if similarity <= 0.985:
+        return True
+
+    requested_tokens = [
+        token
+        for token in re.split(r"[^a-z0-9]+", requested_change.lower())
+        if len(token) >= 5
+    ][:10]
+
+    if not requested_tokens:
+        return similarity < 0.995
+
+    matched = sum(1 for token in requested_tokens if token in revised_norm)
+    required_matches = 2 if len(requested_tokens) >= 4 else 1
+    return matched >= required_matches or similarity < 0.995
+
+
+def _looks_like_expected_mermaid(index: int, code: str) -> bool:
+    first_line = (code.strip().splitlines() or [""])[0].strip().lower()
+    if index == 0:
+        return first_line.startswith("flowchart") or first_line.startswith("graph")
+    if index == 1:
+        return first_line.startswith("sequencediagram")
+    return first_line.startswith("erdiagram")
 
 
 def _fallback_mermaid_code(index: int) -> str:

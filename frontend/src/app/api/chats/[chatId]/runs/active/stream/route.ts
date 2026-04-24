@@ -175,7 +175,10 @@ export async function GET(request: NextRequest, context: Context) {
           const snapshot = {
             status: run.status,
             currentNode: run.currentNode || inferredCurrentNode,
-            etaSeconds: run.etaSeconds,
+            etaSeconds:
+              run.status === ChatRunStatus.RUNNING && (run.etaSeconds ?? 0) <= 0
+                ? 1
+                : run.etaSeconds,
             sections,
           };
           const encodedSnapshot = JSON.stringify(snapshot);

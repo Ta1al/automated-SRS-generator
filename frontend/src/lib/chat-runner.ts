@@ -201,6 +201,10 @@ function toEtaSeconds(milliseconds: number) {
   return Math.max(0, Math.round(milliseconds / 1000));
 }
 
+function toRunningEtaSeconds(milliseconds: number) {
+  return Math.max(1, toEtaSeconds(milliseconds));
+}
+
 async function updateStageTiming(node: string, durationMs: number) {
   const existing = await prisma.stageTimingStat.findUnique({ where: { node } });
 
@@ -317,7 +321,10 @@ export async function getRunSummary(runId: string) {
     status: run.status,
     chatTitle: run.chat.title,
     currentNode: run.currentNode,
-    etaSeconds: run.etaSeconds,
+    etaSeconds:
+      run.status === ChatRunStatus.RUNNING && (run.etaSeconds ?? 0) <= 0
+        ? 1
+        : run.etaSeconds,
     errorMessage: run.errorMessage,
     startedAt: run.startedAt,
     completedAt: run.completedAt,
@@ -406,7 +413,7 @@ export async function startBackgroundChatRun(params: {
       currentNode: null,
       currentNodeStarted: null,
       statusEvents: statusEvents as unknown as Prisma.InputJsonValue,
-      etaSeconds: initialEtaSeconds,
+      etaSeconds: Math.max(1, initialEtaSeconds),
       errorMessage: null,
     },
   });
@@ -546,23 +553,21 @@ export async function startBackgroundChatRun(params: {
         if (activeNode !== node) {
           activeNode = node;
           activeNodeStarted = new Date();
-          const etaSeconds = toEtaSeconds(
-            estimateRemainingMs({
-              timingMap,
-              finishedNodes,
-              currentNode: activeNode,
-              currentNodeStarted: activeNodeStarted,
-              orderedStages,
-              includeParallelDraftStages,
-            }),
-          );
-
           prisma.chatRun.update({
             where: { id: runId },
             data: {
               currentNode: activeNode,
               currentNodeStarted: activeNodeStarted,
-              etaSeconds,
+              etaSeconds: toRunningEtaSeconds(
+                estimateRemainingMs({
+                  timingMap,
+                  finishedNodes,
+                  currentNode: activeNode,
+                  currentNodeStarted: activeNodeStarted,
+                  orderedStages,
+                  includeParallelDraftStages,
+                }),
+              ),
             },
           }).catch((err) => {
             console.error(
@@ -591,17 +596,6 @@ export async function startBackgroundChatRun(params: {
           finishedAt: new Date(nowMs).toISOString(),
         });
 
-        const etaSeconds = toEtaSeconds(
-          estimateRemainingMs({
-            timingMap,
-            finishedNodes,
-            currentNode: activeNode,
-            currentNodeStarted: activeNodeStarted,
-            orderedStages,
-            includeParallelDraftStages,
-          }),
-        );
-
         (async () => {
           try {
             const nextStat = await updateStageTiming(status.node, durationMs);
@@ -613,7 +607,17 @@ export async function startBackgroundChatRun(params: {
                 statusEvents: statusEvents as unknown as Prisma.InputJsonValue,
                 currentNode: activeNode === status.node ? null : activeNode,
                 currentNodeStarted: activeNode === status.node ? null : activeNodeStarted,
-                etaSeconds,
+                etaSeconds: toRunningEtaSeconds(
+                  estimateRemainingMs({
+                    timingMap,
+                    finishedNodes,
+                    currentNode: activeNode === status.node ? null : activeNode,
+                    currentNodeStarted:
+                      activeNode === status.node ? null : activeNodeStarted,
+                    orderedStages,
+                    includeParallelDraftStages,
+                  }),
+                ),
               },
             });
           } catch (err) {
