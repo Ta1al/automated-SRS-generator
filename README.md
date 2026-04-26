@@ -105,8 +105,10 @@ flowchart TD
     evaluate_completeness -->|missing major decisions| ask_clarifying_questions
     ask_clarifying_questions -->|resume with answers| classify_requirements
 
-    evaluate_completeness -->|diagrams requested| generate_mermaid
-    evaluate_completeness -->|ready| finalize_document
+    evaluate_completeness -->|major decisions resolved| qa_review
+    qa_review -->|qa gaps found| ask_clarifying_questions
+    qa_review -->|passed + diagrams requested| generate_mermaid
+    qa_review -->|passed + no diagrams| finalize_document
 
     generate_mermaid --> validate_mermaid
     validate_mermaid -->|errors and retries left| correct_mermaid
@@ -141,7 +143,7 @@ The `_route_from_start` conditional edge selects one of three execution paths:
 │   ├── graph/
 │   │   ├── state.py              # SRSState TypedDict, Requirement, ClarificationQuestion
 │   │   ├── graph.py              # StateGraph builder, conditional edges, fan-out
-│   │   ├── nodes.py              # All 15 node implementations
+│   │   ├── nodes.py              # Graph node implementations + output normalizers
 │   │   └── prompts.py            # System prompts for every LLM-calling node
 │   ├── rag/
 │   │   ├── vectorstore.py        # ChromaDB init, seeding, semantic retrieval
@@ -288,11 +290,12 @@ function that receives `SRSState` and returns a partial state update.
 | `classify_requirements` | ✓ | Assigns 12-label taxonomy to stub requirements (F, A, FT, L, LF, MN, O, PE, PO, SC, SE, US) |
 | `draft_section_1` | ✓ | Writes IEEE 830 Section 1: Introduction (Purpose, Scope, Definitions, References, Overview) |
 | `draft_section_2` | ✓ | Writes Section 2: Product Overview (Perspective, Functions, User Characteristics, Assumptions, Constraints) |
-| `draft_section_3_fr` | ✓ | Writes Section 3.1–3.2: Functional Requirements in `F-NNN` format with acceptance criteria |
+| `draft_section_3_fr` | ✓ | Writes Section 3.2: Functional Requirements in `F-NNN` format with requirement + acceptance criteria blocks |
 | `draft_section_3_nfr` | ✓ | Writes Section 3.3: Quality of Service — 11 subsections for PE, SE, A, SC, FT, MN, PO, O, US, LF, L |
-| `draft_section_3_iface` | ✓ | Writes Section 3.4: External Interfaces (UI, Hardware, Software, Communication) |
+| `draft_section_3_iface` | ✓ | Writes Section 3.1: External Interfaces with `IF-NNN` requirement blocks |
 | `draft_section_4` | ✓ | Generates verification matrix mapping requirement IDs to verification methods (Test / Analysis / Inspection / Demonstration) |
 | `evaluate_completeness` | ✓ | Identifies 2–5 high-impact unresolved architectural decisions; sets `missing_context` or clears it |
+| `qa_review` | ✓ | Performs structural QA gate (coverage, traceability, ambiguity, and ID/table integrity) before finalization |
 | `ask_clarifying_questions` | — | Uses LangGraph `interrupt()` to pause execution and surface questions to the user (HITL) |
 | `generate_mermaid` | ✓ | Generates 3 diagrams (architecture flowchart, sequence, ER) concurrently via `asyncio.gather` |
 | `validate_mermaid` | — | Validates each diagram via `mmdc` subprocess or regex-based heuristic fallback |
@@ -306,7 +309,8 @@ Key helper functions in `nodes.py`:
 - `_llm_invoke_with_retry()` — Retries transient LLM errors with exponential backoff (3 attempts, 2^n seconds).
 - `_build_writing_context()` — Constructs rich context for section writers from chat history, document buffer, requirements, and RAG context.
 - `_retrieve_draft_context()` — Lexical overlap retrieval from already-drafted sections.
-- `_ensure_section_1_completeness()` — Post-processes Section 1 to ensure all five subsections are present.
+- `_normalize_section_output()` — Shared post-processor that unwraps fenced markdown, normalizes spacing, and enforces required section headings across s1/s2/s3/s4 outputs.
+- `_ensure_section_1_completeness()` — Section 1-specific completeness backfill used within the shared normalizer.
 
 ### RAG and vector store
 
@@ -486,7 +490,7 @@ All frontend API routes live under `src/app/api/`:
 **`src/lib/chat-runner.ts`** manages graph run orchestration:
 
 - Defines ordered stage lists for each run mode: `ORDERED_STAGES_FULL` (16
-  stages), `ORDERED_STAGES_NO_DIAGRAMS` (13 stages),
+  stages), `ORDERED_STAGES_NO_DIAGRAMS` (14 stages),
   `ORDERED_STAGES_DIAGRAMS_ONLY` (4 stages),
   `ORDERED_STAGES_SECTION_REVISION` (2 stages).
 - Identifies `PARALLEL_DRAFT_STAGES` (the 5 section writers that run
@@ -597,7 +601,7 @@ The interact endpoint accepts `InteractRequest` with the following fields:
 |---|---|---|
 | `token` | `{"content": "...", "node": "..."}` | Streamed LLM text chunk |
 | `status` | `{"node": "...", "status": "finished"}` | Node completion notification |
-| `project_title` | `{"title": "..."}` | LLM-inferred project title |
+| `project_title` | `{"project_title": "..."}` | LLM-inferred project title |
 | `question` | `{"questions": [...], "prompt": "..."}` | Clarifying questions (HITL interrupt) |
 | `complete` | `{"document": "..."}` | Final SRS Markdown document |
 | `error` | `{"message": "..."}` | Runtime error |

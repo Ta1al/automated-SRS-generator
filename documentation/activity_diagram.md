@@ -25,9 +25,9 @@ flowchart TD
     Classify --> FanOut[/"Fan-out: 5 parallel section writers"/]
     FanOut --> S1[Draft Section 1: Introduction]
     FanOut --> S2[Draft Section 2: Product Overview]
-    FanOut --> S3FR[Draft Section 3.1-3.2: Functional Requirements]
+   FanOut --> S3FR[Draft Section 3.2: Functional Requirements]
     FanOut --> S3NFR[Draft Section 3.3: Quality of Service NFRs]
-    FanOut --> S3IF[Draft Section 3.4: External Interfaces]
+   FanOut --> S3IF[Draft Section 3.1: External Interfaces]
 
     S1 --> FanIn[\"Fan-in: all 5 sections complete"\]
     S2 --> FanIn
@@ -35,15 +35,18 @@ flowchart TD
     S3NFR --> FanIn
     S3IF --> FanIn
 
-    FanIn --> S4[Draft Section 4: Verification Matrix]
-    S4 --> Evaluate[Evaluate Completeness — identify major decisions]
+   FanIn --> S4[Draft Section 4: Verification Matrix]
+   S4 --> Evaluate[Evaluate Completeness — identify major decisions]
 
     Evaluate --> EvalDecision{Missing Major Decisions?}
     EvalDecision -->|Yes, first time| AskQuestions[Ask Clarifying Questions — HITL Interrupt]
     AskQuestions --> UserAnswers[User Provides Answers]
     UserAnswers --> Classify
 
-    EvalDecision -->|No| DiagramDecision{Diagrams Requested?}
+   EvalDecision -->|No| QAReview[QA Review — structural and traceability checks]
+   QAReview --> QAResult{QA Passed?}
+   QAResult -->|No, gaps found| AskQuestions
+   QAResult -->|Yes| DiagramDecision{Diagrams Requested?}
     DiagramDecision -->|Yes| GenMermaid[Generate 3 Mermaid Diagrams — asyncio.gather]
     DiagramDecision -->|No| Finalize
 
@@ -124,7 +127,10 @@ flowchart TD
     sequence, ER) are generated concurrently via `asyncio.gather`, validated
     via `mmdc` or heuristic fallback, and corrected up to `MAX_MERMAID_RETRIES`
     times if errors exist.
-14. **Finalize Document** — All section drafts and diagrams are assembled into
-    the final Markdown SRS document.
-15. **Export** — User can download as Markdown JSON or as DOCX with formatted
+14. **QA Review Gate** — The assembled text is reviewed for structural
+   integrity, traceability, and ambiguity. If gaps are found, the graph routes
+   back to clarification before proceeding.
+15. **Finalize Document** — All normalized section drafts and diagrams are
+   assembled into the final Markdown SRS document.
+16. **Export** — User can download as Markdown JSON or as DOCX with formatted
     text, embedded diagram PNGs, and configurable metadata.

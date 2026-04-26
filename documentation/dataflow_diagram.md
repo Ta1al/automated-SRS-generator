@@ -84,6 +84,7 @@ graph TD
         DraftS3IF["draft_section_3_iface"]
         DraftS4["draft_section_4"]
         Evaluate["evaluate_completeness"]
+        QAReview["qa_review"]
         AskClarify["ask_clarifying_questions — interrupt"]
         GenMermaid["generate_mermaid — asyncio.gather"]
         ValidateMermaid["validate_mermaid"]
@@ -134,8 +135,10 @@ graph TD
     DraftS4 --> Evaluate
     Evaluate --> AskClarify
     AskClarify --> Classify
-    Evaluate --> GenMermaid
-    Evaluate --> Finalize
+    Evaluate --> QAReview
+    QAReview --> AskClarify
+    QAReview --> GenMermaid
+    QAReview --> Finalize
     GenMermaid --> ValidateMermaid
     ValidateMermaid --> CorrectMermaid
     CorrectMermaid --> ValidateMermaid
@@ -151,6 +154,7 @@ graph TD
     DraftS3IF --> OpenRouter
     DraftS4 --> OpenRouter
     Evaluate --> OpenRouter
+    QAReview --> OpenRouter
     GenMermaid --> OpenRouter
     CorrectMermaid --> OpenRouter
     Revise --> OpenRouter
