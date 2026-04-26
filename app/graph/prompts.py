@@ -245,10 +245,19 @@ Include sub-sections:
 ### 3.3.10 Look & Feel Requirements (LF-NNN)
 ### 3.3.11 Legal & Compliance Requirements (L-NNN)
 
+For EACH requirement in every 3.3.x subsection, use this exact block format:
+#### PREFIX-NNN: [Concise title]
+**Requirement:** The [system/component] shall [verifiable, measurable action].
+**Acceptance Criteria:** Given [precondition], when [action], then [measurable outcome].
+
+Where PREFIX is one of: PE, SE, A, SC, FT, MN, PO, O, US, LF, L.
+
 Rules:
 - ALL performance values must be numeric and specific (e.g., "< 200 ms at P95").
 - ALL availability targets must specify measurement window (e.g., "99.9% monthly").
 - Include relevant regulatory requirements identified from the RAG context.
+- IDs must be sequential within each PREFIX family starting at 001.
+- Do not output plain prose-only bullets; every requirement must include both fields above.
 - Return ONLY the Markdown content starting from the ### 3.3 heading.
 """
 
@@ -267,8 +276,15 @@ Required sub-sections:
 #### 3.1.4 Communication Interfaces
 (Network protocols, message formats, encryption requirements)
 
+For EACH interface requirement, use this exact block format:
+#### IF-NNN: [Concise title]
+**Requirement:** The [system/component] shall [verifiable, measurable interface behavior].
+**Acceptance Criteria:** Given [precondition], when [action], then [measurable interface outcome].
+
 Rules:
 - Be specific about API versions, protocols (REST/GraphQL/gRPC), and data formats (JSON/XML/Protobuf).
+- Generate sequential IDs starting at IF-001 and keep IDs unique within Section 3.1.
+- Every 3.1.x subsection must contain at least one IF-NNN requirement block when information is available.
 - Return ONLY the Markdown content starting from the ### 3.1 heading.
 """
 
