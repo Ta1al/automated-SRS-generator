@@ -584,9 +584,8 @@ async def draft_section_1(state: SRSState) -> dict:
         ],
         node_name="draft_section_1",
     )
-    raw_section = _ai_text(response)
-    completed_section = _ensure_section_1_completeness(raw_section, state)
-    return {"sections": {"s1": completed_section}}
+    normalized_section = _normalize_section_output("s1", _ai_text(response), state)
+    return {"sections": {"s1": normalized_section}}
 
 
 # ── Node 7: Draft Section 2 ───────────────────────────────────────────────────
@@ -604,7 +603,7 @@ async def draft_section_2(state: SRSState) -> dict:
         ],
         node_name="draft_section_2",
     )
-    return {"sections": {"s2": _ai_text(response)}}
+    return {"sections": {"s2": _normalize_section_output("s2", _ai_text(response), state)}}
 
 
 # ── Node 8a: Draft Section 3 — Functional Requirements ───────────────────────
@@ -622,7 +621,9 @@ async def draft_section_3_fr(state: SRSState) -> dict:
         ],
         node_name="draft_section_3_fr",
     )
-    return {"sections": {"s3_fr": _ai_text(response)}}
+    return {
+        "sections": {"s3_fr": _normalize_section_output("s3_fr", _ai_text(response), state)}
+    }
 
 
 # ── Node 8b: Draft Section 3 — Non-Functional Requirements ───────────────────
@@ -644,7 +645,9 @@ async def draft_section_3_nfr(state: SRSState) -> dict:
         ],
         node_name="draft_section_3_nfr",
     )
-    return {"sections": {"s3_nfr": _ai_text(response)}}
+    return {
+        "sections": {"s3_nfr": _normalize_section_output("s3_nfr", _ai_text(response), state)}
+    }
 
 
 # ── Node 8c: Draft Section 3 — External Interfaces ───────────────────────────
@@ -662,7 +665,9 @@ async def draft_section_3_iface(state: SRSState) -> dict:
         ],
         node_name="draft_section_3_iface",
     )
-    return {"sections": {"s3_iface": _ai_text(response)}}
+    return {
+        "sections": {"s3_iface": _normalize_section_output("s3_iface", _ai_text(response), state)}
+    }
 
 
 # ── Node 9: Draft Section 4 — Verification Matrix ────────────────────────────
@@ -690,7 +695,7 @@ async def draft_section_4(state: SRSState) -> dict:
         ],
         node_name="draft_section_4",
     )
-    return {"sections": {"s4": _ai_text(response)}}
+    return {"sections": {"s4": _normalize_section_output("s4", _ai_text(response), state)}}
 
 
 async def revise_selected_section(state: SRSState) -> dict:
@@ -745,7 +750,7 @@ async def revise_selected_section(state: SRSState) -> dict:
         ],
         node_name="revise_selected_section",
     )
-    revised_section = _ai_text(response).strip() or current_text
+    revised_section = _normalize_section_output(target_key, _ai_text(response), state).strip() or current_text
 
     # If the model returns something too close to the original section,
     # perform one stricter retry to force an observable revision.
@@ -772,7 +777,7 @@ async def revise_selected_section(state: SRSState) -> dict:
         )
         retry_candidate = _ai_text(retry_response).strip()
         if retry_candidate:
-            revised_section = retry_candidate
+            revised_section = _normalize_section_output(target_key, retry_candidate, state)
 
         if not _is_material_revision(current_text, revised_section, requested_change):
             logger.warning(
@@ -1088,6 +1093,46 @@ def _unwrap_markdown_fence(markdown: str) -> str:
     return stripped
 
 
+def _normalize_markdown_general(markdown: str) -> str:
+    """Normalize common markdown variance from LLM outputs."""
+    source = _unwrap_markdown_fence(markdown).replace("\r\n", "\n").replace("\r", "\n")
+    source = re.sub(r"\n{3,}", "\n\n", source)
+    return source.strip()
+
+
+_SECTION_EXPECTED_HEADINGS: dict[str, str] = {
+    "s2": "## 2. Product Overview",
+    "s3_iface": "### 3.1 External Interface Requirements",
+    "s3_fr": "### 3.2 Functional Requirements",
+    "s3_nfr": "### 3.3 Quality of Service Requirements",
+    "s4": "## 4. Verification",
+}
+
+_SECTION_NUMBER_PREFIX: dict[str, str] = {
+    "s2": "2",
+    "s3_iface": "3.1",
+    "s3_fr": "3.2",
+    "s3_nfr": "3.3",
+    "s4": "4",
+}
+
+
+def _has_heading_for_section_number(markdown: str, section_number: str) -> bool:
+    pattern = re.compile(
+        rf"^\s{{0,3}}#{{1,6}}\s+{re.escape(section_number)}(?:\b|\.|\))",
+        flags=re.MULTILINE,
+    )
+    return bool(pattern.search(markdown))
+
+
+def _ensure_expected_section_heading(markdown: str, expected_heading: str, section_number: str) -> str:
+    if not markdown:
+        return expected_heading
+    if _has_heading_for_section_number(markdown, section_number):
+        return markdown
+    return f"{expected_heading}\n\n{markdown.lstrip()}"
+
+
 def _has_meaningful_markdown_body(lines: list[str]) -> bool:
     for line in lines:
         trimmed = line.strip()
@@ -1108,6 +1153,21 @@ def _has_meaningful_markdown_body(lines: list[str]) -> bool:
             return True
 
     return False
+
+
+def _normalize_section_output(section_key: str, markdown: str, state: SRSState) -> str:
+    """Apply consistent markdown cleanup and required heading enforcement by section."""
+    normalized = _normalize_markdown_general(markdown)
+
+    if section_key == "s1":
+        return _ensure_section_1_completeness(normalized, state)
+
+    expected_heading = _SECTION_EXPECTED_HEADINGS.get(section_key)
+    section_number = _SECTION_NUMBER_PREFIX.get(section_key)
+    if expected_heading and section_number:
+        return _ensure_expected_section_heading(normalized, expected_heading, section_number)
+
+    return normalized
 
 
 def _resolve_project_name(state: SRSState) -> str:
