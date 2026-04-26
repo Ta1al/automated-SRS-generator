@@ -250,11 +250,11 @@ async def _stream_graph(
     event dicts.
 
     Event types emitted:
-        status   — node-level progress ({"node": "...", "status": "started"|"finished"})
-        token    — streamed text chunk ({"content": "..."})
-        question — HITL clarification request ({"questions": [...], "prompt": "..."})
-        complete — workflow finished ({"document": "..."})
-        error    — runtime error ({"message": "..."})
+        status   - node-level progress ({"node": "...", "status": "started"|"finished"})
+        token    - streamed text chunk ({"content": "..."})
+        question - HITL clarification request ({"questions": [...], "prompt": "..."})
+        complete - workflow finished ({"document": "..."})
+        error    - runtime error ({"message": "..."})
     """
     graph = app_state.graph
     config = {"configurable": {"thread_id": thread_id}}
@@ -316,7 +316,7 @@ async def _stream_graph(
                 for node_name, node_updates in data.items():
 
                     if node_name == "__interrupt__":
-                        # Graph paused — surface the questions to the client
+                        # Graph paused - surface the questions to the client
                         if isinstance(node_updates, (list, tuple)):
                             interrupts = list(node_updates)
                         elif node_updates is None:
@@ -591,7 +591,7 @@ async def get_document_docx(thread_id: str, request: Request) -> Response:
 @router.get("/sessions/{thread_id}/state")
 async def get_state(thread_id: str, request: Request) -> JSONResponse:
     """
-    Debug endpoint — return the raw LangGraph state snapshot.
+    Debug endpoint - return the raw LangGraph state snapshot.
     """
     app_state = request.app.state
     if not hasattr(app_state, "graph") or app_state.graph is None:

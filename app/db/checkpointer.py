@@ -51,7 +51,7 @@ async def managed_checkpointer() -> AsyncIterator[AsyncPostgresSaver]:
     try:
         checkpointer = AsyncPostgresSaver(pool)
         # Create LangGraph's internal checkpoint tables on first run.
-        # This is idempotent — safe to call multiple times.
+        # This is idempotent - safe to call multiple times.
         await checkpointer.setup()
         logger.info("AsyncPostgresSaver ready.")
         yield checkpointer

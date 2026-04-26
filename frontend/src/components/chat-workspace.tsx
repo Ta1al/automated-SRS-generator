@@ -1394,7 +1394,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
   }
 
   // ---------------------------------------------------------------------------
-  // Core send function — shared by initial submission and question-answer send.
+  // Core send function - shared by initial submission and question-answer send.
   // ---------------------------------------------------------------------------
 
   async function handleRetry() {

@@ -1,4 +1,4 @@
-HIPAA PRIVACY AND SECURITY RULE — KEY REQUIREMENTS FOR SOFTWARE SYSTEMS
+HIPAA PRIVACY AND SECURITY RULE - KEY REQUIREMENTS FOR SOFTWARE SYSTEMS
 
 OVERVIEW
 The Health Insurance Portability and Accountability Act (HIPAA) establishes mandatory safeguards for systems that create, receive, maintain, or transmit Protected Health Information (PHI) and electronic PHI (ePHI).
@@ -7,7 +7,7 @@ ADMINISTRATIVE SAFEGUARDS
 - Conduct periodic risk analysis to identify threats to ePHI confidentiality, integrity, and availability.
 - Implement a risk management policy to reduce identified risks to a reasonable level.
 - Establish sanctions policies for workforce members who violate HIPAA policies.
-- Implement an information access management process — access granted only to those who need it.
+- Implement an information access management process - access granted only to those who need it.
 - Maintain activity logs and audit controls for all access to ePHI.
 
 PHYSICAL SAFEGUARDS

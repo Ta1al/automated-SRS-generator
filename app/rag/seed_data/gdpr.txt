@@ -1,4 +1,4 @@
-GDPR — GENERAL DATA PROTECTION REGULATION KEY REQUIREMENTS FOR SOFTWARE SYSTEMS
+GDPR - GENERAL DATA PROTECTION REGULATION KEY REQUIREMENTS FOR SOFTWARE SYSTEMS
 
 OVERVIEW
 The General Data Protection Regulation (EU 2016/679) mandates privacy-by-design and privacy-by-default principles. Any software system processing personal data of EU residents must comply.

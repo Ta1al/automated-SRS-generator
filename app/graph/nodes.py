@@ -468,7 +468,7 @@ async def ask_clarifying_questions(state: SRSState) -> dict:
         "Please answer the clarification form so I can finalize it accurately."
     )
 
-    # interrupt() raises GraphInterrupt internally — LangGraph catches it,
+    # interrupt() raises GraphInterrupt internally - LangGraph catches it,
     # saves state, and routes the payload back through the SSE stream.
     payload = {
         "type": "clarification_needed",
@@ -606,7 +606,7 @@ async def draft_section_2(state: SRSState) -> dict:
     return {"sections": {"s2": _normalize_section_output("s2", _ai_text(response), state)}}
 
 
-# ── Node 8a: Draft Section 3 — Functional Requirements ───────────────────────
+# ── Node 8a: Draft Section 3 - Functional Requirements ───────────────────────
 
 
 async def draft_section_3_fr(state: SRSState) -> dict:
@@ -626,7 +626,7 @@ async def draft_section_3_fr(state: SRSState) -> dict:
     }
 
 
-# ── Node 8b: Draft Section 3 — Non-Functional Requirements ───────────────────
+# ── Node 8b: Draft Section 3 - Non-Functional Requirements ───────────────────
 
 
 async def draft_section_3_nfr(state: SRSState) -> dict:
@@ -650,7 +650,7 @@ async def draft_section_3_nfr(state: SRSState) -> dict:
     }
 
 
-# ── Node 8c: Draft Section 3 — External Interfaces ───────────────────────────
+# ── Node 8c: Draft Section 3 - External Interfaces ───────────────────────────
 
 
 async def draft_section_3_iface(state: SRSState) -> dict:
@@ -670,7 +670,7 @@ async def draft_section_3_iface(state: SRSState) -> dict:
     }
 
 
-# ── Node 9: Draft Section 4 — Verification Matrix ────────────────────────────
+# ── Node 9: Draft Section 4 - Verification Matrix ────────────────────────────
 
 
 async def draft_section_4(state: SRSState) -> dict:
@@ -1020,8 +1020,8 @@ async def finalize_document(state: SRSState) -> dict:
 
     diagram_titles = [
         "System Architecture Diagram",
-        "Primary User Workflow — Sequence Diagram",
-        "Core Data Model — Entity Relationship Diagram",
+        "Primary User Workflow - Sequence Diagram",
+        "Core Data Model - Entity Relationship Diagram",
     ]
 
     diagrams_md = ""
@@ -1049,7 +1049,7 @@ async def finalize_document(state: SRSState) -> dict:
                 sections.get("s3_fr", ""),
                 sections.get("s3_nfr", ""),
                 sections.get("s4", ""),
-                "## Appendix A — System Diagrams" + diagrams_md if diagrams_md.strip() else "",
+                "## Appendix A - System Diagrams" + diagrams_md if diagrams_md.strip() else "",
             ],
         )
     )

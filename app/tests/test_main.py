@@ -74,7 +74,7 @@ async def mock_app():
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# Section 1 — Mermaid Validation
+# Section 1 - Mermaid Validation
 # ════════════════════════════════════════════════════════════════════════════
 
 
@@ -86,7 +86,7 @@ class TestMermaidValidation:
         from app.validation.mermaid import validate_mermaid_syntax
 
         code = "flowchart TD\n    A[Start] --> B[End]"
-        # mmdc may not be installed in CI — heuristic fallback must handle this
+        # mmdc may not be installed in CI - heuristic fallback must handle this
         valid, error = await validate_mermaid_syntax(code)
         assert valid is True
         assert error == ""
@@ -144,7 +144,7 @@ class TestMermaidValidation:
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# Section 2 — Requirement Classification Node
+# Section 2 - Requirement Classification Node
 # ════════════════════════════════════════════════════════════════════════════
 
 
@@ -250,7 +250,7 @@ class TestClassifyRequirements:
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# Section 3 — Completeness Evaluation Node
+# Section 3 - Completeness Evaluation Node
 # ════════════════════════════════════════════════════════════════════════════
 
 
@@ -323,7 +323,7 @@ class TestEvaluateCompleteness:
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# Section 3a — Section 1 Completeness Backfill
+# Section 3a - Section 1 Completeness Backfill
 # ════════════════════════════════════════════════════════════════════════════
 
 
@@ -487,7 +487,7 @@ class TestGraphQaRouting:
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# Section 3b — Mermaid Generation Resilience
+# Section 3b - Mermaid Generation Resilience
 # ════════════════════════════════════════════════════════════════════════════
 
 
@@ -526,7 +526,7 @@ class TestGenerateMermaid:
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# Section 4 — API Route Tests
+# Section 4 - API Route Tests
 # ════════════════════════════════════════════════════════════════════════════
 
 

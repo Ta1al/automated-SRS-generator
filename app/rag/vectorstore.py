@@ -2,7 +2,7 @@
 ChromaDB-backed RAG vector store for regulatory and standards documents.
 
 ChromaDB's built-in default embedding model (all-MiniLM-L6-v2) handles
-vectorisation automatically — no external embedding API call is required.
+vectorisation automatically - no external embedding API call is required.
 
 Seed documents (HIPAA, GDPR, PCI-DSS, WCAG, IEEE 830, SRS template guidance) are loaded from the
 ``seed_data/`` directory on startup if the collection is empty.
@@ -117,7 +117,7 @@ def retrieve(query: str, n_results: int = 5) -> str:
         if the vector store has not been initialised.
     """
     if _collection is None:
-        logger.error("Vector store not initialised — call init_vectorstore() first.")
+        logger.error("Vector store not initialised - call init_vectorstore() first.")
         return ""
 
     results = _collection.query(

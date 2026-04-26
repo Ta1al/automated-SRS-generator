@@ -6,11 +6,11 @@ LangGraph backend, live SRS section previews, and document export.
 
 ## Features
 
-- **Landing page** — Product pitch with hero section, feature cards, and CTA
+- **Landing page** - Product pitch with hero section, feature cards, and CTA
   buttons ("Start a New SRS", "Open Workspace").
-- **Login / Signup** — Email and password authentication with JWT session
+- **Login / Signup** - Email and password authentication with JWT session
   cookies (HS256, 7-day expiry, httpOnly, sameSite=lax).
-- **Chat workspace** — Three-column layout:
+- **Chat workspace** - Three-column layout:
   - **Left sidebar**: List of previous chats for the current user, sorted by
     last update. "New Chat" button creates a backend session and Prisma chat
     record.
@@ -20,8 +20,8 @@ LangGraph backend, live SRS section previews, and document export.
   - **Right panel**: Live SRS section preview cards (6 sections: s1, s2,
     s3_iface, s3_fr, s3_nfr, s4), full Markdown document viewer, and export
     buttons (Markdown download, DOCX download). Supports targeted section
-    revision mode — users can request edits to individual sections.
-- **Dark/light theme toggle** — Persisted theme preference.
+    revision mode - users can request edits to individual sections.
+- **Dark/light theme toggle** - Persisted theme preference.
 
 ## Architecture
 
@@ -34,22 +34,22 @@ src/
 │   ├── chat/page.tsx                     # Protected workspace (auth-gated)
 │   └── api/
 │       ├── auth/
-│       │   ├── signup/route.ts           # POST — register (bcrypt hash)
-│       │   ├── login/route.ts            # POST — authenticate, set JWT cookie
-│       │   ├── logout/route.ts           # POST — clear session cookie
-│       │   └── me/route.ts              # GET — current user from JWT
+│       │   ├── signup/route.ts           # POST - register (bcrypt hash)
+│       │   ├── login/route.ts            # POST - authenticate, set JWT cookie
+│       │   ├── logout/route.ts           # POST - clear session cookie
+│       │   └── me/route.ts              # GET - current user from JWT
 │       └── chats/
 │           ├── route.ts                  # GET (list) / POST (create)
 │           └── [chatId]/
 │               ├── route.ts             # GET / PUT / DELETE
-│               ├── interact/route.ts    # POST — proxy to backend SSE
+│               ├── interact/route.ts    # POST - proxy to backend SSE
 │               ├── messages/route.ts    # GET / POST
 │               ├── runs/
 │               │   └── active/
-│               │       ├── route.ts     # GET — active ChatRun
-│               │       └── stream/route.ts # GET — resume SSE
+│               │       ├── route.ts     # GET - active ChatRun
+│               │       └── stream/route.ts # GET - resume SSE
 │               └── export/
-│                   └── docx/route.ts    # GET — proxy DOCX download
+│                   └── docx/route.ts    # GET - proxy DOCX download
 ├── components/
 │   ├── chat-workspace.tsx               # Main 3-column workspace
 │   └── theme-toggle.tsx                 # Dark/light toggle

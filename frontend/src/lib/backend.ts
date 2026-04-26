@@ -285,7 +285,7 @@ export async function consumeSseResponse(
   flushEvent();
 
   // When questions are present `assistantText` is raw LLM JSON that was
-  // already parsed into `questions` — skip it and use only the formatted version.
+  // already parsed into `questions` - skip it and use only the formatted version.
   const normalizedAssistant =
     questions.length > 0
       ? formatClarificationPrompt({ prompt: questionPrompt, questions })

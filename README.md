@@ -71,7 +71,7 @@ The system is a full-stack application with two independently running processes:
 |---|---|---|
 | **Frontend** | Next.js 16, React 19, Prisma | Landing page, auth, chat workspace, SSE consumption, export proxy |
 | **Backend** | FastAPI, LangGraph, LangChain | Session management, guardrail classification, graph execution, SSE streaming, DOCX export |
-| **Database** | PostgreSQL 16 | Shared instance — Prisma tables for app data, LangGraph checkpoint tables for graph state |
+| **Database** | PostgreSQL 16 | Shared instance - Prisma tables for app data, LangGraph checkpoint tables for graph state |
 | **Vector Store** | ChromaDB (all-MiniLM-L6-v2) | Persistent local collection seeded with regulatory/standards documents |
 | **LLM Provider** | OpenRouter API | Main model for generation nodes + lightweight guardrail model for message classification |
 
@@ -202,15 +202,15 @@ The `_route_from_start` conditional edge selects one of three execution paths:
 **`app/main.py`** creates the FastAPI application with a lifespan context
 manager that runs three startup tasks in order:
 
-1. **Initialise ChromaDB** — calls `init_vectorstore()` which creates or opens
+1. **Initialise ChromaDB** - calls `init_vectorstore()` which creates or opens
    the persistent `regulatory_docs` collection and seeds it with the `.txt`
    files from `app/rag/seed_data/` (IEEE 830, HIPAA, GDPR, PCI-DSS, WCAG,
    SRS template). Seeding splits each file into paragraphs and upserts them
    with source metadata.
-2. **Open PostgreSQL pool** — `managed_checkpointer()` opens an async
+2. **Open PostgreSQL pool** - `managed_checkpointer()` opens an async
    connection pool (`psycopg3`, min 2 / max 10 connections) and creates
    `AsyncPostgresSaver` checkpoint tables (idempotent).
-3. **Compile graph** — `build_graph(checkpointer)` wires all nodes and edges
+3. **Compile graph** - `build_graph(checkpointer)` wires all nodes and edges
    into a `CompiledGraph` stored on `app.state.graph`.
 
 On shutdown the checkpointer pool is closed automatically by the async context
@@ -274,9 +274,9 @@ LangGraph merges back using annotated reducers.
 
 Supporting types:
 
-- **`Requirement`** — `{id, text, labels, criteria}` where `id` uses the
+- **`Requirement`** - `{id, text, labels, criteria}` where `id` uses the
   taxonomy prefix (e.g. `F-001`, `SE-003`).
-- **`ClarificationQuestion`** — `{category, question, suggested_options, rationale}`.
+- **`ClarificationQuestion`** - `{category, question, suggested_options, rationale}`.
 
 ### Graph nodes
 
@@ -285,32 +285,32 @@ function that receives `SRSState` and returns a partial state update.
 
 | Node | LLM call | Purpose |
 |---|---|---|
-| `retrieve_rag_context` | — | Queries ChromaDB with the latest user message, returns concatenated chunks with source attribution |
+| `retrieve_rag_context` | - | Queries ChromaDB with the latest user message, returns concatenated chunks with source attribution |
 | `elicit_requirements` | ✓ | Extracts project title and structured outline (entities, workflows, constraints) from user input |
 | `classify_requirements` | ✓ | Assigns 12-label taxonomy to stub requirements (F, A, FT, L, LF, MN, O, PE, PO, SC, SE, US) |
 | `draft_section_1` | ✓ | Writes IEEE 830 Section 1: Introduction (Purpose, Scope, Definitions, References, Overview) |
 | `draft_section_2` | ✓ | Writes Section 2: Product Overview (Perspective, Functions, User Characteristics, Assumptions, Constraints) |
 | `draft_section_3_fr` | ✓ | Writes Section 3.2: Functional Requirements in `F-NNN` format with requirement + acceptance criteria blocks |
-| `draft_section_3_nfr` | ✓ | Writes Section 3.3: Quality of Service — 11 subsections for PE, SE, A, SC, FT, MN, PO, O, US, LF, L |
+| `draft_section_3_nfr` | ✓ | Writes Section 3.3: Quality of Service - 11 subsections for PE, SE, A, SC, FT, MN, PO, O, US, LF, L |
 | `draft_section_3_iface` | ✓ | Writes Section 3.1: External Interfaces with `IF-NNN` requirement blocks |
 | `draft_section_4` | ✓ | Generates verification matrix mapping requirement IDs to verification methods (Test / Analysis / Inspection / Demonstration) |
 | `evaluate_completeness` | ✓ | Identifies 2–5 high-impact unresolved architectural decisions; sets `missing_context` or clears it |
 | `qa_review` | ✓ | Performs structural QA gate (coverage, traceability, ambiguity, and ID/table integrity) before finalization |
-| `ask_clarifying_questions` | — | Uses LangGraph `interrupt()` to pause execution and surface questions to the user (HITL) |
+| `ask_clarifying_questions` | - | Uses LangGraph `interrupt()` to pause execution and surface questions to the user (HITL) |
 | `generate_mermaid` | ✓ | Generates 3 diagrams (architecture flowchart, sequence, ER) concurrently via `asyncio.gather` |
-| `validate_mermaid` | — | Validates each diagram via `mmdc` subprocess or regex-based heuristic fallback |
+| `validate_mermaid` | - | Validates each diagram via `mmdc` subprocess or regex-based heuristic fallback |
 | `correct_mermaid` | ✓ | LLM fixes syntax errors using original code + error message (up to `MAX_MERMAID_RETRIES` attempts) |
 | `revise_selected_section` | ✓ | Rewrites a single section using context from other sections and the user's revision request |
-| `finalize_document` | — | Assembles all section drafts + Mermaid diagrams into the final Markdown document |
+| `finalize_document` | - | Assembles all section drafts + Mermaid diagrams into the final Markdown document |
 
 Key helper functions in `nodes.py`:
 
-- `_get_llm()` — Returns a `ChatOpenAI` instance pointed at OpenRouter with custom HTTP headers.
-- `_llm_invoke_with_retry()` — Retries transient LLM errors with exponential backoff (3 attempts, 2^n seconds).
-- `_build_writing_context()` — Constructs rich context for section writers from chat history, document buffer, requirements, and RAG context.
-- `_retrieve_draft_context()` — Lexical overlap retrieval from already-drafted sections.
-- `_normalize_section_output()` — Shared post-processor that unwraps fenced markdown, normalizes spacing, and enforces required section headings across s1/s2/s3/s4 outputs.
-- `_ensure_section_1_completeness()` — Section 1-specific completeness backfill used within the shared normalizer.
+- `_get_llm()` - Returns a `ChatOpenAI` instance pointed at OpenRouter with custom HTTP headers.
+- `_llm_invoke_with_retry()` - Retries transient LLM errors with exponential backoff (3 attempts, 2^n seconds).
+- `_build_writing_context()` - Constructs rich context for section writers from chat history, document buffer, requirements, and RAG context.
+- `_retrieve_draft_context()` - Lexical overlap retrieval from already-drafted sections.
+- `_normalize_section_output()` - Shared post-processor that unwraps fenced markdown, normalizes spacing, and enforces required section headings across s1/s2/s3/s4 outputs.
+- `_ensure_section_1_completeness()` - Section 1-specific completeness backfill used within the shared normalizer.
 
 ### RAG and vector store
 
@@ -343,9 +343,9 @@ used during diagram generation.
 **`app/validation/mermaid.py`** validates generated Mermaid diagrams using a
 two-tier strategy:
 
-1. **Primary** — Runs `mmdc` (mermaid-cli) as an async subprocess with a 20-second
+1. **Primary** - Runs `mmdc` (mermaid-cli) as an async subprocess with a 20-second
    timeout. Requires `npm install -g @mermaid-js/mermaid-cli`.
-2. **Fallback** — Regex-based heuristic check (bracket balance, diagram type
+2. **Fallback** - Regex-based heuristic check (bracket balance, diagram type
    detection) when `mmdc` is not available. Supports flowchart, sequenceDiagram,
    erDiagram, classDiagram, stateDiagram, gantt, and more.
 
@@ -415,12 +415,12 @@ StageTimingStat).
 **`ChatWorkspace`** (`src/components/chat-workspace.tsx`) is the main
 interactive component with three columns:
 
-- **Left sidebar** — List of previous chats for the current user, with a
+- **Left sidebar** - List of previous chats for the current user, with a
   "New Chat" button.
-- **Center panel** — Active chat conversation with message history, input
+- **Center panel** - Active chat conversation with message history, input
   field, real-time status updates (node progress, ETA estimation), and
   clarification question prompts (HITL interrupt handling).
-- **Right panel** — Live SRS section preview cards (6 sections: s1, s2,
+- **Right panel** - Live SRS section preview cards (6 sections: s1, s2,
   s3_iface, s3_fr, s3_nfr, s4), Markdown document viewer, and export buttons
   (Markdown download, DOCX download). Supports targeted section revision mode.
 
@@ -458,30 +458,30 @@ All frontend API routes live under `src/app/api/`:
 
 **`frontend/prisma/schema.prisma`** defines five models:
 
-- **User** — `id` (CUID PK), `email` (unique), `name?`, `passwordHash`,
+- **User** - `id` (CUID PK), `email` (unique), `name?`, `passwordHash`,
   timestamps. One-to-many with Chat.
-- **Chat** — `id` (CUID PK), `userId` (FK → User, cascade delete), `title`,
+- **Chat** - `id` (CUID PK), `userId` (FK → User, cascade delete), `title`,
   `backendThreadId` (unique, links to backend session UUID), `currentDocument?`,
   `stateJson?` (JSONB). One-to-many with ChatMessage and ChatRun. Indexed on
   `(userId, updatedAt)`.
-- **ChatMessage** — `id` (CUID PK), `chatId` (FK → Chat, cascade delete),
+- **ChatMessage** - `id` (CUID PK), `chatId` (FK → Chat, cascade delete),
   `role` (enum: USER | ASSISTANT), `content`, `createdAt`. Indexed on
   `(chatId, createdAt)`.
-- **ChatRun** — `id` (CUID PK), `chatId` (FK → Chat, cascade delete),
+- **ChatRun** - `id` (CUID PK), `chatId` (FK → Chat, cascade delete),
   `status` (enum: RUNNING | COMPLETED | FAILED | NEEDS_INPUT),
   `inputMessage`, `revisionTarget?` (JSONB), `currentNode?`,
   `currentNodeStarted?`, `statusEvents?` (JSONB), `questionPrompt?`,
   `questionsJson?` (JSONB), `etaSeconds?`, `errorMessage?`, timestamps.
   Indexed on `(chatId, startedAt DESC)` and `(chatId, status)`.
-- **StageTimingStat** — `node` (PK), `sampleCount`, `avgDurationMs`,
+- **StageTimingStat** - `node` (PK), `sampleCount`, `avgDurationMs`,
   timestamps. Tracks average node execution duration for ETA estimation.
 
 ### Backend integration and SSE
 
 **`src/lib/backend.ts`** provides:
 
-- `backendFetch()` — Wrapper around `fetch()` using `BACKEND_API_URL`.
-- `consumeSseResponse()` — Parses the SSE stream from the backend interact
+- `backendFetch()` - Wrapper around `fetch()` using `BACKEND_API_URL`.
+- `consumeSseResponse()` - Parses the SSE stream from the backend interact
   endpoint. Handles events: `token`, `status`, `project_title`, `question`,
   `complete`, `result`, `error`. Accumulates assistant text and final document.
   Normalises clarification questions into structured
@@ -506,14 +506,14 @@ All frontend API routes live under `src/app/api/`:
 - Python 3.11 or 3.13
 - Node.js 20+
 - Docker (for PostgreSQL)
-- `npm install -g @mermaid-js/mermaid-cli` *(optional — enables strict Mermaid validation and DOCX diagram rendering)*
+- `npm install -g @mermaid-js/mermaid-cli` *(optional - enables strict Mermaid validation and DOCX diagram rendering)*
 
 ### 2. Install dependencies
 
 ```bash
 # Backend
 pip install -r requirements.txt
-# On Windows — install chromadb binary first (avoids C++ compiler requirement):
+# On Windows - install chromadb binary first (avoids C++ compiler requirement):
 #   pip install chromadb --prefer-binary
 
 # Frontend
@@ -582,7 +582,7 @@ Frontend runs at `http://localhost:3000`.
 | `DELETE` | `/api/sessions/{id}` | Delete persisted session checkpoint state |
 | `GET` | `/api/sessions/{id}/document` | Retrieve the completed SRS as Markdown JSON |
 | `GET` | `/api/sessions/{id}/document.docx` | Download the completed SRS as DOCX with embedded diagrams |
-| `GET` | `/api/sessions/{id}/state` | Debug — inspect raw LangGraph state |
+| `GET` | `/api/sessions/{id}/state` | Debug - inspect raw LangGraph state |
 | `GET` | `/health` | Health check (returns model name and graph readiness) |
 
 The interact endpoint accepts `InteractRequest` with the following fields:
@@ -592,8 +592,8 @@ The interact endpoint accepts `InteractRequest` with the following fields:
 | `message` | `string` | *(required)* | User message text |
 | `mode` | `string` | `"full"` | Run mode: `full`, `diagrams_only`, or `section_revision` |
 | `generate_diagrams` | `bool` | `false` | Include Mermaid diagram generation in the full flow |
-| `section_seed` | `object?` | — | Pre-existing section data for revision |
-| `revision_*` | various | — | Revision target metadata (section key, title, content, request) |
+| `section_seed` | `object?` | - | Pre-existing section data for revision |
+| `revision_*` | various | - | Revision target metadata (section key, title, content, request) |
 
 ### SSE event types
 
@@ -703,5 +703,5 @@ requirement:
 | Component | Version | Purpose |
 |---|---|---|
 | PostgreSQL | 16 | Shared database for app data (Prisma) and graph checkpoints |
-| Docker Compose | — | PostgreSQL container orchestration |
-| OpenRouter API | — | LLM provider (supports OpenAI, Anthropic, and other models) |
+| Docker Compose | - | PostgreSQL container orchestration |
+| OpenRouter API | - | LLM provider (supports OpenAI, Anthropic, and other models) |

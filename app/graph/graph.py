@@ -1,12 +1,12 @@
 """
 LangGraph StateGraph definition for the SRS generator workflow.
 
-Optimised topology — full flow with one major-decision clarification loop:
+Optimised topology - full flow with one major-decision clarification loop:
     START
       → retrieve_rag_context
       → elicit_requirements
             → classify_requirements
-      → fan-out (Send) — all 5 section writers run in parallel:
+      → fan-out (Send) - all 5 section writers run in parallel:
             draft_section_1
             draft_section_2
             draft_section_3_fr
@@ -67,8 +67,8 @@ logger = logging.getLogger(__name__)
 def _fan_out_all_sections(state: SRSState) -> list[Send]:
     """
     Dispatch all five section writer nodes simultaneously via LangGraph's Send API.
-    Sections 1, 2, 3-FR, 3-NFR, and 3-Interface are fully independent — each
-    reads from state and writes to a distinct key — so they can all run in parallel.
+    Sections 1, 2, 3-FR, 3-NFR, and 3-Interface are fully independent - each
+    reads from state and writes to a distinct key - so they can all run in parallel.
     """
     return [
         Send("draft_section_1", state),
@@ -126,7 +126,7 @@ def _route_after_mermaid_validation(
 
     if has_errors and attempts < settings.max_mermaid_retries:
         logger.info(
-            "Mermaid errors detected (attempt %d/%d) — routing to corrector.",
+            "Mermaid errors detected (attempt %d/%d) - routing to corrector.",
             attempts + 1,
             settings.max_mermaid_retries,
         )
@@ -164,7 +164,7 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None) -> StateGraph:
     builder.add_node("draft_section_3_nfr", draft_section_3_nfr)
     builder.add_node("draft_section_3_iface", draft_section_3_iface)
 
-    # Verification matrix — runs after all five writers fan-in
+    # Verification matrix - runs after all five writers fan-in
     builder.add_node("draft_section_4", draft_section_4)
 
     # Diagram pipeline
@@ -181,7 +181,7 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None) -> StateGraph:
 
     # ── Wire edges ────────────────────────────────────────────────────────────
 
-    # Entry — either full draft flow or diagrams-only mode
+    # Entry - either full draft flow or diagrams-only mode
     builder.add_conditional_edges(
         START,
         _route_from_start,

@@ -1,20 +1,20 @@
-WCAG 2.1 / 2.2 — WEB CONTENT ACCESSIBILITY GUIDELINES KEY REQUIREMENTS
+WCAG 2.1 / 2.2 - WEB CONTENT ACCESSIBILITY GUIDELINES KEY REQUIREMENTS
 
 OVERVIEW
 WCAG 2.1 (ISO/IEC 40500) defines how to make web content more accessible to people with disabilities. Compliance is legally mandated in many jurisdictions (ADA in the USA, EN 301 549 in the EU).
 
 FOUR CORE PRINCIPLES (POUR)
-1. PERCEIVABLE — Information must be presentable to users in ways they can perceive.
-2. OPERABLE — UI components and navigation must be operable.
-3. UNDERSTANDABLE — Information and UI operation must be understandable.
-4. ROBUST — Content must be interpretable by diverse assistive technologies.
+1. PERCEIVABLE - Information must be presentable to users in ways they can perceive.
+2. OPERABLE - UI components and navigation must be operable.
+3. UNDERSTANDABLE - Information and UI operation must be understandable.
+4. ROBUST - Content must be interpretable by diverse assistive technologies.
 
 CONFORMANCE LEVELS
 - Level A (minimum): Must satisfy for basic accessibility.
 - Level AA (standard): Required by most accessibility laws; recommended target.
 - Level AAA (enhanced): Highest level; not required for all content.
 
-KEY SUCCESS CRITERIA (Level AA — commonly required)
+KEY SUCCESS CRITERIA (Level AA - commonly required)
 
 PERCEIVABLE
 - 1.1.1 Non-text Content (A): Provide text alternatives for all non-text content.

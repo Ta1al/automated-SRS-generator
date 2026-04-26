@@ -55,7 +55,7 @@ def _heuristic_validate(code: str) -> tuple[bool, str]:
             "(flowchart, sequenceDiagram, classDiagram, erDiagram, \u2026)."
         )
 
-    # Skip bracket balance check for erDiagram — relationship connectors like
+    # Skip bracket balance check for erDiagram - relationship connectors like
     # ||--o{ and ||--|{ use { } as cardinality markers, not bracket pairs.
     first_line = stripped.split("\n")[0].strip().lower()
     if first_line.startswith("erdiagram"):
@@ -81,7 +81,7 @@ async def validate_mermaid_syntax(code: str) -> tuple[bool, str]:
     """
     Validate Mermaid syntax.
 
-    1. Tries mmdc (mermaid-cli) via subprocess — authoritative AST parse.
+    1. Tries mmdc (mermaid-cli) via subprocess - authoritative AST parse.
     2. Falls back to _heuristic_validate when mmdc is not on PATH.
 
     Args:
@@ -93,7 +93,7 @@ async def validate_mermaid_syntax(code: str) -> tuple[bool, str]:
     mmdc_path = shutil.which("mmdc")
     if mmdc_path is None:
         logger.warning(
-            "mmdc not found in PATH — using heuristic Mermaid validator. "
+            "mmdc not found in PATH - using heuristic Mermaid validator. "
             "Install with: npm install -g @mermaid-js/mermaid-cli"
         )
         return _heuristic_validate(code)

@@ -1,6 +1,6 @@
 # Data Flow Diagrams
 
-## DFD Level 0 — System Context
+## DFD Level 0 - System Context
 
 ```mermaid
 graph LR
@@ -12,7 +12,7 @@ graph LR
     Frontend -->|Export Markdown or DOCX| User
 ```
 
-## DFD Level 1 — Main Processes
+## DFD Level 1 - Main Processes
 
 ```mermaid
 graph TD
@@ -47,7 +47,7 @@ graph TD
     P9 --> User
 ```
 
-## DFD Level 2 — Detailed Processing
+## DFD Level 2 - Detailed Processing
 
 ```mermaid
 graph TD
@@ -66,11 +66,11 @@ graph TD
 
     subgraph Backend["Backend (FastAPI)"]
         Guardrail["Guardrail Classifier LLM"]
-        Sessions["/api/sessions — create/delete"]
-        Interact["/api/sessions/{id}/interact — SSE stream"]
-        DocState["/api/sessions/{id}/document — Markdown"]
-        DocxExport["/api/sessions/{id}/document.docx — DOCX"]
-        StateDebug["/api/sessions/{id}/state — debug"]
+        Sessions["/api/sessions - create/delete"]
+        Interact["/api/sessions/{id}/interact - SSE stream"]
+        DocState["/api/sessions/{id}/document - Markdown"]
+        DocxExport["/api/sessions/{id}/document.docx - DOCX"]
+        StateDebug["/api/sessions/{id}/state - debug"]
     end
 
     subgraph GraphExec["LangGraph Execution"]
@@ -85,8 +85,8 @@ graph TD
         DraftS4["draft_section_4"]
         Evaluate["evaluate_completeness"]
         QAReview["qa_review"]
-        AskClarify["ask_clarifying_questions — interrupt"]
-        GenMermaid["generate_mermaid — asyncio.gather"]
+        AskClarify["ask_clarifying_questions - interrupt"]
+        GenMermaid["generate_mermaid - asyncio.gather"]
         ValidateMermaid["validate_mermaid"]
         CorrectMermaid["correct_mermaid"]
         Revise["revise_selected_section"]
@@ -102,7 +102,7 @@ graph TD
     end
 
     subgraph AIData["AI and Retrieval"]
-        Chroma[(ChromaDB — regulatory_docs)]
+        Chroma[(ChromaDB - regulatory_docs)]
         OpenRouter[OpenRouter API]
         Checkpoint[(PostgreSQL Checkpointer)]
     end

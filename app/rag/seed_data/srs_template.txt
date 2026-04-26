@@ -1,4 +1,4 @@
-SOFTWARE REQUIREMENTS SPECIFICATION TEMPLATE — PRACTICAL OUTLINE AND AUTHORING GUIDANCE
+SOFTWARE REQUIREMENTS SPECIFICATION TEMPLATE - PRACTICAL OUTLINE AND AUTHORING GUIDANCE
 
 OVERVIEW
 This seed document captures a modern Software Requirements Specification (SRS) template structure and authoring guidance. It complements IEEE 830 by adding explicit sections for verification, compliance, build and delivery, distribution, observability, and AI/ML-specific requirements.
@@ -17,7 +17,7 @@ The template uses a formal table of contents covering:
 - 4. Verification
 - 5. Appendixes
 
-SECTION 1 — INTRODUCTION
+SECTION 1 - INTRODUCTION
 
 1.1 Document Purpose
 State why the SRS exists, who will use it, and how it supports product, engineering, QA, security, compliance, and operations across the lifecycle.
@@ -34,7 +34,7 @@ List authoritative references such as standards, contracts, policies, interface 
 1.5 Document Overview
 Briefly explain what each major section covers and how readers should navigate the document.
 
-SECTION 2 — PRODUCT OVERVIEW
+SECTION 2 - PRODUCT OVERVIEW
 
 2.1 Product Perspective
 Describe the product context, whether it is new, replacement, or part of a broader system. Summarise upstream and downstream systems, ownership boundaries, support model, and key external dependencies.
@@ -54,7 +54,7 @@ List environmental assumptions and dependencies on external systems, components,
 2.6 Apportioning of Requirements
 Map major requirements to subsystems, services, releases, or increments. Record deferred items explicitly.
 
-SECTION 3 — REQUIREMENTS
+SECTION 3 - REQUIREMENTS
 
 GENERAL RULES
 - Requirements should be testable, unambiguous, and stated with explicit obligation words such as shall, should, or may.
@@ -133,7 +133,7 @@ For systems with ML or LLM components, define requirements that complement funct
 - 3.6.5 Human-in-the-Loop: where human approval or intervention is required and how it is audited
 - 3.6.6 Model Lifecycle and Operations: deployment, monitoring, retraining triggers, rollback, versioning, and archival
 
-SECTION 4 — VERIFICATION
+SECTION 4 - VERIFICATION
 
 Describe how each requirement will be verified and linked to objective evidence. A verification matrix should include:
 - Requirement ID
@@ -153,7 +153,7 @@ Guidance
 - Include non-functional verification for security, performance, reliability, and availability.
 - For AI/ML systems, link evaluation reports, model cards, and dataset versions where relevant.
 
-SECTION 5 — APPENDIXES
+SECTION 5 - APPENDIXES
 
 Include optional supporting material such as glossaries, data dictionaries, reference diagrams, example datasets, or change impact analyses. Reference supporting material rather than duplicating it when possible.
 

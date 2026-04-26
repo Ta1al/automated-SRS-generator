@@ -163,7 +163,7 @@ WRITER_S1_SYSTEM = """\
 You are a technical writer producing Section 1 of a Software Requirements
 Specification strictly aligned with IEEE 830 / ISO/IEC/IEEE 29148.
 
-Write Section 1 — Introduction — in Markdown.
+Write Section 1 - Introduction - in Markdown.
 
 Required sub-sections:
 ## 1. Introduction
@@ -187,7 +187,7 @@ WRITER_S2_SYSTEM = """\
 You are a technical writer producing Section 2 of a Software Requirements
 Specification strictly aligned with IEEE 830 / ISO/IEC/IEEE 29148.
 
-Write Section 2 — Product Overview — in Markdown.
+Write Section 2 - Product Overview - in Markdown.
 
 Required sub-sections:
 ## 2. Product Overview
@@ -211,7 +211,7 @@ WRITER_S3_FR_SYSTEM = """\
 You are a requirements engineer producing the Functional Requirements
 sub-section of Section 3 in an IEEE 830-compliant SRS document.
 
-Write Section 3.2 — Functional Requirements — in Markdown.
+Write Section 3.2 - Functional Requirements - in Markdown.
 
 Format for EACH requirement:
 #### F-NNN: [Concise title]
@@ -230,7 +230,7 @@ WRITER_S3_NFR_SYSTEM = """\
 You are a requirements engineer producing the Quality of Service requirements
 sub-section of Section 3 in an IEEE 830-compliant SRS document.
 
-Write Section 3.3 — Quality of Service Requirements — in Markdown.
+Write Section 3.3 - Quality of Service Requirements - in Markdown.
 
 Include sub-sections:
 ### 3.3.1 Performance Requirements (PE-NNN)
@@ -265,7 +265,7 @@ WRITER_S3_IFACE_SYSTEM = """\
 You are a systems integration engineer producing the External Interface
 Requirements sub-section in an IEEE 830-compliant SRS document.
 
-Write Section 3.1 — External Interface Requirements — in Markdown.
+Write Section 3.1 - External Interface Requirements - in Markdown.
 
 Required sub-sections:
 ### 3.1 External Interface Requirements
@@ -289,7 +289,7 @@ Rules:
 """
 
 WRITER_S4_SYSTEM = """\
-You are a quality assurance lead producing Section 4 — Verification Matrix —
+You are a quality assurance lead producing Section 4 - Verification Matrix -
 in an IEEE 830-compliant Software Requirements Specification.
 
 Write Section 4 in Markdown.
@@ -340,7 +340,7 @@ You are a software architect generating Mermaid.js diagram code.
 
 Generate {diagram_type} based on the provided system context.
 
-STRICT RULES — violation causes rendering failure:
+STRICT RULES - violation causes rendering failure:
 1. Return ONLY the fenced Mermaid code block. No prose, no explanations,
    no text before or after the triple backticks.
 2. Use ONLY these diagram types: flowchart TD, sequenceDiagram, erDiagram.

@@ -70,7 +70,7 @@ erDiagram
 ### USER
 - Primary entity representing authenticated system users.
 - Stores email (unique), optional display name, and bcrypt password hash.
-- One-to-many relationship with CHAT — deleting a user cascades to all their chats.
+- One-to-many relationship with CHAT - deleting a user cascades to all their chats.
 
 ### CHAT
 - Represents a user conversation tied to a backend LangGraph session.

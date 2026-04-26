@@ -1,5 +1,5 @@
 """
-AI-Driven SRS Generator — FastAPI application entry point.
+AI-Driven SRS Generator - FastAPI application entry point.
 
 Start the server:
     python -m app.main
@@ -61,7 +61,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """
     logger.info("=== SRS Generator startup ===")
 
-    # 1. Vector store — synchronous, fast
+    # 1. Vector store - synchronous, fast
     logger.info("Initialising ChromaDB vector store …")
     init_vectorstore()
 
@@ -72,7 +72,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.info("=== Server ready ===")
         yield
 
-    # After yield — checkpointer pool is closed by managed_checkpointer
+    # After yield - checkpointer pool is closed by managed_checkpointer
     logger.info("=== SRS Generator shutdown complete ===")
 
 
@@ -94,7 +94,7 @@ def create_app() -> FastAPI:
         redoc_url="/redoc",
     )
 
-    # CORS — permissive by default for local dev; tighten for production
+    # CORS - permissive by default for local dev; tighten for production
     application.add_middleware(
         CORSMiddleware,
         allow_origins=cors_origins,
