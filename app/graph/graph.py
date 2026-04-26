@@ -14,12 +14,12 @@ Optimised topology — full flow with one major-decision clarification loop:
             draft_section_3_iface
       → fan-in → draft_section_4
             → evaluate_completeness
-                ↙ [major decisions missing]     ↘ [ready to proceed]
-     ask_clarifying_questions         generate_mermaid / finalize_document
-                        ↓
-         classify_requirements
-                        ↓
-                 fan-out … (redraft with answers)
+              ↙ [major decisions missing]     ↘ [major decisions resolved]
+         ask_clarifying_questions                    qa_review
+                   ↓                         ↙ [qa gaps]     ↘ [passed]
+          classify_requirements         ask_clarifying_questions   generate_mermaid / finalize_document
+                   ↓
+               fan-out … (redraft with answers)
       → generate_mermaid      (3 diagrams generated via asyncio.gather internally)
       → validate_mermaid
         ↙ [errors & retries left]   ↘ [valid / budget exhausted]
@@ -52,6 +52,7 @@ from app.graph.nodes import (
     evaluate_completeness,
     finalize_document,
     generate_mermaid,
+    qa_review,
     revise_selected_section,
     retrieve_rag_context,
     validate_mermaid,
@@ -98,9 +99,18 @@ def _route_after_section_4(state: SRSState) -> Literal["generate_mermaid", "fina
 
 def _route_after_evaluation(
     state: SRSState,
-) -> Literal["ask_clarifying_questions", "generate_mermaid", "finalize_document"]:
+) -> Literal["ask_clarifying_questions", "qa_review"]:
     """Ask major clarification questions once when key architectural decisions are missing."""
     if state.get("missing_context", []):
+        return "ask_clarifying_questions"
+    return "qa_review"
+
+
+def _route_after_qa_review(
+    state: SRSState,
+) -> Literal["ask_clarifying_questions", "generate_mermaid", "finalize_document"]:
+    """Gate finalization with QA structural checks and loop on unresolved QA gaps."""
+    if not state.get("is_complete", False) and state.get("qa_gaps", []):
         return "ask_clarifying_questions"
     return _route_after_section_4(state)
 
@@ -161,6 +171,7 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None) -> StateGraph:
     builder.add_node("generate_mermaid", generate_mermaid)
     builder.add_node("validate_mermaid", validate_mermaid)
     builder.add_node("correct_mermaid", correct_mermaid)
+    builder.add_node("qa_review", qa_review)
 
     # Targeted revision pipeline
     builder.add_node("revise_selected_section", revise_selected_section)
@@ -202,6 +213,15 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None) -> StateGraph:
     builder.add_conditional_edges(
         "evaluate_completeness",
         _route_after_evaluation,
+        {
+            "ask_clarifying_questions": "ask_clarifying_questions",
+            "qa_review": "qa_review",
+        },
+    )
+
+    builder.add_conditional_edges(
+        "qa_review",
+        _route_after_qa_review,
         {
             "ask_clarifying_questions": "ask_clarifying_questions",
             "generate_mermaid": "generate_mermaid",
