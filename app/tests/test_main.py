@@ -392,6 +392,100 @@ Section 2 provides context and Section 3 details requirements.
         assert result.count("### 1.1 Purpose") == 1
 
 
+class TestSectionOutputNormalization:
+    @pytest.mark.asyncio
+    async def test_draft_section_2_unwraps_fence_and_enforces_heading(self):
+        from langchain_core.messages import AIMessage
+
+        from app.graph.nodes import draft_section_2
+
+        mock_response = AIMessage(
+            content=(
+                "```markdown\n"
+                "### Product Perspective\n"
+                "The platform extends existing operations.\n"
+                "```"
+            )
+        )
+
+        state: Any = {
+            "chat_history": [],
+            "document_buffer": "",
+            "missing_context": [],
+            "requirements": [],
+            "rag_context": "",
+            "sections": {},
+            "project_title": "",
+        }
+
+        with patch(
+            "app.graph.nodes._get_llm",
+            return_value=MagicMock(ainvoke=AsyncMock(return_value=mock_response)),
+        ):
+            result = await draft_section_2(state)
+
+        section = result["sections"]["s2"]
+        assert "```" not in section
+        assert section.startswith("## 2. Product Overview")
+
+    @pytest.mark.asyncio
+    async def test_draft_section_3_iface_enforces_numbered_heading(self):
+        from langchain_core.messages import AIMessage
+
+        from app.graph.nodes import draft_section_3_iface
+
+        mock_response = AIMessage(
+            content="#### IF-001: Payment Gateway\n**Requirement:** The API shall use TLS 1.3."
+        )
+
+        state: Any = {
+            "chat_history": [],
+            "document_buffer": "",
+            "missing_context": [],
+            "requirements": [],
+            "rag_context": "",
+            "sections": {},
+            "project_title": "",
+        }
+
+        with patch(
+            "app.graph.nodes._get_llm",
+            return_value=MagicMock(ainvoke=AsyncMock(return_value=mock_response)),
+        ):
+            result = await draft_section_3_iface(state)
+
+        section = result["sections"]["s3_iface"]
+        assert section.startswith("### 3.1 External Interface Requirements")
+
+
+class TestGraphQaRouting:
+    def test_route_after_evaluation_uses_qa_review_when_no_major_gaps(self):
+        from app.graph.graph import _route_after_evaluation
+
+        state: Any = {"missing_context": []}
+        assert _route_after_evaluation(state) == "qa_review"
+
+    def test_route_after_qa_review_loops_for_qas_gaps(self):
+        from app.graph.graph import _route_after_qa_review
+
+        state: Any = {
+            "is_complete": False,
+            "qa_gaps": [{"question": "Clarify SLA target"}],
+            "generate_diagrams": False,
+        }
+        assert _route_after_qa_review(state) == "ask_clarifying_questions"
+
+    def test_route_after_qa_review_respects_diagram_toggle(self):
+        from app.graph.graph import _route_after_qa_review
+
+        state: Any = {
+            "is_complete": True,
+            "qa_gaps": [],
+            "generate_diagrams": True,
+        }
+        assert _route_after_qa_review(state) == "generate_mermaid"
+
+
 # ════════════════════════════════════════════════════════════════════════════
 # Section 3b — Mermaid Generation Resilience
 # ════════════════════════════════════════════════════════════════════════════
