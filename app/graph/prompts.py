@@ -19,14 +19,28 @@ From the user's message, identify and document:
 2. Primary actions / workflows the system must support
 3. Any performance, security, or legal constraints mentioned (even implicitly)
 4. Target platforms or deployment environment
+5. For EACH workflow: What is the success metric? How do you measure "done"?
 
 Produce a concise preliminary outline in this JSON format:
 {{
   "project_title": "...",
   "entities": ["..."],
-  "workflows": ["..."],
+  "workflows": [
+    {{
+      "name": "Workflow name",
+      "description": "What the system does",
+      "success_metric": "How you measure success or null if unclear"
+    }}
+  ],
   "constraints_mentioned": ["..."],
   "platform_hints": ["..."],
+  "preliminary_requirement_candidates": [
+    {{
+      "type": "F|PE|SE|A|FT|L",
+      "description": "One key requirement",
+      "measurement_hint": "How it should be tested/measured or null if vague"
+    }}
+  ],
   "preliminary_sections": {{
     "product_name": "...",
     "product_purpose": "...",
@@ -38,6 +52,10 @@ Produce a concise preliminary outline in this JSON format:
 Be objective. Do not invent information not present in the user's message.
 Always infer and provide a concise 3-8 word `project_title` from the user's prompt.
 If information is absent for other fields, use null for that field.
+
+IMPORTANT: For workflows and requirement candidates, capture any vague language
+(e.g., "fast", "secure", "easy") in the measurement_hint as "[NEEDS_SPECIFICATION]".
+This helps downstream nodes flag quality gaps early.
 """
 
 # ── Completeness Evaluator ────────────────────────────────────────────────────
@@ -96,7 +114,7 @@ Do NOT return any prose outside the JSON object.
 
 CLASSIFIER_SYSTEM = """\
 You are an expert software requirements engineer tasked with classifying
-requirements using a precise 12-label taxonomy.
+requirements using a precise 12-label taxonomy AND flagging quality issues.
 
 LABEL TAXONOMY:
   F   - Functional: Observable system behaviour, business logic, data processing
@@ -112,34 +130,25 @@ LABEL TAXONOMY:
   SE  - Security: Cryptography, access control, vulnerability protection
   US  - Usability: User adoption metrics, training requirements, SUS scores
 
-FEW-SHOT EXAMPLES (from PROMISE dataset and IEEE 830 corpus):
+FEW-SHOT EXAMPLES (with quality issue flagging):
 
 Input: "The system must allow users to register with email and password."
-Output: [{{"id": "F-001", "labels": ["F"]}}]
+Output: [{{"id": "F-001", "labels": ["F"], "quality_issues": []}}]
 
 Input: "The payment API must respond within 200 milliseconds at the 95th percentile."
-Output: [{{"id": "PE-001", "labels": ["PE"]}}]
+Output: [{{"id": "PE-001", "labels": ["PE"], "quality_issues": []}}]
+
+Input: "The system must be fast and secure."
+Output: [{{"id": "PE-001", "labels": ["PE"], "quality_issues": ["vague", "unmeasurable"]}}]
 
 Input: "Database failover must complete within 30 seconds of primary node failure."
-Output: [{{"id": "FT-001", "labels": ["FT"]}}]
+Output: [{{"id": "FT-001", "labels": ["FT"], "quality_issues": []}}]
 
-Input: "The system must maintain 99.95% uptime measured on a rolling 30-day window."
-Output: [{{"id": "A-001", "labels": ["A"]}}]
-
-Input: "The system must encrypt all patient records using AES-256 and comply with HIPAA Security Rule."
-Output: [{{"id": "SE-001", "labels": ["SE", "L"]}}]
-
-Input: "The system must process credit card data and must never store CVV codes, complying with PCI-DSS v4.0."
-Output: [{{"id": "SE-002", "labels": ["SE", "L"]}}]
-
-Input: "The system must scale horizontally to serve 500,000 concurrent users without degraded response times."
-Output: [{{"id": "SC-001", "labels": ["SC", "PE"]}}]
-
-Input: "All UI components must achieve WCAG 2.1 Level AA conformance."
-Output: [{{"id": "LF-001", "labels": ["LF", "L"]}}]
-
-Input: "The system must implement circuit breakers and queue requests during payment processor outages."
-Output: [{{"id": "FT-002", "labels": ["FT", "A"]}}]
+QUALITY ISSUE FLAGS:
+- "vague": Uses banned words without numeric thresholds (fast, secure, easy, simple, efficient, scalable, user-friendly)
+- "unmeasurable": Lacks acceptance criteria or testable outcome
+- "missing_threshold": Should have numeric target but doesn't (PE/A/SC)
+- "missing_technical_specificity": Should cite specific control/standard but doesn't (SE/L)
 
 IMPORTANT DISTINCTIONS:
 - Performance (PE) = specific numeric thresholds (ms, RPS, MB). Scalability (SC) = growth capacity.
@@ -150,7 +159,7 @@ You will receive a list of requirement objects with {{"id": "...", "text": "..."
 
 Return ONLY a valid JSON array in this format:
 [
-  {{"id": "requirement-id", "labels": ["LABEL1", "LABEL2"]}},
+  {{"id": "requirement-id", "labels": ["LABEL1", "LABEL2"], "quality_issues": ["flag1", "flag2"]}},
   ...
 ]
 
@@ -223,7 +232,35 @@ Rules:
 - Cover ALL functional workflows identified in the context.
 - Each statement must be atomic, verifiable, and unambiguous.
 - Do NOT use: fast, secure, user-friendly, easy, efficient, scalable.
+
+GOOD EXAMPLES:
+
+#### F-001: User account registration
+**Requirement:** The system shall enable users to create an account by providing an email address and password.
+**Acceptance Criteria:** Given a new user, when the user submits a valid email and password, then the system creates the account and sends a confirmation email within 5 seconds.
+
+#### F-002: Multi-factor authentication
+**Requirement:** The system shall enforce time-based one-time password (TOTP) verification after password entry.
+**Acceptance Criteria:** Given a user with MFA enabled, when the user completes password authentication, then the system displays a TOTP prompt and allows 30 seconds for code entry.
+
+#### F-003: Payment processing
+**Requirement:** The system shall process credit card payments through the Stripe API.
+**Acceptance Criteria:** Given a user in the checkout flow with a valid card, when the user submits the form, then the system calls Stripe's charge endpoint, returns transaction ID within 3 seconds, and records the transaction.
+
+BAD EXAMPLES (do NOT produce):
+
+#### F-001: User login (VAGUE - no acceptance criteria)
+**Requirement:** The system shall let users log in quickly and securely.
+**Acceptance Criteria:** User can log in.
+
+#### F-002: File handling (UNMEASURABLE - too broad)
+**Requirement:** The system shall handle files properly.
+**Acceptance Criteria:** System processes files well.
+
+INSTRUCTIONS FOR THIS DOCUMENT:
 - Return ONLY the Markdown content starting from the ### 3.2 heading.
+- Include every workflow mentioned in context as a distinct F-NNN requirement.
+- If context lacks detail for a requirement, add [PLACEHOLDER_NEEDS_SPECIFICATION] with a note explaining what additional detail is needed.
 """
 
 WRITER_S3_NFR_SYSTEM = """\
@@ -232,7 +269,7 @@ sub-section of Section 3 in an IEEE 830-compliant SRS document.
 
 Write Section 3.3 - Quality of Service Requirements - in Markdown.
 
-Include sub-sections:
+Include sub-sections for applicable requirement types:
 ### 3.3.1 Performance Requirements (PE-NNN)
 ### 3.3.2 Security Requirements (SE-NNN)
 ### 3.3.3 Availability Requirements (A-NNN)
@@ -252,12 +289,42 @@ For EACH requirement in every 3.3.x subsection, use this exact block format:
 
 Where PREFIX is one of: PE, SE, A, SC, FT, MN, PO, O, US, LF, L.
 
-Rules:
-- ALL performance values must be numeric and specific (e.g., "< 200 ms at P95").
+GOOD EXAMPLES:
+
+#### PE-001: API response latency
+**Requirement:** The system shall respond to all API requests within 200 milliseconds at the 95th percentile under normal load.
+**Acceptance Criteria:** When the system is under normal load (100 concurrent users), then 95% of API responses complete within 200ms, measured over a 5-minute window.
+
+#### SE-001: Encryption for sensitive data
+**Requirement:** The system shall encrypt all personally identifiable information (PII) at rest using AES-256 encryption in CBC mode.
+**Acceptance Criteria:** Given a user record stored in the database, when an administrator inspects the database directly, then all email, phone, and name fields are encrypted with AES-256.
+
+#### A-001: System availability
+**Requirement:** The system shall maintain 99.95% uptime measured on a rolling 30-day window during production hours (8 AM–6 PM UTC).
+**Acceptance Criteria:** When measured over any 30-day period, the system shall experience no more than 21.6 minutes of unplanned downtime.
+
+#### L-001: GDPR compliance
+**Requirement:** The system shall comply with GDPR Article 5 (data minimization) by retaining user data only for as long as necessary.
+**Acceptance Criteria:** Given a user account flagged for deletion, when 30 days have passed, then the system automatically purges all associated data.
+
+BAD EXAMPLES (do NOT produce):
+
+#### PE-001: Fast response (VAGUE - no threshold)
+**Requirement:** The system shall be fast.
+**Acceptance Criteria:** System responds quickly.
+
+#### SE-001: Secure (UNMEASURABLE - no specific control)
+**Requirement:** The system shall be secure.
+**Acceptance Criteria:** No one can break into it.
+
+INSTRUCTIONS FOR THIS DOCUMENT:
+- ALL performance values must be numeric and specific (e.g., "< 200 ms at P95", not "fast").
 - ALL availability targets must specify measurement window (e.g., "99.9% monthly").
+- ALL security requirements must cite specific controls (e.g., "AES-256", "TLS 1.3", "OAuth 2.0").
 - Include relevant regulatory requirements identified from the RAG context.
 - IDs must be sequential within each PREFIX family starting at 001.
-- Do not output plain prose-only bullets; every requirement must include both fields above.
+- Do not output plain prose-only bullets; every requirement must include both **Requirement:** and **Acceptance Criteria:** fields.
+- If context lacks detail, use [PLACEHOLDER_NEEDS_SPECIFICATION] with an explanatory note.
 - Return ONLY the Markdown content starting from the ### 3.3 heading.
 """
 
@@ -440,5 +507,71 @@ Return ONLY a valid JSON object:
 }}
 
 If all four criteria are satisfied, return: {{"passed": true, "gaps": []}}
+Do NOT return any prose outside the JSON object.
+"""
+
+# ── QA Requirement Quality Checker ────────────────────────────────────────────
+
+QA_REQUIREMENT_QUALITY_SYSTEM = """\
+You are a rigorous quality assurance engineer reviewing a Software Requirements
+Specification for requirement quality and measurability.
+
+Your task: Evaluate the provided requirements for QUALITY and SPECIFICITY, not
+just structural presence.
+
+For each requirement ID, assess:
+
+1. SPECIFICITY: Does it contain concrete, verifiable language?
+   - BAD: "The system shall be fast"
+   - GOOD: "The system shall respond within 200ms at P95"
+
+2. MEASURABILITY: Is there a clear, testable acceptance condition?
+   - BAD: "The system shall handle user data properly"
+   - GOOD: "The system shall encrypt PII using AES-256 CBC mode"
+
+3. MISSING THRESHOLDS (for PE/A/SC): Does numeric target exist?
+   - BAD PE: "The system shall be responsive"
+   - GOOD PE: "The system shall process payments within 3 seconds"
+
+4. MISSING TECHNICAL SPECIFICITY (for SE/L): Does it cite specific control/standard?
+   - BAD SE: "The system shall be secure"
+   - GOOD SE: "The system shall enforce OAuth 2.0 with PKCE flow"
+
+5. TESTABILITY: Is there a way to verify pass/fail?
+   - BAD: "The system shall be maintainable"
+   - GOOD: "The system shall include inline code documentation for all public methods"
+
+Return ONLY a valid JSON object in this format:
+{{
+  "passed": true | false,
+  "quality_issues": [
+    {{
+      "requirement_id": "F-001",
+      "issue": "vague_language",
+      "problem": "Uses banned word 'fast' without numeric threshold",
+      "suggested_fix": "The system shall respond within 500ms at P95 latency",
+      "severity": "high"
+    }},
+    {{
+      "requirement_id": "PE-003",
+      "issue": "missing_threshold",
+      "problem": "Performance requirement has no numeric target",
+      "suggested_fix": "Add 'within X seconds' or 'at Y% resource utilization'",
+      "severity": "high"
+    }},
+    ...
+  ]
+}}
+
+SEVERITY LEVELS:
+- "high": Requirement is unmeasurable/untestable; must fix before document approval
+- "medium": Requirement is vague but partially measurable; should improve
+- "low": Requirement is acceptable but could be more specific
+
+Passed threshold: ≤ 20% of requirements have HIGH severity issues.
+
+If quality is acceptable: {{"passed": true, "quality_issues": []}}
+If too many issues: {{"passed": false, "quality_issues": [...]}}
+
 Do NOT return any prose outside the JSON object.
 """

@@ -569,6 +569,139 @@ async def classify_requirements(state: SRSState) -> dict:
     return {"requirements": updated}
 
 
+# ── Node 5.5: Validate and Enrich Requirements Quality ─────────────────────
+
+async def validate_and_enrich_requirements(state: SRSState) -> dict:
+    """
+    LLM-as-a-Judge pass to ensure requirements are measurable, specific, and testable.
+    
+    For each requirement flagged with quality_issues during classification, use LLM
+    to enrich or rewrite it with concrete, verifiable language.
+    """
+    llm = _get_llm(temperature=0.2)  # Some creativity for enrichment
+    
+    requirements: list[Requirement] = state.get("requirements", [])
+    if not requirements:
+        return {"requirements": []}
+    
+    context = _build_writing_context(state)
+    
+    # Check which requirements have quality issues
+    to_enrich: list[tuple[Requirement, list[str]]] = []
+    for req in requirements:
+        # If the requirement came with quality_issues flag (from enhanced classifier)
+        # Note: The enhanced classifier now returns quality_issues in the JSON
+        # We need to check if the original classification response included this
+        # For now, we'll do a heuristic check for vague language
+        text_lower = req["text"].lower()
+        vague_words = ["fast", "secure", "easy", "simple", "efficient", "scalable", 
+                       "user-friendly", "good", "nice", "modern"]
+        
+        has_vague = any(f" {word}" in f" {text_lower}" or f" {word}s" in f" {text_lower}" 
+                       for word in vague_words)
+        
+        if has_vague or not req.get("criteria"):
+            to_enrich.append((req, vague_words if has_vague else []))
+    
+    if not to_enrich:
+        return {"requirements": requirements}  # All requirements already good
+    
+    logger.info("Found %d requirements needing quality enrichment.", len(to_enrich))
+    
+    # Batch enrich (up to 10 at a time for efficiency)
+    enrichment_tasks = []
+    for req, vague_found in to_enrich[:10]:
+        enrichment_tasks.append(_enrich_single_requirement(llm, req, vague_found, context))
+    
+    enrichment_results = await asyncio.gather(*enrichment_tasks, return_exceptions=True)
+    
+    # Build enriched requirement map
+    enriched_map: dict[str, Requirement] = {}
+    for result in enrichment_results:
+        if isinstance(result, Exception):
+            logger.exception("Requirement enrichment task failed.", exc_info=result)
+            continue
+        if result:
+            enriched_map[result["id"]] = result
+    
+    # Merge enriched requirements back into list
+    final_requirements: list[Requirement] = []
+    for req in requirements:
+        if req["id"] in enriched_map:
+            final_requirements.append(enriched_map[req["id"]])
+        else:
+            final_requirements.append(req)
+    
+    return {"requirements": final_requirements}
+
+
+async def _enrich_single_requirement(
+    llm: ChatOpenAI,
+    requirement: Requirement,
+    vague_words: list[str],
+    context: str,
+) -> Requirement | None:
+    """
+    Use LLM to rewrite a requirement with concrete, measurable language.
+    """
+    label_hint = ", ".join(requirement.get("labels", ["F"]))
+    vague_hint = ", ".join(vague_words) if vague_words else "unmeasurable"
+    
+    enrichment_prompt = f"""\
+The following requirement is too vague and needs to be rewritten with specific, measurable language.
+
+Original: {requirement['text']}
+Issue: Uses vague language ({vague_hint}); lacks acceptance criteria.
+Requirement type: {label_hint}
+Project context: {context[:1000]}
+
+Rewrite this requirement to be:
+1. Specific with concrete details (not "fast", but "< 200ms at P95")
+2. Include an acceptance criterion with measurable outcome
+3. Atomic and testable
+
+Return ONLY the rewritten requirement text in this format:
+**Requirement:** [The system shall ...]
+**Acceptance Criteria:** Given [precondition], when [action], then [measurable outcome].
+
+Do not include any other text or explanation.
+"""
+    
+    response = await _llm_invoke_with_retry(
+        llm,
+        [HumanMessage(content=enrichment_prompt)],
+        node_name="validate_and_enrich_requirements",
+        max_attempts=2,
+    )
+    
+    enriched_text = _ai_text(response)
+    
+    # Extract requirement and criteria if possible
+    requirement_match = re.search(
+        r"\*\*Requirement:\*\*\s*(.+?)(?=\*\*Acceptance|$)",
+        enriched_text,
+        re.DOTALL | re.IGNORECASE,
+    )
+    criteria_match = re.search(
+        r"\*\*Acceptance\s+Criteria:\*\*\s*(.+?)(?=$)",
+        enriched_text,
+        re.DOTALL | re.IGNORECASE,
+    )
+    
+    new_text = requirement_match.group(1).strip() if requirement_match else enriched_text.strip()
+    new_criteria = criteria_match.group(1).strip() if criteria_match else ""
+    
+    if not new_text:
+        return None  # Enrichment failed
+    
+    return Requirement(
+        id=requirement["id"],
+        text=new_text,
+        labels=requirement.get("labels", ["F"]),
+        criteria=new_criteria,
+    )
+
+
 # ── Node 6: Draft Section 1 ───────────────────────────────────────────────────
 
 
@@ -972,9 +1105,16 @@ async def correct_mermaid(state: SRSState) -> dict:
 
 
 async def qa_review(state: SRSState) -> dict:
-    """LLM-as-a-Judge pass over the assembled draft document."""
-    llm = _get_llm(temperature=0.0)
-
+    """
+    Two-pass LLM-as-a-Judge quality check:
+    1. Structural check: Coverage, traceability, formatting
+    2. Requirement quality check: Specificity, measurability, testability
+    
+    If either pass fails, populate qa_gaps with specific guidance.
+    """
+    llm_structural = _get_llm(temperature=0.0)
+    llm_quality = _get_llm(temperature=0.0)
+    
     sections = state.get("sections", {})
     draft = "\n\n".join(
         [
@@ -986,27 +1126,88 @@ async def qa_review(state: SRSState) -> dict:
             sections.get("s4", ""),
         ]
     )
-
-    response = await _llm_invoke_with_retry(
-        llm,
+    
+    # ── Pass 1: Structural check ──────────────────────────────────────────────
+    response_structural = await _llm_invoke_with_retry(
+        llm_structural,
         [
             SystemMessage(content=prompts.QA_REVIEWER_SYSTEM),
             HumanMessage(content=f"Review this SRS draft:\n\n{draft[:12000]}"),
         ],
-        node_name="qa_review",
+        node_name="qa_review_structural",
     )
-
+    
+    structural_passed = False
+    structural_gaps = []
     try:
-        data = _parse_json(_ai_text(response))
-        passed: bool = bool(data.get("passed", False))
-        gaps = _normalize_questions(data.get("gaps", []))
+        data = _parse_json(_ai_text(response_structural))
+        structural_passed: bool = bool(data.get("passed", False))
+        structural_gaps = _normalize_questions(data.get("gaps", []))
     except (json.JSONDecodeError, ValueError):
-        logger.warning("QA reviewer returned non-JSON; defaulting to passed=True.")
-        passed = True
-        gaps = []
-
-    logger.info("QA review: passed=%s, gaps=%d", passed, len(gaps))
-    return {"is_complete": passed, "qa_gaps": gaps}
+        logger.warning("QA structural reviewer returned non-JSON; defaulting to passed=True.")
+        structural_passed = True
+        structural_gaps = []
+    
+    logger.info("QA structural pass: passed=%s, gaps=%d", structural_passed, len(structural_gaps))
+    
+    # ── Pass 2: Requirement quality check ─────────────────────────────────────
+    # Extract top 30 requirements from draft for quality review
+    requirement_lines = [
+        line for line in draft.split("\n")
+        if re.match(r"^####\s+[A-Z]+-\d+:", line)
+    ]
+    requirements_sample = "\n".join(requirement_lines[:30])
+    
+    response_quality = await _llm_invoke_with_retry(
+        llm_quality,
+        [
+            SystemMessage(content=prompts.QA_REQUIREMENT_QUALITY_SYSTEM),
+            HumanMessage(content=f"Review requirement quality:\n\n{requirements_sample}"),
+        ],
+        node_name="qa_review_quality",
+    )
+    
+    quality_passed = False
+    quality_issues = []
+    try:
+        data = _parse_json(_ai_text(response_quality))
+        quality_passed: bool = bool(data.get("passed", True))  # Default to pass if unclear
+        quality_issues_raw = data.get("quality_issues", [])
+        
+        # Count high-severity issues
+        high_severity_count = sum(
+            1 for issue in quality_issues_raw
+            if isinstance(issue, dict) and issue.get("severity") == "high"
+        )
+        
+        # Fail if > 20% of sampled requirements have HIGH severity issues
+        if high_severity_count > max(1, len(requirement_lines) // 5):
+            quality_passed = False
+        
+        # Convert quality issues to ClarificationQuestion format
+        for issue in quality_issues_raw[:5]:  # Limit to 5 issues in output
+            if isinstance(issue, dict):
+                quality_issues.append(
+                    ClarificationQuestion(
+                        category="Requirement Quality",
+                        question=f"{issue.get('requirement_id', 'REQ')}: {issue.get('problem', 'Quality issue')}",
+                        suggested_options=[issue.get("suggested_fix", "Improve requirement specificity")],
+                        rationale=issue.get("issue", "Requirement needs refinement"),
+                    )
+                )
+    except (json.JSONDecodeError, ValueError):
+        logger.warning("QA quality reviewer returned non-JSON; defaulting to passed=True.")
+        quality_passed = True
+        quality_issues = []
+    
+    logger.info("QA quality pass: passed=%s, issues=%d", quality_passed, len(quality_issues))
+    
+    # ── Combine results ───────────────────────────────────────────────────────
+    overall_passed = structural_passed and quality_passed
+    all_gaps = structural_gaps + quality_issues
+    
+    logger.info("QA review complete: passed=%s, total_gaps=%d", overall_passed, len(all_gaps))
+    return {"is_complete": overall_passed, "qa_gaps": all_gaps}
 
 
 # ── Node 14: Finalize document ────────────────────────────────────────────────

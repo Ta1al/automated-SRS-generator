@@ -147,6 +147,7 @@ class SRSState(TypedDict):
     is_complete: bool
     qa_gaps: list[ClarificationQuestion]
     major_decisions_asked: bool
+    requirement_quality_remediation_attempts: int
 
     # ── Final output ──────────────────────────────────────────────────────────
     final_document: str

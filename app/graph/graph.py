@@ -55,6 +55,7 @@ from app.graph.nodes import (
     qa_review,
     revise_selected_section,
     retrieve_rag_context,
+    validate_and_enrich_requirements,
     validate_mermaid,
 )
 from app.graph.state import SRSState
@@ -156,6 +157,7 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None) -> StateGraph:
     builder.add_node("evaluate_completeness", evaluate_completeness)
     builder.add_node("ask_clarifying_questions", ask_clarifying_questions)
     builder.add_node("classify_requirements", classify_requirements)
+    builder.add_node("validate_and_enrich_requirements", validate_and_enrich_requirements)
 
     # All five section writers run in parallel via Send fan-out
     builder.add_node("draft_section_1", draft_section_1)
@@ -193,10 +195,11 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None) -> StateGraph:
     )
     builder.add_edge("retrieve_rag_context", "elicit_requirements")
     builder.add_edge("elicit_requirements", "classify_requirements")
+    builder.add_edge("classify_requirements", "validate_and_enrich_requirements")
 
-    # classify_requirements → fan-out ALL five section writers in parallel
+    # validate_and_enrich_requirements → fan-out ALL five section writers in parallel
     builder.add_conditional_edges(
-        "classify_requirements",
+        "validate_and_enrich_requirements",
         _fan_out_all_sections,
     )
 

@@ -231,6 +231,144 @@ async def _is_interrupted(app_state: Any, thread_id: str) -> bool:
 
 # ── SSE event generator ───────────────────────────────────────────────────────
 
+# Node display names and typical durations for better UX feedback
+_NODE_DISPLAY_NAMES = {
+    "retrieve_rag_context": "Retrieving regulatory context",
+    "elicit_requirements": "Eliciting requirements from input",
+    "classify_requirements": "Classifying requirements",
+    "validate_and_enrich_requirements": "Validating & enriching requirements",
+    "draft_section_1": "Drafting Introduction",
+    "draft_section_2": "Drafting Product Overview",
+    "draft_section_3_iface": "Drafting External Interfaces",
+    "draft_section_3_fr": "Drafting Functional Requirements",
+    "draft_section_3_nfr": "Drafting Quality Requirements",
+    "draft_section_4": "Drafting Verification Matrix",
+    "evaluate_completeness": "Evaluating completeness",
+    "ask_clarifying_questions": "Waiting for clarification",
+    "generate_mermaid": "Generating diagrams",
+    "validate_mermaid": "Validating diagrams",
+    "correct_mermaid": "Correcting diagrams",
+    "qa_review": "Running QA review",
+    "revise_selected_section": "Revising selected section",
+    "finalize_document": "Finalizing document",
+}
+
+_TYPICAL_DURATION_MS = {
+    "retrieve_rag_context": 2000,
+    "elicit_requirements": 8000,
+    "classify_requirements": 6000,
+    "validate_and_enrich_requirements": 10000,
+    "draft_section_1": 8000,
+    "draft_section_2": 6000,
+    "draft_section_3_iface": 7000,
+    "draft_section_3_fr": 9000,
+    "draft_section_3_nfr": 12000,
+    "draft_section_4": 5000,
+    "evaluate_completeness": 5000,
+    "generate_mermaid": 15000,
+    "validate_mermaid": 2000,
+    "correct_mermaid": 8000,
+    "qa_review": 8000,
+    "revise_selected_section": 6000,
+    "finalize_document": 3000,
+}
+
+_PARALLEL_NODES = {"draft_section_1", "draft_section_2", "draft_section_3_iface", "draft_section_3_fr", "draft_section_3_nfr"}
+
+# Ordered sequence of nodes for progress tracking (excluding ask_clarifying_questions which is conditional)
+_NODE_SEQUENCE_FULL = [
+    "retrieve_rag_context",
+    "elicit_requirements",
+    "classify_requirements",
+    "validate_and_enrich_requirements",
+    "draft_section_1",  # These 5 run in parallel but count as 1 step
+    "draft_section_2",
+    "draft_section_3_iface",
+    "draft_section_3_fr",
+    "draft_section_3_nfr",
+    "draft_section_4",
+    "evaluate_completeness",
+    "generate_mermaid",
+    "validate_mermaid",
+    "qa_review",
+    "finalize_document",
+]
+
+_NODE_SEQUENCE_DIAGRAMS_ONLY = [
+    "generate_mermaid",
+    "validate_mermaid",
+    "finalize_document",
+]
+
+_NODE_SEQUENCE_SECTION_REVISION = [
+    "revise_selected_section",
+    "finalize_document",
+]
+
+
+def _calculate_progress(
+    current_node: str,
+    node_sequence: list[str],
+    finished_nodes: set[str],
+    started_nodes: set[str],
+    parallel_nodes: set[str],
+) -> dict[str, int]:
+    """Calculate current step and total steps for progress display.
+    
+    Handles parallel nodes as a single step.
+    """
+    total_steps = len([n for n in node_sequence if n not in parallel_nodes]) + (1 if any(n in parallel_nodes for n in node_sequence) else 0)
+    
+    current_step = 0
+    parallel_group_finished = False
+    
+    for node in node_sequence:
+        if node in parallel_nodes:
+            # Count parallel nodes as a single step when all are finished
+            if node in finished_nodes and not parallel_group_finished:
+                parallel_group_finished = True
+                current_step += 1
+        else:
+            if node in finished_nodes:
+                current_step += 1
+            elif node == current_node or node in started_nodes:
+                # Current node or already started
+                current_step += 1
+                break
+    
+    return {
+        "step": max(1, current_step),
+        "total_steps": total_steps,
+    }
+
+
+def _calculate_estimated_remaining_ms(
+    node_sequence: list[str],
+    finished_nodes: set[str],
+    parallel_nodes: set[str],
+    durations_map: dict[str, int] | None = None,
+) -> int:
+    """Calculate estimated remaining time based on unfinished nodes."""
+    remaining_ms = 0
+    parallel_group_counted = False
+    
+    for node in node_sequence:
+        if node not in finished_nodes:
+            if node in parallel_nodes:
+                # Only count the max duration of the parallel group once
+                if not parallel_group_counted:
+                    dm = durations_map or _TYPICAL_DURATION_MS
+                    remaining_ms += max(
+                        dm.get(n, 5000)
+                        for n in parallel_nodes
+                        if n in node_sequence
+                    )
+                    parallel_group_counted = True
+            else:
+                remaining_ms += (durations_map or _TYPICAL_DURATION_MS).get(node, 5000)
+    
+    return remaining_ms
+
 
 async def _stream_graph(
     app_state: Any,
@@ -258,6 +396,22 @@ async def _stream_graph(
     """
     graph = app_state.graph
     config = {"configurable": {"thread_id": thread_id}}
+    
+    # Determine which node sequence we're using based on mode
+    if mode == "diagrams_only":
+        node_sequence = _NODE_SEQUENCE_DIAGRAMS_ONLY
+    elif mode == "section_revision":
+        node_sequence = _NODE_SEQUENCE_SECTION_REVISION
+    else:
+        node_sequence = _NODE_SEQUENCE_FULL
+    
+    # Track timing and progress
+    import time
+    node_start_times: dict[str, float] = {}
+    nodes_started: set[str] = set()
+    nodes_finished: set[str] = set()
+    parallel_group_started = False
+    stream_start_time = time.time()
 
     try:
         if is_resume:
@@ -350,13 +504,112 @@ async def _stream_graph(
                                 "data": json.dumps({"project_title": project_title}),
                             }
 
-                    # Emit node progress status
+                    # ── Emit node progress status with enriched timing info ──
+                    import time
+                    current_time = time.time()
+                    total_elapsed_ms = int((current_time - stream_start_time) * 1000)
+                    
+                    # Mark node as started if first time we see it
+                    is_first_encounter = node_name not in nodes_started
+                    if is_first_encounter:
+                        nodes_started.add(node_name)
+                        node_start_times[node_name] = current_time
+                        
+                        # Emit "started" event immediately for UX feedback
+                        description = _NODE_DISPLAY_NAMES.get(node_name, node_name)
+                        
+                        # Calculate progress at node start
+                        progress_info = _calculate_progress(
+                            node_name,
+                            node_sequence,
+                            nodes_finished,
+                            nodes_started,
+                            _PARALLEL_NODES,
+                        )
+
+                        # Resolve durations map from app_state EMA store if available
+                        durations_map = getattr(app_state, "srs_node_ema", None) or _TYPICAL_DURATION_MS
+
+                        # Compute estimated remaining ms using current estimates
+                        estimated_remaining_ms = _calculate_estimated_remaining_ms(
+                            node_sequence, nodes_finished, _PARALLEL_NODES, durations_map
+                        )
+
+                        yield {
+                            "event": "status",
+                            "data": json.dumps(
+                                {
+                                    "node": node_name,
+                                    "status": "started",
+                                    "description": description,
+                                    "step": progress_info["step"],
+                                    "total_steps": progress_info["total_steps"],
+                                    "elapsed_ms": total_elapsed_ms,
+                                    "typical_duration_ms": int(durations_map.get(node_name, 5000)),
+                                    "estimated_remaining_ms": estimated_remaining_ms,
+                                }
+                            ),
+                        }
+                    
+                    # Calculate elapsed time for this node
+                    node_elapsed_ms = int((current_time - node_start_times[node_name]) * 1000)
+                    
+                    # Get description
+                    description = _NODE_DISPLAY_NAMES.get(node_name, node_name)
+                    
+                    # Calculate progress for finished event
+                    nodes_finished.add(node_name)
+                    progress_info = _calculate_progress(
+                        node_name,
+                        node_sequence,
+                        nodes_finished,
+                        nodes_started,
+                        _PARALLEL_NODES,
+                    )
+                    
+                    # Get typical duration for estimate - prefer EMA stored in app_state
+                    durations_map = getattr(app_state, "srs_node_ema", None) or _TYPICAL_DURATION_MS
+                    typical_ms = int(durations_map.get(node_name, 5000))
+
+                    # Calculate estimated remaining time using EMA durations
+                    estimated_remaining_ms = _calculate_estimated_remaining_ms(
+                        node_sequence,
+                        nodes_finished,
+                        _PARALLEL_NODES,
+                        durations_map,
+                    )
+                    
                     yield {
                         "event": "status",
                         "data": json.dumps(
-                            {"node": node_name, "status": "finished"}
+                            {
+                                "node": node_name,
+                                "status": "finished",
+                                "description": description,
+                                "step": progress_info["step"],
+                                "total_steps": progress_info["total_steps"],
+                                "elapsed_ms": total_elapsed_ms,
+                                "node_elapsed_ms": node_elapsed_ms,
+                                "typical_duration_ms": typical_ms,
+                                "estimated_remaining_ms": estimated_remaining_ms,
+                            }
                         ),
                     }
+
+                    # Update EMA durations in app_state for better future estimates
+                    try:
+                        prev_map = getattr(app_state, "srs_node_ema", None)
+                        if prev_map is None:
+                            prev_map = dict(_TYPICAL_DURATION_MS)
+                            setattr(app_state, "srs_node_ema", prev_map)
+
+                        alpha = 0.2
+                        prev = int(prev_map.get(node_name, typical_ms))
+                        observed = int(node_elapsed_ms)
+                        updated = int(alpha * observed + (1 - alpha) * prev)
+                        prev_map[node_name] = max(200, updated)
+                    except Exception:
+                        logger.exception("Failed to update EMA durations in app_state.")
 
                     # If the graph just finalised, emit the document
                     if node_name == "finalize_document":
