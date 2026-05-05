@@ -8,6 +8,13 @@ export type ClarificationQuestion = {
 export type BackendStatusEvent = {
   node: string;
   status: string;
+  description?: string;
+  elapsed_ms?: number;
+  node_elapsed_ms?: number;
+  typical_duration_ms?: number;
+  estimated_remaining_ms?: number;
+  step?: number;
+  total_steps?: number;
 };
 
 type SseConsumerOptions = {

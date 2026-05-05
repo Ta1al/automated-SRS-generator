@@ -297,7 +297,7 @@ function getWaitingOnLabel(statuses: BackendStatusEvent[], activeNode: string | 
 }
 
 function getStatusLabel(event: BackendStatusEvent) {
-  const base = NODE_LABELS[event.node] || event.node.replaceAll("_", " ");
+  const base = event.description || NODE_LABELS[event.node] || event.node.replaceAll("_", " ");
   return event.status === "finished" ? base : `${base} (${event.status})`;
 }
 
@@ -814,41 +814,109 @@ function ReceivingBubble({
   statuses: BackendStatusEvent[];
   etaSeconds: number | null;
 }) {
-  const recentStatuses = statuses.slice(-3);
+  const latestStatus = statuses[statuses.length - 1];
+  const recentStatuses = statuses.slice(-2);
+  
+  // Extract progress info from latest status
+  const step = latestStatus?.step ?? null;
+  const totalSteps = latestStatus?.total_steps ?? null;
+  const description = latestStatus?.description ?? waitingOn;
+  const elapsedMs = latestStatus?.elapsed_ms ?? 0;
+  const typicalMs = latestStatus?.typical_duration_ms ?? 5000;
+  const estimatedRemainingMs = latestStatus?.estimated_remaining_ms ?? null;
+  const status = latestStatus?.status ?? "running";
+  
+  // Calculate progress percentage
+  const progressPercent = step && totalSteps ? (step / totalSteps) * 100 : 0;
+  
+  // Format remaining time more robustly
+  const remainingSeconds = estimatedRemainingMs 
+    ? Math.max(0, Math.round(estimatedRemainingMs / 1000))
+    : (etaSeconds ?? 0);
+  
+  const formatRemainingTime = (seconds: number): string => {
+    if (seconds <= 0) return "Finalizing...";
+    if (seconds <= 30) return "Almost done (~30s or less)";
+    const minutes = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    if (minutes <= 0) return `~${seconds}s remaining`;
+    if (secs === 0) return `~${minutes}m remaining`;
+    return `~${minutes}m ${secs}s remaining`;
+  };
 
   return (
     <div
       className="max-w-[85%] rounded-2xl bg-[color:var(--surface-highest)]/78 px-4 py-3 text-[color:var(--foreground)] ring-1 ring-[color:var(--outline-variant)]/30 backdrop-blur"
       aria-live="polite"
+      role="status"
     >
       <div className="flex items-start gap-3">
         <span className="mt-0.5 h-4 w-4 animate-spin rounded-full border-2 border-[color:var(--outline-variant)]/50 border-t-[color:var(--primary)]" />
-        <div>
+        <div className="flex-1">
           <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[color:var(--on-surface-variant)]">
-            SRS generation in progress
+            SRS Generation in Progress
           </p>
-          <p className="mt-1 text-sm leading-snug">
-            Now {waitingOn}.
+          <p className="mt-1.5 text-sm leading-snug font-medium">
+            {status === "started" ? (
+              <span>Starting: {description}</span>
+            ) : (
+              <span>Completed: {description}</span>
+            )}
           </p>
-          <p className="mt-1 text-xs text-[color:var(--on-surface-variant)]">{formatEtaLabel(etaSeconds)}</p>
+          
+          {/* Progress bar with percentage */}
+          {step && totalSteps && (
+            <div className="mt-3">
+              <div className="flex items-center justify-between text-[10px] text-[color:var(--on-surface-variant)] mb-1.5">
+                <span className="font-medium">Progress</span>
+                <span>{step}/{totalSteps} steps • {Math.round(progressPercent)}%</span>
+              </div>
+              <div className="h-2 w-full rounded-full bg-[color:var(--outline-variant)]/20 overflow-hidden shadow-inner">
+                <div
+                  className="h-full bg-gradient-to-r from-[color:var(--primary)] to-[color:var(--tertiary)] transition-all duration-500 ease-out"
+                  style={{ width: `${progressPercent}%` }}
+                />
+              </div>
+            </div>
+          )}
+          
+          {/* Timing information - more prominent */}
+          <div className="mt-2.5 flex items-center justify-between">
+            <p className="text-xs text-[color:var(--on-surface-variant)]">
+              {elapsedMs > 0 && (
+                <span>{Math.round(elapsedMs / 1000)}s elapsed</span>
+              )}
+            </p>
+            <p className="text-xs font-medium text-[color:var(--primary)]">
+              {formatRemainingTime(remainingSeconds)}
+            </p>
+          </div>
         </div>
       </div>
 
-      {recentStatuses.length > 0 ? (
-        <div className="mt-3 flex flex-wrap gap-2">
-          {recentStatuses.map((status, index) => (
+      {/* Recent status indicators */}
+      {recentStatuses.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-2 border-t border-[color:var(--outline-variant)]/10 pt-2">
+          {recentStatuses.map((s, idx) => (
             <span
-              key={`${status.node}-${status.status}-${index}`}
-              className="status-pill rounded-full px-2.5 py-1 text-[11px] text-[color:var(--on-surface-variant)]"
+              key={`${s.node}-${s.status}-${idx}`}
+              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                s.status === "finished"
+                  ? "bg-[color:var(--primary)]/10 text-[color:var(--primary)]"
+                  : "bg-[color:var(--tertiary)]/10 text-[color:var(--tertiary)]"
+              }`}
+              title={s.description || s.node}
             >
-              {getStatusLabel(status)}
+              <span>{s.status === "finished" ? "✓" : "○"}</span>
+              <span className="truncate max-w-xs">{getStatusLabel(s)}</span>
             </span>
           ))}
         </div>
-      ) : null}
+      )}
     </div>
   );
 }
+
 
 function SelectedDraftBubble({
   part,

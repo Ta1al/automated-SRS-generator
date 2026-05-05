@@ -578,6 +578,15 @@ export async function startBackgroundChatRun(params: {
         }
       },
       onStatus: (status) => {
+        // Track when nodes start for better ETA calculation
+        if (status.status === "started") {
+          if (!nodeStartedAt.has(status.node)) {
+            nodeStartedAt.set(status.node, Date.now());
+          }
+          return;
+        }
+
+        // Only process "finished" events for persistence and timing updates
         if (status.status !== "finished") {
           return;
         }
@@ -601,23 +610,34 @@ export async function startBackgroundChatRun(params: {
             const nextStat = await updateStageTiming(status.node, durationMs);
             timingMap.set(status.node, nextStat.avgDurationMs);
 
+            // Calculate ETA: prefer backend-provided estimate if available,
+            // otherwise fall back to local calculation
+            let etaSeconds: number;
+            if (status.estimated_remaining_ms !== undefined && status.estimated_remaining_ms !== null) {
+              // Use backend's more accurate estimate
+              etaSeconds = toRunningEtaSeconds(status.estimated_remaining_ms);
+            } else {
+              // Fall back to local estimation based on timing map
+              etaSeconds = toRunningEtaSeconds(
+                estimateRemainingMs({
+                  timingMap,
+                  finishedNodes,
+                  currentNode: activeNode === status.node ? null : activeNode,
+                  currentNodeStarted:
+                    activeNode === status.node ? null : activeNodeStarted,
+                  orderedStages,
+                  includeParallelDraftStages,
+                }),
+              );
+            }
+
             await prisma.chatRun.update({
               where: { id: runId },
               data: {
                 statusEvents: statusEvents as unknown as Prisma.InputJsonValue,
                 currentNode: activeNode === status.node ? null : activeNode,
                 currentNodeStarted: activeNode === status.node ? null : activeNodeStarted,
-                etaSeconds: toRunningEtaSeconds(
-                  estimateRemainingMs({
-                    timingMap,
-                    finishedNodes,
-                    currentNode: activeNode === status.node ? null : activeNode,
-                    currentNodeStarted:
-                      activeNode === status.node ? null : activeNodeStarted,
-                    orderedStages,
-                    includeParallelDraftStages,
-                  }),
-                ),
+                etaSeconds,
               },
             });
           } catch (err) {
