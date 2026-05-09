@@ -1666,9 +1666,12 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
     setIsExportingDocx(true);
 
     try {
+      const payload = { document: resolvedDocumentText };
       const response = await fetch(`/api/chats/${chatId}/export/docx`, {
-        method: "GET",
+        method: "POST",
         cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
       });
 
       const contentType = response.headers.get("content-type") || "";
@@ -2158,7 +2161,13 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
                 <button
                   type="button"
                   onClick={() => void handleDownloadDocx()}
-                  disabled={isExportingDocx || !selectedChatId}
+                  disabled={
+                    isExportingDocx ||
+                    !selectedChatId ||
+                    !resolvedDocumentText ||
+                    (activeRun ? activeRun.status !== "COMPLETED" : false)
+                  }
+                  title={activeRun?.status === "RUNNING" ? "Wait for generation to complete before exporting" : ""}
                   className="rounded-md px-3 py-1 text-xs ring-1 ring-[color:var(--outline-variant)]/45 hover:bg-[color:var(--surface-low)] disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {isExportingDocx ? "Exporting…" : "Download .docx"}
