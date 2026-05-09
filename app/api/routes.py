@@ -812,9 +812,16 @@ async def get_document_docx(thread_id: str, request: Request) -> Response:
 
     final_doc = state.values.get("final_document", "")
     if not final_doc:
+        # Provide more helpful error message based on generation state
+        missing_context = state.values.get("missing_context", [])
+        qa_gaps = state.values.get("qa_gaps", [])
+        if missing_context or qa_gaps:
+            detail = "Document still being refined. Please answer the remaining clarification questions to finalize the SRS."
+        else:
+            detail = "Document not yet complete. Please wait for the generation process to finish or continue the elicitation session."
         raise HTTPException(
             status_code=202,
-            detail="Document not yet complete. Continue the elicitation session.",
+            detail=detail,
         )
 
     settings = get_settings()
@@ -832,6 +839,13 @@ async def get_document_docx(thread_id: str, request: Request) -> Response:
         author=settings.docx_author,
         comments=settings.docx_comment,
     )
+    
+    if not docx_bytes:
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to generate DOCX file. The document content may be corrupted.",
+        )
+    
     return Response(
         content=docx_bytes,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",

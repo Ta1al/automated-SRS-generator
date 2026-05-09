@@ -66,10 +66,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     init_vectorstore()
 
     # 2 & 3. Postgres checkpointer + graph compilation
-    async with managed_checkpointer() as checkpointer:
-        logger.info("Compiling LangGraph workflow …")
-        app.state.graph = build_graph(checkpointer=checkpointer)
-        logger.info("=== Server ready ===")
+    # Attempt to initialise the checkpointer and compile the graph. If the
+    # database is unavailable (e.g., Docker not running) allow a degraded
+    # startup so the frontend can still load for local UI verification.
+    try:
+        async with managed_checkpointer() as checkpointer:
+            logger.info("Compiling LangGraph workflow …")
+            app.state.graph = build_graph(checkpointer=checkpointer)
+            logger.info("=== Server ready ===")
+            yield
+    except Exception as exc:  # pragma: no cover - defensive fallback for dev
+        logger.warning(
+            "Unable to initialise Postgres checkpointer; starting in degraded mode. Error: %s",
+            exc,
+        )
+        # In degraded mode the graph is not available; endpoints should handle
+        # missing graph state gracefully (returning helpful 503s). Yield so the
+        # app still starts and the frontend can be used for UI verification.
+        app.state.graph = None
         yield
 
     # After yield - checkpointer pool is closed by managed_checkpointer

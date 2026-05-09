@@ -111,7 +111,11 @@ def _route_after_qa_review(
     state: SRSState,
 ) -> Literal["ask_clarifying_questions", "generate_mermaid", "finalize_document"]:
     """Gate finalization with QA structural checks and loop on unresolved QA gaps."""
-    if not state.get("is_complete", False) and state.get("qa_gaps", []):
+    # Limit QA clarification loops to 1 attempt to prevent endless cycles
+    attempts = state.get("requirement_quality_remediation_attempts", 0)
+    max_attempts = 1
+    
+    if not state.get("is_complete", False) and state.get("qa_gaps", []) and attempts < max_attempts:
         return "ask_clarifying_questions"
     return _route_after_section_4(state)
 

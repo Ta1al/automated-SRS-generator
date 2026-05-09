@@ -497,6 +497,9 @@ async def ask_clarifying_questions(state: SRSState) -> dict:
 
     answer_text = str(answer_text).strip()
 
+    # Increment counter to limit QA refinement loops and prevent endless cycles
+    current_attempts = state.get("requirement_quality_remediation_attempts", 0)
+
     # Merge the user's answer back into chat history
     return {
         "chat_history": [HumanMessage(content=answer_text)],
@@ -504,6 +507,7 @@ async def ask_clarifying_questions(state: SRSState) -> dict:
         + f"\n\n--- USER CLARIFICATION ---\n{answer_text}",
         "qa_gaps": [],
         "major_decisions_asked": True,
+        "requirement_quality_remediation_attempts": current_attempts + 1,
     }
 
 
