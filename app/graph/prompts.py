@@ -61,51 +61,74 @@ This helps downstream nodes flag quality gaps early.
 # ── Completeness Evaluator ────────────────────────────────────────────────────
 
 EVALUATOR_SYSTEM = """\
-You are a senior product architect auditing an INITIAL SRS draft.
+You are a business analyst and product strategist reviewing an INITIAL SRS draft.
 
-Your goal is to ask only MAJOR DECISION questions that materially change system
-architecture, deployment strategy, or business-critical constraints.
+Your goal is to ask LOGIC AND DIRECTION questions about what the system does,
+not architectural or deployment concerns.
 
-Do NOT ask minor editing/detail questions (wording, naming, small UI tweaks,
-field-level formatting, etc.).
+Do NOT ask about: architecture, deployment, tech stack, cloud infrastructure,
+authentication frameworks, compliance, performance thresholds, or operational SLAs.
 
-Focus on the highest-impact unresolved areas only, such as:
-1. Technology stack direction (frontend/backend/runtime/database style)
-2. Hosting/deployment model (cloud provider, on-prem, serverless, multi-region)
-3. Auth and identity strategy (SSO/OAuth/local accounts, RBAC approach)
-4. Data/compliance boundaries (PII handling, regulated domains, residency)
-5. External integrations that shape architecture (payments, ERP, messaging, etc.)
-6. Core scale/SLA targets that drive design choices
+FOCUS INSTEAD ON: Core logic, workflows, success criteria, feature scope, priorities,
+edge cases, and user interaction patterns.
+
+PROJECT SCOPE: {project_scope}
+
+QUESTIONS SHOULD ADDRESS:
+1. Core workflow logic: What are the primary user workflows? Any unclear steps?
+2. Success criteria: How do users/stakeholders measure success? What's the win condition?
+3. Feature boundaries: What's in scope vs. out of scope? Any features to deprioritize?
+4. Data flow and constraints: What are the key entities? Any business rules missing?
+5. Edge cases and error handling: What happens when things go wrong? Unhappy paths?
+6. User interaction patterns: How do users interact? Any missing decision points?
+7. Integration points: Does this system depend on or connect to other systems?
+
+EXAMPLES OF GOOD QUESTIONS FOR A GAME:
+- "What is the primary win/lose condition for the player?"
+- "How does the game difficulty scale - do levels get harder, or is difficulty fixed?"
+- "Are there power-ups or special mechanics beyond basic movement and eating?"
+- "What happens when the player loses all lives - game over, or infinite lives?"
+
+EXAMPLES OF GOOD QUESTIONS FOR AN E-COMMERCE PLATFORM:
+- "What triggers an order workflow - is it a checkout flow, or something else?"
+- "How are inventory levels managed - real-time, batch updates, or manual?"
+- "What are the cancellation/refund policies and how are they enforced?"
+
+EXAMPLES OF BAD QUESTIONS (do NOT ask):
+- "What authentication framework will you use?" (architecture)
+- "How will you handle 10,000 concurrent users?" (performance/scalability)
+- "Will you host on AWS, GCP, or on-premises?" (deployment)
+- "Do you need GDPR compliance?" (compliance framework)
 
 Ask at most 5 questions total. Prefer 2–4 if enough.
-If the draft is sufficient to proceed with reasonable assumptions, return an empty list and do not ask follow-up questions.
+If the draft clearly captures the core logic and workflows, return an empty list.
 Questions are optional, not mandatory.
 
 Return ONLY a valid JSON object in this exact format:
 {{
   "missing": [
     {{
-      "category": "Authentication",
-      "question": "What authentication and authorization mechanisms are required for buyers, organizers, and administrators?",
+      "category": "Game Win Condition",
+      "question": "What is the primary win/lose condition for the player - how does a game end successfully vs. unsuccessfully?",
       "suggested_options": [
-        "Email/password with MFA for admins only",
-        "OAuth social login for buyers plus RBAC",
-        "SSO/SAML for organizers and admins"
+        "Win by collecting all pellets; lose when all lives are gone",
+        "Levels with progressive difficulty; game never ends (endless runner style)",
+        "Time-based win condition (complete level within X seconds)"
       ],
-      "rationale": "Authentication and authorization requirements affect security controls, user flows, and compliance scope."
+      "rationale": "The win/lose condition defines the core game loop and success metric."
     }},
     ...
   ]
 }}
 
-Return an empty list if no critical gaps remain: {{"missing": []}}
+Return an empty list if core logic is clear: {{"missing": []}}
 
 Rules:
 - Each entry must be a JSON object, not a string.
-- `question` must be direct and decision-oriented.
-- Include 2-4 concrete `suggested_options` whenever realistic; options must be mutually distinct architectural/business paths.
-- Keep `category` short and aligned to one of the mandatory coverage areas.
-- Keep `rationale` to one sentence explaining why the information matters.
+- `question` must directly probe PROJECT LOGIC AND DIRECTION, not architecture.
+- Include 2-4 concrete `suggested_options` whenever realistic.
+- Keep `category` short and business/logic-oriented.
+- Keep `rationale` to one sentence explaining why this affects the system.
 
 Do NOT return any prose outside the JSON object.
 """
@@ -222,6 +245,8 @@ sub-section of Section 3 in an IEEE 830-compliant SRS document.
 
 Write Section 3.2 - Functional Requirements - in Markdown.
 
+PROJECT SCOPE: {project_scope}
+
 Format for EACH requirement:
 #### F-NNN: [Concise title]
 **Requirement:** The [system/component] shall [verifiable, measurable action].
@@ -232,6 +257,18 @@ Rules:
 - Cover ALL functional workflows identified in the context.
 - Each statement must be atomic, verifiable, and unambiguous.
 - Do NOT use: fast, secure, user-friendly, easy, efficient, scalable.
+
+SCOPE-SPECIFIC GUIDANCE:
+For SIMPLE projects (games, tools, scripts):
+- Focus on core game mechanics and user interactions
+- Keep acceptance criteria straightforward and implementation-agnostic
+- Avoid enterprise concerns (scaling, multi-tenancy, internationalization)
+- Example: "The system shall display the player's current score and level"
+
+For COMPLEX projects (enterprise, multi-user systems):
+- Include integration points and system interactions
+- Ensure requirements support scaling and extensibility
+- Address multi-user scenarios and permission boundaries
 
 GOOD EXAMPLES:
 
@@ -269,18 +306,32 @@ sub-section of Section 3 in an IEEE 830-compliant SRS document.
 
 Write Section 3.3 - Quality of Service Requirements - in Markdown.
 
-Include sub-sections for applicable requirement types:
-### 3.3.1 Performance Requirements (PE-NNN)
-### 3.3.2 Security Requirements (SE-NNN)
-### 3.3.3 Availability Requirements (A-NNN)
-### 3.3.4 Scalability Requirements (SC-NNN)
-### 3.3.5 Fault Tolerance Requirements (FT-NNN)
-### 3.3.6 Maintainability Requirements (MN-NNN)
-### 3.3.7 Portability Requirements (PO-NNN)
-### 3.3.8 Operational Requirements (O-NNN)
-### 3.3.9 Usability Requirements (US-NNN)
-### 3.3.10 Look & Feel Requirements (LF-NNN)
-### 3.3.11 Legal & Compliance Requirements (L-NNN)
+PROJECT SCOPE: {project_scope}
+
+SCOPE-SPECIFIC GUIDANCE:
+
+For SIMPLE projects (games, tools, scripts):
+- Include ONLY these subsections if applicable:
+  ### 3.3.1 Look & Feel Requirements (LF-NNN) - Basic UI/UX preferences
+  ### 3.3.2 Portability Requirements (PO-NNN) - Platform/OS support
+  ### 3.3.3 Fault Tolerance Requirements (FT-NNN) - Basic error handling
+  ### 3.3.4 Usability Requirements (US-NNN) - Basic UX expectations
+- SKIP: Performance thresholds, Security controls, Availability SLAs, Scalability targets, Compliance requirements
+- Keep requirements simple and focused on core user experience
+
+For COMPLEX/MEDIUM projects:
+- Include ALL applicable subsections:
+  ### 3.3.1 Performance Requirements (PE-NNN)
+  ### 3.3.2 Security Requirements (SE-NNN)
+  ### 3.3.3 Availability Requirements (A-NNN)
+  ### 3.3.4 Scalability Requirements (SC-NNN)
+  ### 3.3.5 Fault Tolerance Requirements (FT-NNN)
+  ### 3.3.6 Maintainability Requirements (MN-NNN)
+  ### 3.3.7 Portability Requirements (PO-NNN)
+  ### 3.3.8 Operational Requirements (O-NNN)
+  ### 3.3.9 Usability Requirements (US-NNN)
+  ### 3.3.10 Look & Feel Requirements (LF-NNN)
+  ### 3.3.11 Legal & Compliance Requirements (L-NNN)
 
 For EACH requirement in every 3.3.x subsection, use this exact block format:
 #### PREFIX-NNN: [Concise title]
@@ -318,9 +369,9 @@ BAD EXAMPLES (do NOT produce):
 **Acceptance Criteria:** No one can break into it.
 
 INSTRUCTIONS FOR THIS DOCUMENT:
-- ALL performance values must be numeric and specific (e.g., "< 200 ms at P95", not "fast").
-- ALL availability targets must specify measurement window (e.g., "99.9% monthly").
-- ALL security requirements must cite specific controls (e.g., "AES-256", "TLS 1.3", "OAuth 2.0").
+- (COMPLEX only) ALL performance values must be numeric and specific (e.g., "< 200 ms at P95", not "fast").
+- (COMPLEX only) ALL availability targets must specify measurement window (e.g., "99.9% monthly").
+- (COMPLEX only) ALL security requirements must cite specific controls (e.g., "AES-256", "TLS 1.3", "OAuth 2.0").
 - Include relevant regulatory requirements identified from the RAG context.
 - IDs must be sequential within each PREFIX family starting at 001.
 - Do not output plain prose-only bullets; every requirement must include both **Requirement:** and **Acceptance Criteria:** fields.
@@ -519,7 +570,22 @@ Specification for requirement quality and measurability.
 Your task: Evaluate the provided requirements for QUALITY and SPECIFICITY, not
 just structural presence.
 
-For each requirement ID, assess:
+IMPORTANT - PROJECT SCOPE: {project_scope}
+
+For SIMPLE projects (e.g., games, tools):
+- Focus ONLY on Functional (F) and Fault Tolerance (FT) requirements
+- Check for clear, concrete language and testability
+- SKIP quality checks for PE (Performance), A (Availability), SC (Scalability) requirements
+  (these are not applicable for hobby/personal projects)
+- SKIP detailed security/compliance control specifications (SE/L categories)
+- Treat simple requirements as acceptable even if they lack numeric benchmarks
+
+For COMPLEX/MEDIUM projects:
+- Evaluate all requirement types for specificity and measurability
+- Require numeric thresholds for PE, A, SC requirements
+- Require technical specificity for SE, L requirements
+
+For each requirement ID (scope-appropriate), assess:
 
 1. SPECIFICITY: Does it contain concrete, verifiable language?
    - BAD: "The system shall be fast"
@@ -529,11 +595,11 @@ For each requirement ID, assess:
    - BAD: "The system shall handle user data properly"
    - GOOD: "The system shall encrypt PII using AES-256 CBC mode"
 
-3. MISSING THRESHOLDS (for PE/A/SC): Does numeric target exist?
+3. MISSING THRESHOLDS (for PE/A/SC - ONLY for complex/medium projects): Does numeric target exist?
    - BAD PE: "The system shall be responsive"
    - GOOD PE: "The system shall process payments within 3 seconds"
 
-4. MISSING TECHNICAL SPECIFICITY (for SE/L): Does it cite specific control/standard?
+4. MISSING TECHNICAL SPECIFICITY (for SE/L - ONLY for complex/medium projects): Does it cite specific control/standard?
    - BAD SE: "The system shall be secure"
    - GOOD SE: "The system shall enforce OAuth 2.0 with PKCE flow"
 
@@ -568,7 +634,10 @@ SEVERITY LEVELS:
 - "medium": Requirement is vague but partially measurable; should improve
 - "low": Requirement is acceptable but could be more specific
 
-Passed threshold: ≤ 20% of requirements have HIGH severity issues.
+Passed threshold:
+  - For SIMPLE projects: ≤ 30% of Functional requirements have HIGH severity issues
+    (PE/A/SC/SE/L requirements skipped)
+  - For COMPLEX/MEDIUM: ≤ 20% of requirements have HIGH severity issues
 
 If quality is acceptable: {{"passed": true, "quality_issues": []}}
 If too many issues: {{"passed": false, "quality_issues": [...]}}

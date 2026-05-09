@@ -222,21 +222,49 @@ _HIGH_IMPACT_KEYWORDS = (
 )
 
 
-def _is_high_impact_question(item: ClarificationQuestion) -> bool:
+
+
+
+def _filter_major_questions(questions: list[ClarificationQuestion], scope: str = "complex") -> list[ClarificationQuestion]:
+    """Keep only logic/direction-focused questions that clarify project goals and workflows.
+    
+    Filters out architecture, deployment, auth, compliance questions regardless of scope,
+    since the new evaluator prompt focuses on logic and direction instead.
+    """
+    return [item for item in questions if _is_high_impact_question(item)]
+
+
+def _is_high_impact_question(item: ClarificationQuestion, exclude_enterprise: bool = False) -> bool:
     category = str(item.get("category", "")).strip().lower()
     question = str(item.get("question", "")).strip().lower()
     rationale = str(item.get("rationale", "")).strip().lower()
 
-    if category in _HIGH_IMPACT_CATEGORIES:
-        return True
-
-    haystack = f"{question} {rationale}"
-    return any(keyword in haystack for keyword in _HIGH_IMPACT_KEYWORDS)
-
-
-def _filter_major_questions(questions: list[ClarificationQuestion]) -> list[ClarificationQuestion]:
-    """Keep only high-impact clarification questions that materially affect architecture."""
-    return [item for item in questions if _is_high_impact_question(item)]
+    # Keywords that indicate architecture/deployment questions (not logic/direction)
+    # These should be filtered regardless of scope since the new evaluator prompt forbids them
+    forbidden_keywords = {
+        "performance", "peak load", "scalability", "concurrent", "throughput",
+        "deployment", "hosting", "cloud", "on-prem", "serverless",
+        "availability", "uptime", "sla", "region",
+        "compliance", "gdpr", "hipaa", "pci",
+        "auth", "oauth", "sso", "saml", "rbac",
+        "tech stack", "architecture", "infrastructure",
+    }
+    forbidden_categories = {
+        "technology", "tech stack", "stack", "architecture",
+        "deployment", "hosting", "infrastructure",
+        "authentication", "authorization", "identity",
+        "security", "privacy", "compliance", "legal",
+        "integrations", "integration",
+        "scalability", "performance", "availability", "sla",
+    }
+    
+    haystack = f"{category} {question} {rationale}"
+    # Reject if any forbidden keyword or category is found
+    if category in forbidden_categories or any(keyword in haystack for keyword in forbidden_keywords):
+        return False
+    
+    # Accept the question (it's logic/direction focused)
+    return True
 
 
 def _normalize_project_title(value: Any) -> str:
@@ -340,6 +368,46 @@ async def retrieve_rag_context(state: SRSState) -> dict:
     return {"rag_context": context}
 
 
+# ── Scope Detection ───────────────────────────────────────────────────────────
+
+
+def _detect_project_scope(elicitation_data: str, user_input: str) -> str:
+    """
+    Detect project scope (simple, medium, or complex) from elicitation data and user input.
+    
+    Simple projects: hobby/personal, single user, offline/local, no auth, no integrations
+    Complex projects: enterprise, multi-user, distributed, auth required, integrations
+    Medium: everything in between
+    """
+    combined_text = f"{elicitation_data} {user_input}".lower()
+    
+    # Simple project indicators
+    simple_indicators = {
+        "game", "hobby", "personal project", "script", "tool", "weekend",
+        "local", "offline", "single user", "standalone", "simple", "basic",
+        "learning", "tutorial", "poc", "prototype", "demo",
+    }
+    
+    # Complex project indicators  
+    complex_indicators = {
+        "enterprise", "multi-user", "distributed", "cloud", "saas", "platform",
+        "auth", "oauth", "sso", "api", "integration", "payment", "compliance",
+        "gdpr", "hipaa", "pci", "scaling", "microservice", "database", "migration",
+        "production", "customer", "business", "commercial",
+    }
+    
+    simple_count = sum(1 for indicator in simple_indicators if indicator in combined_text)
+    complex_count = sum(1 for indicator in complex_indicators if indicator in combined_text)
+    
+    # Determine scope based on indicator counts
+    if simple_count >= 2 or (simple_count >= 1 and complex_count == 0):
+        return "simple"
+    elif complex_count >= 3 or (complex_count >= 2 and simple_count == 0):
+        return "complex"
+    else:
+        return "medium"
+
+
 # ── Node 2: Elicit requirements ───────────────────────────────────────────────
 
 
@@ -374,9 +442,21 @@ async def elicit_requirements(state: SRSState) -> dict:
     except (json.JSONDecodeError, ValueError):
         buffer = raw
 
+    # Extract user input for scope detection
+    user_input = ""
+    for msg in state.get("chat_history", []):
+        if isinstance(msg, HumanMessage):
+            user_input = str(msg.content)
+            break
+
+    # Detect project scope
+    project_scope = _detect_project_scope(buffer, user_input)
+    logger.info("Detected project scope: %s", project_scope)
+
     return {
         "document_buffer": buffer,
         "project_title": project_title,
+        "project_scope": project_scope,
         "chat_history": [AIMessage(content=f"Elicitation result:\n{buffer}")],
     }
 
@@ -409,6 +489,9 @@ async def evaluate_completeness(state: SRSState) -> dict:
     if not current_draft:
         current_draft = state.get("document_buffer", "(no draft yet)")
 
+    # Get project scope for evaluator context (default to "complex" for backward compatibility)
+    project_scope = state.get("project_scope", "complex")
+
     user_prompt = (
         "Current SRS draft (may be partial):\n"
         f"{current_draft[:14000]}"
@@ -419,7 +502,7 @@ async def evaluate_completeness(state: SRSState) -> dict:
     response = await _llm_invoke_with_retry(
         llm,
         [
-            SystemMessage(content=prompts.EVALUATOR_SYSTEM),
+            SystemMessage(content=prompts.EVALUATOR_SYSTEM.format(project_scope=project_scope)),
             HumanMessage(content=user_prompt),
         ],
         node_name="evaluate_completeness",
@@ -428,12 +511,12 @@ async def evaluate_completeness(state: SRSState) -> dict:
     try:
         data = _parse_json(_ai_text(response))
         missing = _normalize_questions(data.get("missing", []))
-        missing = _filter_major_questions(missing)
+        missing = _filter_major_questions(missing, scope=project_scope)
     except (json.JSONDecodeError, ValueError, AttributeError):
         logger.warning("Evaluator returned non-JSON; treating as complete.")
         missing = []
 
-    logger.info("Evaluator found %d gaps.", len(missing))
+    logger.info("Evaluator found %d gaps for scope '%s'.", len(missing), project_scope)
     return {"missing_context": missing, "qa_gaps": []}
 
 
@@ -749,11 +832,12 @@ async def draft_section_2(state: SRSState) -> dict:
 async def draft_section_3_fr(state: SRSState) -> dict:
     llm = _get_llm(temperature=0.2)
     context = _build_writing_context(state)
+    project_scope = state.get("project_scope", "complex")
 
     response = await _llm_invoke_with_retry(
         llm,
         [
-            SystemMessage(content=prompts.WRITER_S3_FR_SYSTEM),
+            SystemMessage(content=prompts.WRITER_S3_FR_SYSTEM.format(project_scope=project_scope)),
             HumanMessage(content=context),
         ],
         node_name="draft_section_3_fr",
@@ -769,6 +853,7 @@ async def draft_section_3_fr(state: SRSState) -> dict:
 async def draft_section_3_nfr(state: SRSState) -> dict:
     llm = _get_llm(temperature=0.2)
     context = _build_writing_context(state)
+    project_scope = state.get("project_scope", "complex")
 
     # Inject RAG context into NFR writing for regulatory grounding
     rag = state.get("rag_context", "")
@@ -777,7 +862,7 @@ async def draft_section_3_nfr(state: SRSState) -> dict:
     response = await _llm_invoke_with_retry(
         llm,
         [
-            SystemMessage(content=prompts.WRITER_S3_NFR_SYSTEM),
+            SystemMessage(content=prompts.WRITER_S3_NFR_SYSTEM.format(project_scope=project_scope)),
             HumanMessage(content=context + extra),
         ],
         node_name="draft_section_3_nfr",
@@ -1162,10 +1247,13 @@ async def qa_review(state: SRSState) -> dict:
     ]
     requirements_sample = "\n".join(requirement_lines[:30])
     
+    # Get project scope for quality checker context (default to "complex" for backward compatibility)
+    project_scope = state.get("project_scope", "complex")
+    
     response_quality = await _llm_invoke_with_retry(
         llm_quality,
         [
-            SystemMessage(content=prompts.QA_REQUIREMENT_QUALITY_SYSTEM),
+            SystemMessage(content=prompts.QA_REQUIREMENT_QUALITY_SYSTEM.format(project_scope=project_scope)),
             HumanMessage(content=f"Review requirement quality:\n\n{requirements_sample}"),
         ],
         node_name="qa_review_quality",
@@ -1184,8 +1272,15 @@ async def qa_review(state: SRSState) -> dict:
             if isinstance(issue, dict) and issue.get("severity") == "high"
         )
         
-        # Fail if > 20% of sampled requirements have HIGH severity issues
-        if high_severity_count > max(1, len(requirement_lines) // 5):
+        # Fail threshold depends on scope
+        # For simple projects: allow up to 30% high-severity issues (only checking Functional requirements)
+        # For complex: require ≤ 20% high-severity issues
+        if project_scope == "simple":
+            fail_threshold = max(2, len(requirement_lines) // 3)  # 33% threshold for simple
+        else:
+            fail_threshold = max(1, len(requirement_lines) // 5)  # 20% threshold for complex/medium
+        
+        if high_severity_count > fail_threshold:
             quality_passed = False
         
         # Convert quality issues to ClarificationQuestion format

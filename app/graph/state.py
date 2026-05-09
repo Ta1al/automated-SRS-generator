@@ -108,6 +108,11 @@ class SRSState(TypedDict):
         project_title:
             Short LLM-generated title inferred from the user's prompt.
 
+        project_scope:
+            Complexity level of the project: "simple" (hobby, single-user, local),
+            "medium" (moderate complexity), or "complex" (enterprise, multi-user, distributed).
+            Detected from initial requirements and used to filter evaluator questions.
+
         major_decisions_asked:
             True after the major-decision clarification round has been asked once.
             Prevents repeated follow-up loops for minor details.
@@ -119,6 +124,7 @@ class SRSState(TypedDict):
     # ── Elicitation ───────────────────────────────────────────────────────────
     document_buffer: str
     missing_context: list[ClarificationQuestion]
+    project_scope: str
 
     # ── Requirements ──────────────────────────────────────────────────────────
     requirements: list[Requirement]
