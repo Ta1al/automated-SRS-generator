@@ -166,64 +166,6 @@ def _normalize_questions(raw_questions: Any) -> list[ClarificationQuestion]:
     return normalized
 
 
-_HIGH_IMPACT_CATEGORIES = {
-    "technology",
-    "tech stack",
-    "stack",
-    "architecture",
-    "deployment",
-    "hosting",
-    "infrastructure",
-    "authentication",
-    "authorization",
-    "identity",
-    "security",
-    "privacy",
-    "compliance",
-    "legal",
-    "data",
-    "integrations",
-    "integration",
-    "scalability",
-    "performance",
-    "availability",
-    "sla",
-}
-
-_HIGH_IMPACT_KEYWORDS = (
-    "auth",
-    "oauth",
-    "sso",
-    "saml",
-    "rbac",
-    "deployment",
-    "hosting",
-    "cloud",
-    "on-prem",
-    "serverless",
-    "database",
-    "residency",
-    "pii",
-    "gdpr",
-    "hipaa",
-    "pci",
-    "integration",
-    "payment",
-    "throughput",
-    "latency",
-    "scal",
-    "concurrent",
-    "user count",
-    "capacity",
-    "load",
-    "availability",
-    "uptime",
-    "region",
-)
-
-
-
-
 
 def _filter_major_questions(questions: list[ClarificationQuestion], scope: str = "complex") -> list[ClarificationQuestion]:
     """Keep only logic/direction-focused questions that clarify project goals and workflows.
