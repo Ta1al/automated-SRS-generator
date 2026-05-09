@@ -276,7 +276,7 @@ _TYPICAL_DURATION_MS = {
 _PARALLEL_NODES = {"draft_section_1", "draft_section_2", "draft_section_3_iface", "draft_section_3_fr", "draft_section_3_nfr"}
 
 # Ordered sequence of nodes for progress tracking (excluding ask_clarifying_questions which is conditional)
-_NODE_SEQUENCE_FULL = [
+_NODE_SEQUENCE_FULL_WITH_DIAGRAMS = [
     "retrieve_rag_context",
     "elicit_requirements",
     "classify_requirements",
@@ -290,6 +290,22 @@ _NODE_SEQUENCE_FULL = [
     "evaluate_completeness",
     "generate_mermaid",
     "validate_mermaid",
+    "qa_review",
+    "finalize_document",
+]
+
+_NODE_SEQUENCE_FULL_NO_DIAGRAMS = [
+    "retrieve_rag_context",
+    "elicit_requirements",
+    "classify_requirements",
+    "validate_and_enrich_requirements",
+    "draft_section_1",  # These 5 run in parallel but count as 1 step
+    "draft_section_2",
+    "draft_section_3_iface",
+    "draft_section_3_fr",
+    "draft_section_3_nfr",
+    "draft_section_4",
+    "evaluate_completeness",
     "qa_review",
     "finalize_document",
 ]
@@ -397,13 +413,14 @@ async def _stream_graph(
     graph = app_state.graph
     config = {"configurable": {"thread_id": thread_id}}
     
-    # Determine which node sequence we're using based on mode
+    # Determine which node sequence we're using based on mode and generate_diagrams
     if mode == "diagrams_only":
         node_sequence = _NODE_SEQUENCE_DIAGRAMS_ONLY
     elif mode == "section_revision":
         node_sequence = _NODE_SEQUENCE_SECTION_REVISION
     else:
-        node_sequence = _NODE_SEQUENCE_FULL
+        # For "full" mode, choose between diagrams and no-diagrams sequence
+        node_sequence = _NODE_SEQUENCE_FULL_WITH_DIAGRAMS if generate_diagrams else _NODE_SEQUENCE_FULL_NO_DIAGRAMS
     
     # Track timing and progress
     import time
