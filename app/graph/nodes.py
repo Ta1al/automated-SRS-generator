@@ -303,7 +303,13 @@ def _unwrap_structured_response(response: Any, *, model_class: type | None = Non
         raise
 
 
-def _normalize_questions(raw_questions: Any) -> list[ClarificationQuestion]:
+def _normalize_questions(
+    raw_questions: Any,
+    *,
+    source: str = "evaluator",
+    project_scope: str = "complex",
+    draft_context: str = "",
+) -> list[ClarificationQuestion]:
     """Normalize evaluator and QA gap output to a structured question shape."""
     normalized: list[ClarificationQuestion] = []
 
@@ -311,41 +317,258 @@ def _normalize_questions(raw_questions: Any) -> list[ClarificationQuestion]:
         return normalized
 
     for item in raw_questions:
-        if isinstance(item, str):
-            question = item.strip()
-            if question:
-                normalized.append(
-                    ClarificationQuestion(
-                        category="General",
-                        question=question,
-                        suggested_options=[],
-                        rationale="This detail is required to complete the specification.",
-                    )
-                )
-            continue
-
-        if not isinstance(item, dict):
-            continue
-
-        question = str(item.get("question", "")).strip()
-        if not question:
-            continue
-
-        suggested_options = item.get("suggested_options", [])
-        if not isinstance(suggested_options, list):
-            suggested_options = []
-
-        normalized.append(
-            ClarificationQuestion(
-                category=str(item.get("category", "General")).strip() or "General",
-                question=question,
-                suggested_options=[str(option).strip() for option in suggested_options if str(option).strip()],
-                rationale=str(item.get("rationale", "")).strip()
-                or "This detail is required to complete the specification.",
-            )
+        normalized_item = _normalize_clarification_question(
+            item,
+            source=source,
+            project_scope=project_scope,
+            draft_context=draft_context,
         )
+        if normalized_item is not None:
+            normalized.append(normalized_item)
 
     return normalized
+
+
+def _clarification_topic(question: str, category: str, rationale: str) -> str:
+    haystack = f"{category} {question} {rationale}".lower()
+
+    topic_keywords: dict[str, tuple[str, ...]] = {
+        "success": (
+            "success metric",
+            "success criteria",
+            "win condition",
+            "win/lose",
+            "measure success",
+            "successful",
+            "success",
+            "result",
+            "done",
+        ),
+        "workflow": ("workflow", "flow", "steps", "sequence", "process"),
+        "scope": ("scope", "out of scope", "in scope", "boundary", "include"),
+        "data": ("data", "entity", "business rule", "rules", "fields"),
+        "edge": ("edge case", "unhappy path", "error", "failure", "exception"),
+        "integration": ("integration", "external system", "connect", "depends on"),
+        "quality": ("specificity", "measurable", "testable", "acceptance", "vague"),
+    }
+
+    for topic, keywords in topic_keywords.items():
+        if any(keyword in haystack for keyword in keywords):
+            return topic
+
+    return "other"
+
+
+def _rewrite_clarification_question_text(
+    question: str,
+    *,
+    source: str,
+    project_scope: str,
+    draft_context: str,
+    category: str,
+    rationale: str,
+) -> str:
+    cleaned = re.sub(r"\s+", " ", str(question or "")).strip()
+    if not cleaned:
+        return cleaned
+
+    if source != "evaluator":
+        return cleaned
+
+    haystack = f"{category} {cleaned} {rationale}".lower()
+    if any(keyword in haystack for keyword in ("success metric", "success criteria", "measure success", "win condition")):
+        return "What should count as a successful result for this feature?"
+
+    if any(keyword in haystack for keyword in ("workflow", "flow", "steps", "sequence")):
+        return "What should happen first, next, and last in this flow?"
+
+    if any(keyword in haystack for keyword in ("scope", "out of scope", "in scope", "boundary")):
+        return "What should be included in the first version?"
+
+    if any(keyword in haystack for keyword in ("edge case", "unhappy path", "error", "failure", "exception")):
+        return "What should happen when something goes wrong?"
+
+    if any(keyword in haystack for keyword in ("integration", "external system", "connect", "depends on")):
+        return "Does this need to connect to anything else, or stay standalone?"
+
+    if any(keyword in haystack for keyword in ("data", "entity", "business rule", "rules", "fields")):
+        return "What key data or rules need to be defined?"
+
+    return cleaned
+
+
+def _is_helpful_suggested_option(option: str, question: str) -> bool:
+    cleaned = re.sub(r"\s+", " ", str(option or "")).strip(" \t\n\r-•").strip()
+    if len(cleaned) < 8:
+        return False
+
+    lowered = cleaned.lower()
+    if lowered in {"yes", "no", "maybe", "other", "n/a", "not sure", "unsure", "it depends"}:
+        return False
+
+    if lowered.startswith("improve") or lowered.startswith("be more") or lowered.startswith("clarify"):
+        return False
+
+    if lowered.endswith("?"):
+        return False
+
+    question_haystack = str(question or "").lower()
+    if "success" in question_haystack and any(token in lowered for token in {"success metric", "win condition"}):
+        return False
+
+    return bool(re.search(r"[a-z0-9]", cleaned))
+
+
+def _build_suggested_options(
+    topic: str,
+    *,
+    question: str,
+    project_scope: str,
+    draft_context: str,
+) -> list[str]:
+    if topic == "success":
+        return [
+            "The main goal is completed successfully.",
+            "The user reaches a target score, count, or threshold.",
+            "The flow ends when the user confirms the task is done.",
+        ]
+
+    if topic == "workflow":
+        return [
+            "A simple linear flow with one main path.",
+            "A flow with a few decision points or branches.",
+            "A more flexible flow where users can choose different paths.",
+        ]
+
+    if topic == "scope":
+        return [
+            "Keep only the core version for launch.",
+            "Include the core version plus a few extras.",
+            "Plan for a fuller first version with more features.",
+        ]
+
+    if topic == "data":
+        return [
+            "Keep the stored data minimal and only save what is needed.",
+            "Store the main records plus a few supporting details.",
+            "Track detailed state and history for later review.",
+        ]
+
+    if topic == "edge":
+        return [
+            "Show a simple error message and let the user retry.",
+            "Pause the flow and ask the user what to do next.",
+            "Recover automatically when possible and explain the fallback.",
+        ]
+
+    if topic == "integration":
+        return [
+            "Keep it standalone with no external connections.",
+            "Connect to one essential external service.",
+            "Allow optional integrations later.",
+        ]
+
+    if topic == "quality":
+        return [
+            "Make the requirement measurable with a concrete threshold.",
+            "State a clear pass/fail acceptance condition.",
+            "Add a specific example or technical detail that can be tested.",
+        ]
+
+    return [
+        "Keep the simplest version that covers the core use case.",
+        "Include a few optional behaviors or extras.",
+        "Leave room to refine the rule after the first version.",
+    ]
+
+
+def _normalize_suggested_options(
+    question: str,
+    category: str,
+    rationale: str,
+    suggested_options: list[str],
+    *,
+    source: str,
+    project_scope: str,
+    draft_context: str,
+) -> list[str]:
+    normalized: list[str] = []
+
+    for option in suggested_options:
+        cleaned = re.sub(r"\s+", " ", str(option or "")).strip()
+        if not cleaned:
+            continue
+        if _is_helpful_suggested_option(cleaned, question):
+            normalized.append(cleaned)
+
+    topic = _clarification_topic(question, category, rationale)
+    defaults = _build_suggested_options(
+        topic,
+        question=question,
+        project_scope=project_scope,
+        draft_context=draft_context,
+    )
+
+    for option in defaults:
+        if len(normalized) >= 3:
+            break
+        if option not in normalized:
+            normalized.append(option)
+
+    if not normalized and source == "qa":
+        normalized = defaults[:3]
+
+    return normalized[:5]
+
+
+def _normalize_clarification_question(
+    item: Any,
+    *,
+    source: str,
+    project_scope: str,
+    draft_context: str,
+) -> ClarificationQuestion | None:
+    if isinstance(item, str):
+        question = item.strip()
+        if not question:
+            return None
+        category = "General"
+        rationale = "This detail is required to complete the specification."
+        suggested_options: list[str] = []
+    elif isinstance(item, dict):
+        question = str(item.get("question", "")).strip()
+        if not question:
+            return None
+        category = str(item.get("category", "General")).strip() or "General"
+        rationale = str(item.get("rationale", "")).strip() or "This detail is required to complete the specification."
+        suggested_options = item.get("suggested_options", []) if isinstance(item.get("suggested_options", []), list) else []
+    else:
+        return None
+
+    normalized_question = _rewrite_clarification_question_text(
+        question,
+        source=source,
+        project_scope=project_scope,
+        draft_context=draft_context,
+        category=category,
+        rationale=rationale,
+    )
+    normalized_options = _normalize_suggested_options(
+        normalized_question,
+        category,
+        rationale,
+        [str(option).strip() for option in suggested_options if str(option).strip()],
+        source=source,
+        project_scope=project_scope,
+        draft_context=draft_context,
+    )
+
+    return ClarificationQuestion(
+        category=category,
+        question=normalized_question,
+        suggested_options=normalized_options,
+        rationale=rationale,
+    )
 
 
 
@@ -695,7 +918,12 @@ async def evaluate_completeness(state: SRSState) -> dict:
                 except Exception:
                     missing_list = []
 
-            missing = _normalize_questions(missing_list)
+            missing = _normalize_questions(
+                missing_list,
+                source="evaluator",
+                project_scope=project_scope,
+                draft_context=current_draft,
+            )
             missing = _filter_major_questions(missing, scope=project_scope)
         except Exception:
             # Structured wrapper unavailable or mocked; fall back to format-instruction flow
@@ -710,11 +938,21 @@ async def evaluate_completeness(state: SRSState) -> dict:
                 else:
                     missing_list = missing_raw or []
 
-                missing = _normalize_questions(missing_list)
+                missing = _normalize_questions(
+                    missing_list,
+                    source="evaluator",
+                    project_scope=project_scope,
+                    draft_context=current_draft,
+                )
             except Exception:
                 try:
                     data = _parse_json(_ai_text(response))
-                    missing = _normalize_questions(data.get("missing", []))
+                    missing = _normalize_questions(
+                        data.get("missing", []),
+                        source="evaluator",
+                        project_scope=project_scope,
+                        draft_context=current_draft,
+                    )
                 except (json.JSONDecodeError, ValueError, AttributeError):
                     logger.warning(
                         "Evaluator returned non-JSON or unparsable structured output; treating as complete."
@@ -734,12 +972,22 @@ async def evaluate_completeness(state: SRSState) -> dict:
             else:
                 missing_list = missing_raw or []
 
-            missing = _normalize_questions(missing_list)
+            missing = _normalize_questions(
+                missing_list,
+                source="evaluator",
+                project_scope=project_scope,
+                draft_context=current_draft,
+            )
         except Exception:
             # Fallback to legacy JSON parsing for environments without structured parser
             try:
                 data = _parse_json(_ai_text(response))
-                missing = _normalize_questions(data.get("missing", []))
+                missing = _normalize_questions(
+                    data.get("missing", []),
+                    source="evaluator",
+                    project_scope=project_scope,
+                    draft_context=current_draft,
+                )
             except (json.JSONDecodeError, ValueError, AttributeError):
                 logger.warning("Evaluator returned non-JSON or unparsable structured output; treating as complete.")
                 missing = []
@@ -1747,7 +1995,12 @@ async def qa_review(state: SRSState) -> dict:
     try:
         data = _parse_json(_ai_text(response_structural))
         structural_passed: bool = bool(data.get("passed", False))
-        structural_gaps = _normalize_questions(data.get("gaps", []))
+        structural_gaps = _normalize_questions(
+            data.get("gaps", []),
+            source="qa",
+            project_scope=project_scope,
+            draft_context=draft,
+        )
     except (json.JSONDecodeError, ValueError):
         logger.warning("QA structural reviewer returned non-JSON; defaulting to passed=True.")
         structural_passed = True
@@ -1802,14 +2055,21 @@ async def qa_review(state: SRSState) -> dict:
         # Convert quality issues to ClarificationQuestion format
         for issue in quality_issues_raw[:5]:  # Limit to 5 issues in output
             if isinstance(issue, dict):
-                quality_issues.append(
-                    ClarificationQuestion(
-                        category="Requirement Quality",
-                        question=f"{issue.get('requirement_id', 'REQ')}: {issue.get('problem', 'Quality issue')}",
-                        suggested_options=[issue.get("suggested_fix", "Improve requirement specificity")],
-                        rationale=issue.get("issue", "Requirement needs refinement"),
-                    )
+                quality_question = f"{issue.get('requirement_id', 'REQ')}: {issue.get('problem', 'Quality issue')}"
+                quality_issue = ClarificationQuestion(
+                    category="Requirement Quality",
+                    question=quality_question,
+                    suggested_options=[issue.get("suggested_fix", "Make the requirement more specific")],
+                    rationale=issue.get("issue", "Requirement needs refinement"),
                 )
+                normalized_issue = _normalize_clarification_question(
+                    quality_issue,
+                    source="qa",
+                    project_scope=project_scope,
+                    draft_context=draft,
+                )
+                if normalized_issue:
+                    quality_issues.append(normalized_issue)
     except (json.JSONDecodeError, ValueError):
         logger.warning("QA quality reviewer returned non-JSON; defaulting to passed=True.")
         quality_passed = True

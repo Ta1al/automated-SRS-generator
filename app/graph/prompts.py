@@ -108,6 +108,8 @@ Question style requirements:
 - Write questions as guided prompts, not single-line checks.
 - Each question should include enough context so a non-technical stakeholder can answer confidently.
 - When useful, include 3-5 concrete suggested options that represent meaningful product directions.
+- Suggested options must be full answer choices, not vague placeholders, yes/no prompts, or one-word labels.
+- If the question is about success or the win condition, explain it in plain language and make the answer options concrete and distinct.
 - Prefer questions that reveal product vision and priorities (who/why/when/success) over implementation details.
 - Use clear tradeoff framing where relevant (e.g., speed vs depth, automation vs control, flexibility vs consistency).
 
@@ -614,6 +616,9 @@ For each requirement ID (scope-appropriate), assess:
 5. TESTABILITY: Is there a way to verify pass/fail?
    - BAD: "The system shall be maintainable"
    - GOOD: "The system shall include inline code documentation for all public methods"
+
+Suggested fixes should be concrete, mutually distinct, and easy to compare.
+Avoid generic options such as "improve it", "be more specific", or "it depends" unless they are paired with a concrete alternative.
 
 Return ONLY a valid JSON object in this format:
 {{
