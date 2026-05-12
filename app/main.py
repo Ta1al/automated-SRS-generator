@@ -35,7 +35,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import router
 from app.config import get_settings
-from app.db.checkpointer import managed_checkpointer
+from app.db.checkpointer import managed_checkpointer, managed_sqlite_checkpointer
 from app.graph.graph import build_graph
 from app.rag.vectorstore import init_vectorstore
 
@@ -67,8 +67,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # 2 & 3. Postgres checkpointer + graph compilation
     # Attempt to initialise the checkpointer and compile the graph. If the
-    # database is unavailable (e.g., Docker not running) allow a degraded
-    # startup so the frontend can still load for local UI verification.
+    # database is unavailable (e.g., Docker not running) fall back to
+    # in-memory SQLite for local development/testing.
     try:
         async with managed_checkpointer() as checkpointer:
             logger.info("Compiling LangGraph workflow …")
@@ -77,16 +77,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             yield
     except Exception as exc:  # pragma: no cover - defensive fallback for dev
         logger.warning(
-            "Unable to initialise Postgres checkpointer; starting in degraded mode. Error: %s",
+            "Unable to initialise Postgres checkpointer: %s. Falling back to in-memory SQLite.",
             exc,
         )
-        # In degraded mode the graph is not available; endpoints should handle
-        # missing graph state gracefully (returning helpful 503s). Yield so the
-        # app still starts and the frontend can be used for UI verification.
-        app.state.graph = None
-        yield
+        try:
+            async with managed_sqlite_checkpointer() as checkpointer:
+                logger.info("Compiling LangGraph workflow with SQLite checkpointer …")
+                app.state.graph = build_graph(checkpointer=checkpointer)
+                logger.info("=== Server ready (in-memory mode) ===")
+                yield
+        except Exception as exc2:  # pragma: no cover
+            logger.error("Failed to initialize with SQLite fallback: %s", exc2)
+            app.state.graph = None
+            yield
 
-    # After yield - checkpointer pool is closed by managed_checkpointer
+    # After yield - checkpointer pool is closed by managed_checkpointer or managed_sqlite_checkpointer
     logger.info("=== SRS Generator shutdown complete ===")
 
 
