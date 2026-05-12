@@ -17,6 +17,7 @@ from typing import AsyncIterator
 
 from psycopg_pool import AsyncConnectionPool
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from langgraph.checkpoint.memory import MemorySaver
 
 from app.config import get_settings
 
@@ -58,3 +59,21 @@ async def managed_checkpointer() -> AsyncIterator[AsyncPostgresSaver]:
     finally:
         logger.info("Closing Postgres connection pool …")
         await pool.close()
+
+
+@asynccontextmanager
+async def managed_sqlite_checkpointer() -> AsyncIterator[MemorySaver]:
+    """
+    Fallback checkpointer using in-memory storage.
+    Used when Postgres is unavailable (e.g., for local development/testing).
+    
+    Yields:
+        MemorySaver: An in-memory LangGraph checkpointer.
+    """
+    logger.info("Opening in-memory checkpointer (degraded mode) …")
+    checkpointer = MemorySaver()
+    try:
+        logger.info("MemorySaver ready (in-memory, data will not persist).")
+        yield checkpointer
+    finally:
+        logger.info("Closing in-memory checkpointer …")
