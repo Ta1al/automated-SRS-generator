@@ -45,6 +45,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["srs"])
 
+# Allow fallback behavior for guardrail classifier
+DISABLE_FALLBACKS = False
+
 _guardrail_async_http_client = httpx.AsyncClient()
 _guardrail_sync_http_client = httpx.Client()
 
@@ -105,6 +108,94 @@ def _extract_json_dict(raw_text: str) -> dict[str, Any] | None:
             return parsed if isinstance(parsed, dict) else None
         except json.JSONDecodeError:
             return None
+
+
+def _try_parse_json_payload(raw_text: str) -> Any | None:
+    """Parse a complete JSON payload from raw streamed text if possible."""
+    cleaned = re.sub(r"```(?:json)?\s*", "", str(raw_text or "")).strip().rstrip("`").strip()
+    if not cleaned:
+        return None
+
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        return None
+
+
+def _json_to_stream_text(value: Any, depth: int = 0) -> list[str]:
+    """Convert JSON payloads into readable paragraph-like lines for live streaming."""
+    indent = "  " * depth
+
+    if isinstance(value, dict):
+        lines: list[str] = []
+        for key, item in value.items():
+            label = str(key).replace("_", " ").strip().capitalize()
+            if isinstance(item, (dict, list)):
+                lines.append(f"{indent}{label}:")
+                lines.extend(_json_to_stream_text(item, depth + 1))
+            else:
+                text = str(item).strip()
+                if text:
+                    lines.append(f"{indent}{label}: {text}")
+        return lines
+
+    if isinstance(value, list):
+        lines = []
+        for item in value:
+            if isinstance(item, (dict, list)):
+                lines.append(f"{indent}-")
+                lines.extend(_json_to_stream_text(item, depth + 1))
+            else:
+                text = str(item).strip()
+                if text:
+                    lines.append(f"{indent}- {text}")
+        return lines
+
+    text = str(value).strip()
+    return [f"{indent}{text}"] if text else []
+
+
+def _coerce_message_chunk_for_stream(
+    content: Any,
+    node_name: str,
+    json_stream_buffers: dict[str, str],
+) -> str | None:
+    """
+    Convert message chunks into frontend-safe text.
+
+    - Buffers JSON fragments until valid JSON is complete, then emits readable text.
+    - Suppresses incomplete JSON fragments to avoid leaking raw JSON.
+    - Passes plain text through unchanged.
+    """
+    raw_text = str(content or "")
+    if not raw_text:
+        return None
+
+    stripped = raw_text.strip()
+    buffer_key = node_name or "__unknown__"
+    has_buffer = buffer_key in json_stream_buffers
+
+    starts_json_like = stripped.startswith("{") or stripped.startswith("[") or stripped.startswith("```json")
+    continue_json_like = has_buffer or starts_json_like
+
+    if continue_json_like:
+        json_stream_buffers[buffer_key] = f"{json_stream_buffers.get(buffer_key, "")}{raw_text}"
+        parsed = _try_parse_json_payload(json_stream_buffers[buffer_key])
+        if parsed is not None:
+            lines = _json_to_stream_text(parsed)
+            json_stream_buffers.pop(buffer_key, None)
+            if not lines:
+                return None
+            rendered = "\n".join(lines).strip()
+            return f"{rendered}\n" if rendered else None
+
+        # If still incomplete JSON, wait for more chunks instead of streaming raw JSON.
+        if len(json_stream_buffers[buffer_key]) > 50000:
+            logger.warning("Dropping oversized JSON stream buffer from node %s", buffer_key)
+            json_stream_buffers.pop(buffer_key, None)
+        return None
+
+    return raw_text
 
 
 def _normalize_guardrail_label(value: Any) -> str:
@@ -192,10 +283,19 @@ async def _classify_non_resume_message_with_llm(message: str) -> tuple[bool, str
         if redirect:
             return False, redirect, f"llm-{label}"
 
+        # If guardrail returned an invalid payload, decide based on the temporary
+        # DISABLE_FALLBACKS flag. When disabled, treat invalid payloads as out-of-scope
+        # to avoid allowing raw JSON or unexpected outputs through to the main flow.
+        if DISABLE_FALLBACKS:
+            logger.info("Guardrail LLM returned invalid payload; blocking message due to DISABLE_FALLBACKS.")
+            return False, SRS_SCOPE_REDIRECT_MESSAGE, "llm-fallback-disabled"
         logger.info("Guardrail LLM returned invalid classification payload; allowing message through.")
     except asyncio.CancelledError:
         raise
     except Exception as exc:
+        if DISABLE_FALLBACKS:
+            logger.warning("Guardrail LLM classifier failed; blocking message due to DISABLE_FALLBACKS: %s", exc)
+            return False, SRS_SCOPE_REDIRECT_MESSAGE, "llm-fallback-disabled"
         logger.warning("Guardrail LLM classifier failed, allowing message through: %s", exc)
 
     return True, "", "llm-fallback-allow"
@@ -429,6 +529,7 @@ async def _stream_graph(
     nodes_finished: set[str] = set()
     parallel_group_started = False
     stream_start_time = time.time()
+    json_stream_buffers: dict[str, str] = {}
 
     try:
         if is_resume:
@@ -472,15 +573,22 @@ async def _stream_graph(
                 # data = (message_chunk, metadata)
                 msg_chunk, meta = data
                 if hasattr(msg_chunk, "content") and msg_chunk.content:
-                    yield {
-                        "event": "token",
-                        "data": json.dumps(
-                            {
-                                "content": msg_chunk.content,
-                                "node": meta.get("langgraph_node", ""),
-                            }
-                        ),
-                    }
+                    node_from_meta = meta.get("langgraph_node", "") if isinstance(meta, dict) else ""
+                    safe_content = _coerce_message_chunk_for_stream(
+                        msg_chunk.content,
+                        node_from_meta,
+                        json_stream_buffers,
+                    )
+                    if safe_content:
+                        yield {
+                            "event": "token",
+                            "data": json.dumps(
+                                {
+                                    "content": safe_content,
+                                    "node": node_from_meta,
+                                }
+                            ),
+                        }
 
             elif mode == "updates":
                 # data = {node_name: {state_updates}}
@@ -520,6 +628,7 @@ async def _stream_graph(
                                 "event": "project_title",
                                 "data": json.dumps({"project_title": project_title}),
                             }
+
 
                     # ── Emit node progress status with enriched timing info ──
                     import time
@@ -627,6 +736,25 @@ async def _stream_graph(
                         prev_map[node_name] = max(200, updated)
                     except Exception:
                         logger.exception("Failed to update EMA durations in app_state.")
+
+                    # ── Handle special events from node updates ──
+                    if isinstance(node_updates, dict):
+                        # ── Stream sections as tokens for frontend consumption ──
+                        if "sections" in node_updates:
+                            sections = node_updates.get("sections", {})
+                            if isinstance(sections, dict):
+                                for section_key, section_content in sections.items():
+                                    if isinstance(section_content, str) and section_content.strip():
+                                        yield {
+                                            "event": "token",
+                                            "data": json.dumps(
+                                                {
+                                                    "content": section_content,
+                                                    "node": node_name,
+                                                    "section_key": section_key,
+                                                }
+                                            ),
+                                        }
 
                     # If the graph just finalised, emit the document
                     if node_name == "finalize_document":
