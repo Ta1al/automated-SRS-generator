@@ -70,6 +70,84 @@ classDiagram
         +rationale: string
     }
 
+    class InitialElicitation {
+        +project_title: string
+        +project_purpose: string
+        +key_stakeholders: list~string~
+        +main_features: list~string~
+        +constraints: list~string~
+        +preliminary_glossary: list~GlossaryEntry~
+    }
+
+    class GlossaryEntry {
+        +term: string
+        +definition: string
+    }
+
+    class UseCase {
+        +name: string
+        +actor: string
+        +description: string
+        +trigger: string
+        +precondition: string
+        +basic_steps: list~string~
+    }
+
+    class SystemEnvironment {
+        +description: string
+        +actors: list~string~
+        +external_systems: list~string~
+    }
+
+    class Section1Introduction {
+        +purpose: string
+        +scope: string
+        +glossary: list~GlossaryEntry~
+        +overview: string
+    }
+
+    class Section2OverallDescription {
+        +system_environment: SystemEnvironment
+        +primary_use_cases: list~UseCase~
+        +user_characteristics: string
+        +non_functional_overview: string
+    }
+
+    class FunctionalRequirement {
+        +requirement_id: string
+        +name: string
+        +trigger: string
+        +precondition: string
+        +basic_flow: string
+        +alternative_flows: list~string~
+        +postcondition: string
+        +exception_paths: list~string~
+    }
+
+    class NonFunctionalRequirement {
+        +category: string
+        +requirement: string
+        +rationale: string
+    }
+
+    class Section3Requirements {
+        +external_interfaces: list~string~
+        +functional_requirements: list~FunctionalRequirement~
+        +non_functional_requirements: list~NonFunctionalRequirement~
+    }
+
+    class VerificationEntry {
+        +requirement_id: string
+        +test_case: string
+        +acceptance_criteria: string
+    }
+
+    class Section4Verification {
+        +title: string
+        +description: string
+        +verification_entries: list~VerificationEntry~
+    }
+
     class SRSState {
         +chat_history: list~BaseMessage~
         +document_buffer: string
@@ -164,11 +242,25 @@ classDiagram
         +docx_comment: string
     }
 
+    %% Pydantic model relationships for structured LLM output
+    InitialElicitation --> "*" GlossaryEntry : contains
+    Section1Introduction --> "*" GlossaryEntry : contains
+    Section2OverallDescription --> SystemEnvironment : contains
+    Section2OverallDescription --> "*" UseCase : contains
+    Section3Requirements --> "*" FunctionalRequirement : contains
+    Section3Requirements --> "*" NonFunctionalRequirement : contains
+    Section4Verification --> "*" VerificationEntry : contains
+
     User "1" --> "*" Chat : owns
     Chat "1" --> "*" ChatMessage : contains
     Chat "1" --> "*" ChatRun : tracks
     SRSState --> "*" Requirement : contains
     SRSState --> "*" ClarificationQuestion : references
+    SRSState --> InitialElicitation : uses
+    SRSState --> Section1Introduction : uses
+    SRSState --> Section2OverallDescription : uses
+    SRSState --> Section3Requirements : uses
+    SRSState --> Section4Verification : uses
     PrismaChatAPI --> User : authenticates
     PrismaChatAPI --> Chat : persists
     PrismaChatAPI --> ChatMessage : writes
@@ -215,3 +307,24 @@ classDiagram
   HTTP API fallback.
 - **Settings** - Pydantic `BaseSettings` class reading `.env` configuration with
   LRU-cached singleton retrieval via `get_settings()`.
+
+## Pydantic Structured Output Models
+
+These models enforce schema validation on LLM-generated content using LangChain's
+`with_structured_output()` method. Each model is used by a corresponding graph node:
+
+- **InitialElicitation** - Used by `elicit_requirements` to extract project metadata
+  (title, purpose, stakeholders, features, constraints, preliminary glossary).
+  Enables structured project bootstrapping from user input.
+- **Section1Introduction** - Used by `draft_section_1` to generate IEEE 830 Section 1
+  with purpose, scope, glossary entries, and overview.
+- **Section2OverallDescription** - Used by `draft_section_2` to produce system context
+  (environment, use cases, user characteristics, non-functional overview).
+- **Section3Requirements** - Used by `draft_section_3_fr`, `draft_section_3_nfr`, and
+  `draft_section_3_iface` to generate functional requirements, non-functional requirements,
+  and external interfaces with structured acceptance criteria and flows.
+- **Section4Verification** - Used by `draft_section_4` to produce a verification matrix
+  mapping requirement IDs to test cases and acceptance criteria.
+- **Nested models** - `GlossaryEntry`, `UseCase`, `SystemEnvironment`, `FunctionalRequirement`,
+  `NonFunctionalRequirement`, and `VerificationEntry` are nested within the above models
+  to provide fine-grained field descriptions for LLM schema generation.

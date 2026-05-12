@@ -122,7 +122,59 @@ sequenceDiagram
     end
 ```
 
-## 4. Data Design
+## 4. LLM Output Validation and Structured Output
+
+All LLM-invoking nodes use **Pydantic-based structured output** to ensure schema compliance and type safety at the LLM boundary.
+
+### Three-Level Fallback Strategy
+
+```mermaid
+flowchart TD
+    Start([LLM Node Invoked]) --> Check{with_structured_output<br/>available?}
+    
+    Check -->|Yes| MockCheck{Mock<br/>detected?}
+    MockCheck -->|Yes| Fallback1[Fallback 1: Text LLM]
+    MockCheck -->|No| Primary["Primary: LLM.with_structured_output<br/>(Pydantic model)"]
+    
+    Check -->|No| Fallback1
+    
+    Primary --> PrimarySuccess{Valid<br/>Pydantic?}
+    PrimarySuccess -->|Yes| Format["Format model to<br/>Markdown output"]
+    PrimarySuccess -->|No| Fallback1
+    
+    Fallback1 --> JSONParse{Parse JSON<br/>from text?}
+    JSONParse -->|Yes| Format
+    JSONParse -->|No| Fallback2["Fallback 2: Raw text"]
+    
+    Format --> Return([Return formatted<br/>section/data])
+    Fallback2 --> Return
+```
+
+### Validation Process
+
+1. **Pydantic Schema Definition** - Each generative node defines a Pydantic `BaseModel` with typed fields and descriptive `Field(description=...)` annotations.
+2. **LLM Structured Call** - When available, `llm.with_structured_output(ModelClass)` constrains the LLM response to match the schema exactly.
+3. **Mock Detection** - Checks `llm.__class__.__module__` to detect unittest.mock objects and force fallback for tests.
+4. **JSON Parsing Fallback** - If structured output unavailable, calls text-based LLM and attempts manual JSON parsing.
+5. **Format Conversion** - Valid Pydantic model instances are converted to formatted Markdown section text.
+
+### Pydantic Models
+
+| Model | Fields | Purpose |
+|---|---|---|
+| `InitialElicitation` | project_title, project_purpose, key_stakeholders, main_features, constraints, preliminary_glossary | Extracts project metadata in `elicit_requirements` |
+| `GlossaryEntry` | term, definition | Glossary term/definition pairs |
+| `Section1Introduction` | purpose, scope, glossary[], overview | IEEE 830 Section 1: Introduction |
+| `UseCase` | name, actor, description, trigger, precondition, basic_steps | System use case definition |
+| `SystemEnvironment` | description, actors, external_systems | Product environment context |
+| `Section2OverallDescription` | system_environment, primary_use_cases[], user_characteristics, non_functional_overview | Section 2: Overall Description |
+| `FunctionalRequirement` | requirement_id, name, trigger, precondition, basic_flow, alternative_flows[], postcondition, exception_paths[] | Complete functional requirement |
+| `NonFunctionalRequirement` | category, requirement, rationale | Non-functional requirement (quality attribute) |
+| `Section3Requirements` | external_interfaces[], functional_requirements[], non_functional_requirements[] | Section 3: Requirements (all variants: FR, NFR, interfaces) |
+| `VerificationEntry` | requirement_id, test_case, acceptance_criteria | Single requirement verification mapping |
+| `Section4Verification` | title, description, verification_entries[] | Section 4: Verification Matrix |
+
+## 5. Data Design
 
 The data model stores user ownership, conversational history, and execution state for resumable workflow runs.
 
@@ -185,7 +237,7 @@ erDiagram
     }
 ```
 
-## 5. Workflow Design
+## 6. Workflow Design
 
 The workflow supports three operation modes and includes quality gates plus human-in-the-loop clarification.
 
