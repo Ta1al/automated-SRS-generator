@@ -100,9 +100,16 @@ EXAMPLES OF BAD QUESTIONS (do NOT ask):
 - "Will you host on AWS, GCP, or on-premises?" (deployment)
 - "Do you need GDPR compliance?" (compliance framework)
 
-Ask at most 5 questions total. Prefer 2–4 if enough.
+Ask up to 7 questions total. Prefer 4-6 when important direction is still unclear.
 If the draft clearly captures the core logic and workflows, return an empty list.
 Questions are optional, not mandatory.
+
+Question style requirements:
+- Write questions as guided prompts, not single-line checks.
+- Each question should include enough context so a non-technical stakeholder can answer confidently.
+- When useful, include 3-5 concrete suggested options that represent meaningful product directions.
+- Prefer questions that reveal product vision and priorities (who/why/when/success) over implementation details.
+- Use clear tradeoff framing where relevant (e.g., speed vs depth, automation vs control, flexibility vs consistency).
 
 Return ONLY a valid JSON object in this exact format:
 {{
@@ -126,7 +133,8 @@ Return an empty list if core logic is clear: {{"missing": []}}
 Rules:
 - Each entry must be a JSON object, not a string.
 - `question` must directly probe PROJECT LOGIC AND DIRECTION, not architecture.
-- Include 2-4 concrete `suggested_options` whenever realistic.
+- `question` should be elaborate enough to guide vision capture, typically 1-3 sentences.
+- Include 3-5 concrete `suggested_options` whenever realistic.
 - Keep `category` short and business/logic-oriented.
 - Keep `rationale` to one sentence explaining why this affects the system.
 

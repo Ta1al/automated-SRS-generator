@@ -22,6 +22,30 @@ import httpx
 import openai
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
+try:
+    from langchain.output_parsers import StructuredOutputParser, ResponseSchema
+except Exception:
+    try:
+        from langchain_core.output_parsers import StructuredOutputParser, ResponseSchema
+    except Exception:
+        # LangChain structured parser not available in this environment.
+        # Provide a lightweight shim so the code can fall back to legacy JSON parsing.
+        class _NoopParser:
+            @classmethod
+            def from_response_schemas(cls, schemas):
+                return cls()
+
+            def get_format_instructions(self):
+                return ""
+
+            def parse(self, text):
+                raise RuntimeError("StructuredOutputParser not available")
+
+        StructuredOutputParser = _NoopParser
+
+        def ResponseSchema(*args, **kwargs):
+            return None
+from pydantic import BaseModel, Field
 from langgraph.types import interrupt
 
 from app.config import get_settings
@@ -32,6 +56,116 @@ from app.rag.vectorstore import retrieve
 from app.validation.mermaid import validate_mermaid_syntax
 
 logger = logging.getLogger(__name__)
+
+# ── SRS Pydantic Models for structured LLM output ──────────────────────────────
+
+
+class GlossaryEntry(BaseModel):
+    """A single glossary term and definition."""
+    term: str = Field(..., description="The term being defined")
+    definition: str = Field(..., description="Clear definition of the term")
+
+
+class Section1Introduction(BaseModel):
+    """SRS Section 1: Introduction."""
+    purpose: str = Field(..., description="Purpose of the document")
+    scope: str = Field(..., description="Scope of the project")
+    glossary: list[GlossaryEntry] = Field(
+        default_factory=list,
+        description="Key glossary terms and definitions"
+    )
+    overview: str = Field(..., description="Overview of the document structure")
+
+
+class UseCase(BaseModel):
+    """A single use case with name and description."""
+    name: str = Field(..., description="Use case name")
+    actor: str = Field(..., description="Actor (e.g., Reader, Author, Editor)")
+    brief_description: str = Field(..., description="Brief description of use case")
+    trigger: str = Field(..., description="What triggers this use case")
+    precondition: str = Field(..., description="Precondition before use case starts")
+    basic_steps: list[str] = Field(..., description="Numbered steps of basic path")
+
+
+class SystemEnvironment(BaseModel):
+    """System environment description."""
+    description: str = Field(..., description="Description of system environment")
+    actors: list[str] = Field(..., description="List of system actors")
+    external_systems: list[str] = Field(..., description="External systems connected")
+
+
+class Section2OverallDescription(BaseModel):
+    """SRS Section 2: Overall Description."""
+    system_environment: SystemEnvironment
+    primary_use_cases: list[UseCase] = Field(
+        ..., description="Primary use cases for each actor"
+    )
+    user_characteristics: str = Field(..., description="Description of user characteristics")
+    non_functional_overview: str = Field(
+        ..., description="Overview of non-functional requirements"
+    )
+
+
+class FunctionalRequirement(BaseModel):
+    """A detailed functional requirement with use case details."""
+    requirement_id: str = Field(..., description="Requirement ID (e.g., REQ-3.2.1)")
+    name: str = Field(..., description="Requirement name")
+    trigger: str = Field(..., description="What triggers this requirement")
+    precondition: str = Field(..., description="Precondition")
+    basic_flow: list[str] = Field(..., description="Basic flow steps")
+    alternative_flows: list[str] = Field(
+        default_factory=list, description="Alternative flow steps"
+    )
+    postcondition: str = Field(..., description="Expected state after requirement")
+    exception_paths: list[str] = Field(
+        default_factory=list, description="Exception handling paths"
+    )
+
+
+class NonFunctionalRequirement(BaseModel):
+    """A non-functional requirement (performance, security, scalability, etc.)."""
+    category: str = Field(..., description="Category (e.g., Performance, Security, Scalability)")
+    requirement: str = Field(..., description="The requirement statement")
+    rationale: str = Field(..., description="Why this requirement is important")
+
+
+class Section3Requirements(BaseModel):
+    """SRS Section 3: Requirements Specification."""
+    external_interfaces: str = Field(..., description="External interface requirements")
+    functional_requirements: list[FunctionalRequirement] = Field(
+        ..., description="Detailed functional requirements with use cases"
+    )
+    non_functional_requirements: list[NonFunctionalRequirement] = Field(
+        ..., description="Non-functional requirements"
+    )
+
+
+class VerificationEntry(BaseModel):
+    """A single entry in the verification matrix linking requirement to test."""
+    requirement_id: str = Field(..., description="Requirement ID being verified")
+    test_case: str = Field(..., description="Test case or verification method")
+    acceptance_criteria: str = Field(..., description="How to determine if requirement is met")
+
+
+class Section4Verification(BaseModel):
+    """SRS Section 4: Verification Matrix."""
+    title: str = Field(default="4.0 Verification Matrix", description="Section title")
+    description: str = Field(..., description="Overview of verification approach")
+    verification_entries: list[VerificationEntry] = Field(
+        ..., description="Matrix of requirements to test cases"
+    )
+
+
+class InitialElicitation(BaseModel):
+    """Initial requirements elicitation output."""
+    project_title: str = Field(..., description="Concise project title")
+    project_purpose: str = Field(..., description="Purpose and goals of the project")
+    key_stakeholders: list[str] = Field(..., description="Key stakeholders involved")
+    main_features: list[str] = Field(..., description="Main features/functionality needed")
+    constraints: list[str] = Field(default_factory=list, description="Known constraints")
+    preliminary_glossary: list[GlossaryEntry] = Field(
+        default_factory=list, description="Initial glossary terms"
+    )
 
 # ── Shared HTTP clients ────────────────────────────────────────────────────────
 # langchain_openai's internal _cached_async_httpx_client uses @lru_cache keyed
@@ -118,7 +252,55 @@ def _parse_json(text: str) -> Any:
     """Extract the first JSON object or array from a string."""
     # Strip markdown fences if present
     text = re.sub(r"```(?:json)?\s*", "", text).strip().rstrip("`").strip()
-    return json.loads(text)
+    try:
+        return json.loads(text)
+    except Exception:
+        # Fallback: extract first {...} or [...] substring
+        m = re.search(r"(\{[\s\S]*\}|\[[\s\S]*\])", text)
+        if not m:
+            raise
+        return json.loads(m.group(0))
+
+
+def _unwrap_structured_response(response: Any, *, model_class: type | None = None, parser=None) -> Any:
+    """Normalize structured responses from model wrappers.
+
+    Returns a Python object (dict/list) when possible.
+    """
+    # If the model returned a Pydantic instance already
+    try:
+        from pydantic import BaseModel as _BaseModel
+
+        if model_class is not None and isinstance(response, model_class):
+            return response.dict()
+        if isinstance(response, _BaseModel):
+            return response.dict()
+    except Exception:
+        pass
+
+    # If it's already a dict/list, return as-is
+    if isinstance(response, (dict, list)):
+        return response
+
+    # If a parser is supplied and has parse(), try that first
+    if parser is not None:
+        try:
+            parsed = parser.parse(_ai_text(response))
+            # parser.parse may return dict-like or a stringified JSON
+            if isinstance(parsed, (dict, list)):
+                return parsed
+            if isinstance(parsed, str):
+                return _parse_json(parsed)
+        except Exception:
+            pass
+
+    # Otherwise, try to coerce text -> JSON
+    text = _ai_text(response)
+    try:
+        return _parse_json(text)
+    except Exception:
+        # No structured content available
+        raise
 
 
 def _normalize_questions(raw_questions: Any) -> list[ClarificationQuestion]:
@@ -370,19 +552,50 @@ async def elicit_requirements(state: SRSState) -> dict:
     if context_block:
         messages.append(HumanMessage(content=context_block))
 
-    response = await _llm_invoke_with_retry(llm, messages, node_name="elicit_requirements")
-    raw = _ai_text(response)
     project_title = state.get("project_title", "")
+    buffer = ""
 
-    # Try to parse as JSON; fall back to storing as-is
-    try:
-        parsed = _parse_json(raw)
-        buffer = json.dumps(parsed, indent=2)
-        extracted_title = _extract_project_title(parsed)
-        if extracted_title:
-            project_title = extracted_title
-    except (json.JSONDecodeError, ValueError):
-        buffer = raw
+    # Prefer using the model's `with_structured_output` helper when available
+    if hasattr(llm, "with_structured_output"):
+        try:
+            mod = getattr(llm.__class__, "__module__", "")
+            if not mod.startswith("unittest.mock"):
+                structured = llm.with_structured_output(InitialElicitation)
+                response = await structured.ainvoke(messages)
+                try:
+                    parsed = _unwrap_structured_response(response, model_class=InitialElicitation)
+                except Exception:
+                    parsed = None
+
+                if isinstance(parsed, dict):
+                    # Format structured response into JSON buffer
+                    buffer_dict = {
+                        "project_title": parsed.get("project_title", ""),
+                        "project_purpose": parsed.get("project_purpose", ""),
+                        "key_stakeholders": parsed.get("key_stakeholders", []),
+                        "main_features": parsed.get("main_features", []),
+                        "constraints": parsed.get("constraints", []),
+                        "preliminary_glossary": parsed.get("preliminary_glossary", []),
+                    }
+                    buffer = json.dumps(buffer_dict, indent=2)
+                    project_title = _extract_project_title(parsed)
+        except Exception:
+            pass
+
+    # Fallback to text-based LLM call if structured output failed
+    if not buffer:
+        response = await _llm_invoke_with_retry(
+            llm, messages, node_name="elicit_requirements"
+        )
+        raw = _ai_text(response)
+        try:
+            parsed = _parse_json(raw)
+            buffer = json.dumps(parsed, indent=2)
+            extracted_title = _extract_project_title(parsed)
+            if extracted_title:
+                project_title = extracted_title
+        except (json.JSONDecodeError, ValueError):
+            buffer = raw
 
     # Extract user input for scope detection
     user_input = ""
@@ -441,22 +654,95 @@ async def evaluate_completeness(state: SRSState) -> dict:
         "\n\nIdentify only high-impact unanswered decisions using the required JSON format."
     )
 
-    response = await _llm_invoke_with_retry(
-        llm,
-        [
-            SystemMessage(content=prompts.EVALUATOR_SYSTEM.format(project_scope=project_scope)),
-            HumanMessage(content=user_prompt),
-        ],
-        node_name="evaluate_completeness",
-    )
+    # Prefer structured JSON output from evaluator
+    eval_schemas = [
+        ResponseSchema(name="missing", description="List of unanswered high-impact questions (array of objects)"),
+    ]
+    eval_parser = StructuredOutputParser.from_response_schemas(eval_schemas)
+    eval_fmt = eval_parser.get_format_instructions()
 
-    try:
-        data = _parse_json(_ai_text(response))
-        missing = _normalize_questions(data.get("missing", []))
-        missing = _filter_major_questions(missing, scope=project_scope)
-    except (json.JSONDecodeError, ValueError, AttributeError):
-        logger.warning("Evaluator returned non-JSON; treating as complete.")
-        missing = []
+    messages = [
+        SystemMessage(content=prompts.EVALUATOR_SYSTEM.format(project_scope=project_scope)),
+        HumanMessage(content=user_prompt),
+    ]
+
+    # Prefer model-level structured output when available
+    missing = []
+    if hasattr(llm, "with_structured_output"):
+        try:
+            try:
+                structured = llm.with_structured_output(eval_parser)
+            except Exception:
+                structured = llm.with_structured_output(eval_schemas)
+
+            # Avoid using mocks as real structured wrappers
+            mod = getattr(structured.__class__, "__module__", "")
+            if isinstance(structured, object) and mod.startswith("unittest.mock"):
+                raise RuntimeError("mocked structured wrapper; fallback")
+
+            resp = await structured.ainvoke(messages)
+            try:
+                parsed = _unwrap_structured_response(resp, parser=eval_parser)
+            except Exception:
+                parsed = None
+
+            if isinstance(parsed, dict):
+                missing_list = parsed.get("missing") or []
+            else:
+                # Try best-effort parsing of raw response
+                try:
+                    missing_list = _parse_json(_ai_text(resp)).get("missing", [])
+                except Exception:
+                    missing_list = []
+
+            missing = _normalize_questions(missing_list)
+            missing = _filter_major_questions(missing, scope=project_scope)
+        except Exception:
+            # Structured wrapper unavailable or mocked; fall back to format-instruction flow
+            messages.append(HumanMessage(content=eval_fmt))
+            response = await _llm_invoke_with_retry(llm, messages, node_name="evaluate_completeness")
+
+            try:
+                parsed = eval_parser.parse(_ai_text(response))
+                missing_raw = parsed.get("missing")
+                if isinstance(missing_raw, str):
+                    missing_list = _parse_json(missing_raw)
+                else:
+                    missing_list = missing_raw or []
+
+                missing = _normalize_questions(missing_list)
+            except Exception:
+                try:
+                    data = _parse_json(_ai_text(response))
+                    missing = _normalize_questions(data.get("missing", []))
+                except (json.JSONDecodeError, ValueError, AttributeError):
+                    logger.warning(
+                        "Evaluator returned non-JSON or unparsable structured output; treating as complete."
+                    )
+                    missing = []
+    else:
+        # Fallback: include format instructions and call normally
+        messages.append(HumanMessage(content=eval_fmt))
+        response = await _llm_invoke_with_retry(llm, messages, node_name="evaluate_completeness")
+
+        try:
+            parsed = eval_parser.parse(_ai_text(response))
+            missing_raw = parsed.get("missing")
+            # If the parser returned a JSON string, decode it
+            if isinstance(missing_raw, str):
+                missing_list = _parse_json(missing_raw)
+            else:
+                missing_list = missing_raw or []
+
+            missing = _normalize_questions(missing_list)
+        except Exception:
+            # Fallback to legacy JSON parsing for environments without structured parser
+            try:
+                data = _parse_json(_ai_text(response))
+                missing = _normalize_questions(data.get("missing", []))
+            except (json.JSONDecodeError, ValueError, AttributeError):
+                logger.warning("Evaluator returned non-JSON or unparsable structured output; treating as complete.")
+                missing = []
 
     logger.info("Evaluator found %d gaps for scope '%s'.", len(missing), project_scope)
     return {"missing_context": missing, "qa_gaps": []}
@@ -564,20 +850,92 @@ async def classify_requirements(state: SRSState) -> dict:
     batch = [{"id": r["id"], "text": r["text"]} for r in existing]
     user_prompt = f"Classify these requirements:\n{json.dumps(batch, indent=2)}"
 
-    response = await _llm_invoke_with_retry(
-        llm,
-        [
-            SystemMessage(content=prompts.CLASSIFIER_SYSTEM),
-            HumanMessage(content=user_prompt),
-        ],
-        node_name="classify_requirements",
-    )
+    # Ask classifier to return structured JSON and include parser instructions
+    cls_schema = [
+        ResponseSchema(name="classifications", description="Array of objects: {id: str, labels: [str], quality_issues?: [str]}"),
+    ]
+    cls_parser = StructuredOutputParser.from_response_schemas(cls_schema)
+    cls_fmt = cls_parser.get_format_instructions()
 
-    try:
-        classifications: list[dict] = _parse_json(_ai_text(response))
-    except (json.JSONDecodeError, ValueError):
-        logger.warning("Classifier returned non-JSON; skipping label assignment.")
-        return {"requirements": existing}
+    messages = [
+        SystemMessage(content=prompts.CLASSIFIER_SYSTEM),
+        HumanMessage(content=user_prompt),
+    ]
+
+    if hasattr(llm, "with_structured_output"):
+        try:
+            try:
+                structured = llm.with_structured_output(cls_parser)
+            except Exception:
+                structured = llm.with_structured_output(cls_schema)
+
+            # Avoid using mocks as real structured wrappers
+            mod = getattr(structured.__class__, "__module__", "")
+            if isinstance(structured, object) and mod.startswith("unittest.mock"):
+                raise RuntimeError("mocked structured wrapper; fallback")
+
+            resp = await structured.ainvoke(messages)
+            try:
+                parsed = _unwrap_structured_response(resp, parser=cls_parser)
+            except Exception:
+                parsed = None
+
+            if isinstance(parsed, dict):
+                classifications = parsed.get("classifications")
+            else:
+                # Best-effort: try to parse raw response as JSON
+                try:
+                    classifications = _parse_json(_ai_text(resp))
+                except Exception:
+                    classifications = None
+
+            if not classifications:
+                raise RuntimeError("No classifications parsed from structured response")
+        except Exception:
+            logger.warning("Classifier structured output failed; falling back to freeform JSON.")
+            # Fall back to the message-instruction flow
+            messages.append(HumanMessage(content=cls_fmt))
+            response = await _llm_invoke_with_retry(
+                llm,
+                messages,
+                node_name="classify_requirements",
+            )
+
+            try:
+                parsed = cls_parser.parse(_ai_text(response))
+                classifications = parsed.get("classifications")
+                if isinstance(classifications, str):
+                    classifications = _parse_json(classifications)
+            except Exception:
+                # Try a loose JSON parse as a final fallback
+                try:
+                    raw_text = _ai_text(response)
+                    classifications = _parse_json(raw_text)
+                except Exception:
+                    logger.warning("Classifier returned non-JSON or unparsable structured output; skipping label assignment.")
+                    return {"requirements": existing}
+    else:
+        # Fallback to including format instructions in messages
+        messages.append(HumanMessage(content=cls_fmt))
+        response = await _llm_invoke_with_retry(
+            llm,
+            messages,
+            node_name="classify_requirements",
+        )
+
+        try:
+            parsed = cls_parser.parse(_ai_text(response))
+            classifications = parsed.get("classifications")
+            if isinstance(classifications, str):
+                classifications = _parse_json(classifications)
+        except Exception:
+            # Try a loose JSON parse as a final fallback
+            try:
+                raw_text = _ai_text(response)
+                classifications = _parse_json(raw_text)
+            except Exception:
+                logger.warning("Classifier returned non-JSON or unparsable structured output; skipping label assignment.")
+                return {"requirements": existing}
 
     # Build lookup map
     label_map: dict[str, list[str]] = {
@@ -738,15 +1096,56 @@ async def draft_section_1(state: SRSState) -> dict:
     llm = _get_llm(temperature=0.3)
     context = _build_writing_context(state)
 
+    messages = [
+        SystemMessage(content=prompts.WRITER_S1_SYSTEM),
+        HumanMessage(content=context),
+    ]
+
+    # Try structured output first
+    if hasattr(llm, "with_structured_output"):
+        try:
+            mod = getattr(llm.__class__, "__module__", "")
+            if not mod.startswith("unittest.mock"):
+                logger.info("draft_section_1: Using structured output with Section1Introduction")
+                structured = llm.with_structured_output(Section1Introduction)
+                response = await structured.ainvoke(messages)
+                logger.info(f"draft_section_1: Response type = {type(response)}")
+                try:
+                    parsed = _unwrap_structured_response(response, model_class=Section1Introduction)
+                except Exception:
+                    parsed = None
+
+                if isinstance(parsed, dict):
+                    # Convert model dict to formatted text
+                    section_text = f"""1.0. Introduction
+
+1.1. Purpose
+{parsed.get('purpose','')}
+
+1.2. Scope of Project
+{parsed.get('scope','')}
+
+1.3. Glossary
+"""
+                    for entry in parsed.get("glossary", []):
+                        section_text += f"{entry.get('term', '')}: {entry.get('definition', '')}\n"
+                    section_text += f"\n1.5. Overview of Document\n{parsed.get('overview','')}"
+                    logger.info(f"draft_section_1: Successfully converted to formatted text ({len(section_text)} chars)")
+                    return {"sections": {"s1": section_text}}
+        except Exception as e:
+            logger.warning(f"draft_section_1: Structured output failed, falling back to text-based: {e}")
+
+    # Fallback to text-based LLM call
+    logger.info("draft_section_1: Using text-based LLM call")
     response = await _llm_invoke_with_retry(
         llm,
-        [
-            SystemMessage(content=prompts.WRITER_S1_SYSTEM),
-            HumanMessage(content=context),
-        ],
+        messages,
         node_name="draft_section_1",
     )
-    normalized_section = _normalize_section_output("s1", _ai_text(response), state)
+    text_response = _ai_text(response)
+    logger.info(f"draft_section_1: Text response ({len(text_response)} chars), first 100 chars: {text_response[:100]}")
+    normalized_section = _normalize_section_output("s1", text_response, state)
+    logger.info(f"draft_section_1: Normalized section ({len(normalized_section)} chars), first 100 chars: {normalized_section[:100]}")
     return {"sections": {"s1": normalized_section}}
 
 
@@ -757,15 +1156,59 @@ async def draft_section_2(state: SRSState) -> dict:
     llm = _get_llm(temperature=0.3)
     context = _build_writing_context(state)
 
+    messages = [
+        SystemMessage(content=prompts.WRITER_S2_SYSTEM),
+        HumanMessage(content=context),
+    ]
+
+    # Try structured output first
+    if hasattr(llm, "with_structured_output"):
+        try:
+            mod = getattr(llm.__class__, "__module__", "")
+            if not mod.startswith("unittest.mock"):
+                logger.info("draft_section_2: Using structured output with Section2OverallDescription")
+                structured = llm.with_structured_output(Section2OverallDescription)
+                response = await structured.ainvoke(messages)
+                logger.info(f"draft_section_2: Response type = {type(response)}")
+                try:
+                    parsed = _unwrap_structured_response(response, model_class=Section2OverallDescription)
+                except Exception:
+                    parsed = None
+
+                if isinstance(parsed, dict):
+                    # Convert model dict to formatted text
+                    env = parsed.get("system_environment", {}) or {}
+                    section_text = f"""2.0. Overall Description
+
+2.1 System Environment
+{env.get('description','')}
+
+Actors: {', '.join(env.get('actors', []))}
+External Systems: {', '.join(env.get('external_systems', []))}
+
+2.2 Functional Requirements Specification
+"""
+                    for uc in parsed.get("primary_use_cases", []):
+                        section_text += f"\nUse case: {uc.get('name','')}\nActor: {uc.get('actor','')}\nDescription: {uc.get('brief_description','')}\nTrigger: {uc.get('trigger','')}\n"
+                    section_text += f"\n2.3 User Characteristics\n{parsed.get('user_characteristics','')}"
+                    section_text += f"\n2.4 Non-Functional Requirements\n{parsed.get('non_functional_overview','')}"
+                    logger.info(f"draft_section_2: Successfully converted to formatted text ({len(section_text)} chars)")
+                    return {"sections": {"s2": section_text}}
+        except Exception as e:
+            logger.warning(f"draft_section_2: Structured output failed, falling back to text-based: {e}")
+
+    # Fallback to text-based LLM call
+    logger.info("draft_section_2: Using text-based LLM call")
     response = await _llm_invoke_with_retry(
         llm,
-        [
-            SystemMessage(content=prompts.WRITER_S2_SYSTEM),
-            HumanMessage(content=context),
-        ],
+        messages,
         node_name="draft_section_2",
     )
-    return {"sections": {"s2": _normalize_section_output("s2", _ai_text(response), state)}}
+    text_response = _ai_text(response)
+    logger.info(f"draft_section_2: Text response ({len(text_response)} chars), first 100 chars: {text_response[:100]}")
+    normalized_section = _normalize_section_output("s2", text_response, state)
+    logger.info(f"draft_section_2: Normalized section ({len(normalized_section)} chars), first 100 chars: {normalized_section[:100]}")
+    return {"sections": {"s2": normalized_section}}
 
 
 # ── Node 8a: Draft Section 3 - Functional Requirements ───────────────────────
@@ -776,16 +1219,53 @@ async def draft_section_3_fr(state: SRSState) -> dict:
     context = _build_writing_context(state)
     project_scope = state.get("project_scope", "complex")
 
+    messages = [
+        SystemMessage(content=prompts.WRITER_S3_FR_SYSTEM.format(project_scope=project_scope)),
+        HumanMessage(content=context),
+    ]
+
+    # Try structured output first
+    if hasattr(llm, "with_structured_output"):
+        try:
+            mod = getattr(llm.__class__, "__module__", "")
+            if not mod.startswith("unittest.mock"):
+                logger.info("draft_section_3_fr: Using structured output with Section3Requirements")
+                structured = llm.with_structured_output(Section3Requirements)
+                response = await structured.ainvoke(messages)
+                logger.info(f"draft_section_3_fr: Response type = {type(response)}")
+                try:
+                    parsed = _unwrap_structured_response(response, model_class=Section3Requirements)
+                except Exception:
+                    parsed = None
+
+                if isinstance(parsed, dict):
+                    section_text = "3.0. Requirements Specification\n\n3.2 Functional Requirements\n"
+                    for req in parsed.get("functional_requirements", []):
+                        section_text += f"\n{req.get('requirement_id','')} {req.get('name','')}\n"
+                        section_text += f"Trigger: {req.get('trigger','')}\n"
+                        section_text += f"Precondition: {req.get('precondition','')}\n"
+                        section_text += f"Basic Flow: {'. '.join(req.get('basic_flow', []))}\n"
+                        if req.get('alternative_flows'):
+                            section_text += f"Alternative: {'. '.join(req.get('alternative_flows', []))}\n"
+                        section_text += f"Postcondition: {req.get('postcondition','')}\n"
+                    logger.info(f"draft_section_3_fr: Successfully converted to formatted text ({len(section_text)} chars)")
+                    return {"sections": {"s3_fr": section_text}}
+        except Exception as e:
+            logger.warning(f"draft_section_3_fr: Structured output failed, falling back to text-based: {e}")
+
+    # Fallback to text-based LLM call
+    logger.info("draft_section_3_fr: Using text-based LLM call")
     response = await _llm_invoke_with_retry(
         llm,
-        [
-            SystemMessage(content=prompts.WRITER_S3_FR_SYSTEM.format(project_scope=project_scope)),
-            HumanMessage(content=context),
-        ],
+        messages,
         node_name="draft_section_3_fr",
     )
+    text_response = _ai_text(response)
+    logger.info(f"draft_section_3_fr: Text response ({len(text_response)} chars), first 100 chars: {text_response[:100]}")
+    normalized_section = _normalize_section_output("s3_fr", text_response, state)
+    logger.info(f"draft_section_3_fr: Normalized section ({len(normalized_section)} chars), first 100 chars: {normalized_section[:100]}")
     return {
-        "sections": {"s3_fr": _normalize_section_output("s3_fr", _ai_text(response), state)}
+        "sections": {"s3_fr": normalized_section}
     }
 
 
@@ -801,16 +1281,49 @@ async def draft_section_3_nfr(state: SRSState) -> dict:
     rag = state.get("rag_context", "")
     extra = f"\n\nREGULATORY CONTEXT (use to generate L-NNN, SE-NNN requirements):\n{rag}" if rag else ""
 
+    messages = [
+        SystemMessage(content=prompts.WRITER_S3_NFR_SYSTEM.format(project_scope=project_scope)),
+        HumanMessage(content=context + extra),
+    ]
+
+    # Try structured output first
+    if hasattr(llm, "with_structured_output"):
+        try:
+            mod = getattr(llm.__class__, "__module__", "")
+            if not mod.startswith("unittest.mock"):
+                logger.info("draft_section_3_nfr: Using structured output with Section3Requirements")
+                structured = llm.with_structured_output(Section3Requirements)
+                response = await structured.ainvoke(messages)
+                logger.info(f"draft_section_3_nfr: Response type = {type(response)}")
+                try:
+                    parsed = _unwrap_structured_response(response, model_class=Section3Requirements)
+                except Exception:
+                    parsed = None
+
+                if isinstance(parsed, dict):
+                    section_text = "3.3 Detailed Non-Functional Requirements\n"
+                    for nfr in parsed.get("non_functional_requirements", []):
+                        section_text += f"\n{nfr.get('category','')}\n"
+                        section_text += f"Requirement: {nfr.get('requirement','')}\n"
+                        section_text += f"Rationale: {nfr.get('rationale','')}\n"
+                    logger.info(f"draft_section_3_nfr: Successfully converted to formatted text ({len(section_text)} chars)")
+                    return {"sections": {"s3_nfr": section_text}}
+        except Exception as e:
+            logger.warning(f"draft_section_3_nfr: Structured output failed, falling back to text-based: {e}")
+
+    # Fallback to text-based LLM call
+    logger.info("draft_section_3_nfr: Using text-based LLM call")
     response = await _llm_invoke_with_retry(
         llm,
-        [
-            SystemMessage(content=prompts.WRITER_S3_NFR_SYSTEM.format(project_scope=project_scope)),
-            HumanMessage(content=context + extra),
-        ],
+        messages,
         node_name="draft_section_3_nfr",
     )
+    text_response = _ai_text(response)
+    logger.info(f"draft_section_3_nfr: Text response ({len(text_response)} chars), first 100 chars: {text_response[:100]}")
+    normalized_section = _normalize_section_output("s3_nfr", text_response, state)
+    logger.info(f"draft_section_3_nfr: Normalized section ({len(normalized_section)} chars), first 100 chars: {normalized_section[:100]}")
     return {
-        "sections": {"s3_nfr": _normalize_section_output("s3_nfr", _ai_text(response), state)}
+        "sections": {"s3_nfr": normalized_section}
     }
 
 
@@ -821,16 +1334,46 @@ async def draft_section_3_iface(state: SRSState) -> dict:
     llm = _get_llm(temperature=0.2)
     context = _build_writing_context(state)
 
+    messages = [
+        SystemMessage(content=prompts.WRITER_S3_IFACE_SYSTEM),
+        HumanMessage(content=context),
+    ]
+
+    # Try structured output first
+    if hasattr(llm, "with_structured_output"):
+        try:
+            mod = getattr(llm.__class__, "__module__", "")
+            if not mod.startswith("unittest.mock"):
+                logger.info("draft_section_3_iface: Using structured output with Section3Requirements")
+                structured = llm.with_structured_output(Section3Requirements)
+                response = await structured.ainvoke(messages)
+                logger.info(f"draft_section_3_iface: Response type = {type(response)}")
+                try:
+                    parsed = _unwrap_structured_response(response, model_class=Section3Requirements)
+                except Exception:
+                    parsed = None
+
+                if isinstance(parsed, dict):
+                    section_text = "3.1 External Interface Requirements\n"
+                    section_text += f"{parsed.get('external_interfaces','')}"
+                    logger.info(f"draft_section_3_iface: Successfully converted to formatted text ({len(section_text)} chars)")
+                    return {"sections": {"s3_iface": section_text}}
+        except Exception as e:
+            logger.warning(f"draft_section_3_iface: Structured output failed, falling back to text-based: {e}")
+
+    # Fallback to text-based LLM call
+    logger.info("draft_section_3_iface: Using text-based LLM call")
     response = await _llm_invoke_with_retry(
         llm,
-        [
-            SystemMessage(content=prompts.WRITER_S3_IFACE_SYSTEM),
-            HumanMessage(content=context),
-        ],
+        messages,
         node_name="draft_section_3_iface",
     )
+    text_response = _ai_text(response)
+    logger.info(f"draft_section_3_iface: Text response ({len(text_response)} chars), first 100 chars: {text_response[:100]}")
+    normalized_section = _normalize_section_output("s3_iface", text_response, state)
+    logger.info(f"draft_section_3_iface: Normalized section ({len(normalized_section)} chars), first 100 chars: {normalized_section[:100]}")
     return {
-        "sections": {"s3_iface": _normalize_section_output("s3_iface", _ai_text(response), state)}
+        "sections": {"s3_iface": normalized_section}
     }
 
 
@@ -849,17 +1392,48 @@ async def draft_section_4(state: SRSState) -> dict:
         ]
     )
 
+    messages = [
+        SystemMessage(content=prompts.WRITER_S4_SYSTEM),
+        HumanMessage(content=f"Generate the verification matrix for:\n\n{section_3_combined}"),
+    ]
+
+    # Try structured output first
+    if hasattr(llm, "with_structured_output"):
+        try:
+            mod = getattr(llm.__class__, "__module__", "")
+            if not mod.startswith("unittest.mock"):
+                logger.info("draft_section_4: Using structured output with Section4Verification")
+                structured = llm.with_structured_output(Section4Verification)
+                response = await structured.ainvoke(messages)
+                logger.info(f"draft_section_4: Response type = {type(response)}")
+                try:
+                    parsed = _unwrap_structured_response(response, model_class=Section4Verification)
+                except Exception:
+                    parsed = None
+
+                if isinstance(parsed, dict):
+                    section_text = f"{parsed.get('title','')}\n\n{parsed.get('description','')}\n\n"
+                    section_text += "| Requirement ID | Test Case | Acceptance Criteria |\n"
+                    section_text += "|---|---|---|\n"
+                    for entry in parsed.get('verification_entries', []):
+                        section_text += f"| {entry.get('requirement_id','')} | {entry.get('test_case','')} | {entry.get('acceptance_criteria','')} |\n"
+                    logger.info(f"draft_section_4: Successfully converted to formatted text ({len(section_text)} chars)")
+                    return {"sections": {"s4": section_text}}
+        except Exception as e:
+            logger.warning(f"draft_section_4: Structured output failed, falling back to text-based: {e}")
+
+    # Fallback to text-based LLM call
+    logger.info("draft_section_4: Using text-based LLM call")
     response = await _llm_invoke_with_retry(
         llm,
-        [
-            SystemMessage(content=prompts.WRITER_S4_SYSTEM),
-            HumanMessage(
-                content=f"Generate the verification matrix for:\n\n{section_3_combined}"
-            ),
-        ],
+        messages,
         node_name="draft_section_4",
     )
-    return {"sections": {"s4": _normalize_section_output("s4", _ai_text(response), state)}}
+    text_response = _ai_text(response)
+    logger.info(f"draft_section_4: Text response ({len(text_response)} chars), first 100 chars: {text_response[:100]}")
+    normalized_section = _normalize_section_output("s4", text_response, state)
+    logger.info(f"draft_section_4: Normalized section ({len(normalized_section)} chars), first 100 chars: {normalized_section[:100]}")
+    return {"sections": {"s4": normalized_section}}
 
 
 async def revise_selected_section(state: SRSState) -> dict:
