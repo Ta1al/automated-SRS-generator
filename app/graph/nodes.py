@@ -80,66 +80,81 @@ class Section1Introduction(BaseModel):
     overview: str = Field(..., description="Overview of the document structure")
 
 
-class UseCase(BaseModel):
-    """A single use case with name and description."""
-    name: str = Field(..., description="Use case name")
-    actor: str = Field(..., description="Actor (e.g., Reader, Author, Editor)")
-    brief_description: str = Field(..., description="Brief description of use case")
-    trigger: str = Field(..., description="What triggers this use case")
-    precondition: str = Field(..., description="Precondition before use case starts")
-    basic_steps: list[str] = Field(..., description="Numbered steps of basic path")
+class CoreFlow(BaseModel):
+    """A single core flow with goal, steps, and success metric."""
+    name: str = Field(..., description="Flow name")
+    goal: str = Field(..., description="Flow goal or outcome")
+    steps: list[str] = Field(..., description="Ordered steps of the flow")
+    success_metric: str = Field(..., description="How success is measured")
 
 
-class SystemEnvironment(BaseModel):
-    """System environment description."""
-    description: str = Field(..., description="Description of system environment")
-    actors: list[str] = Field(..., description="List of system actors")
-    external_systems: list[str] = Field(..., description="External systems connected")
+class ComponentDefinition(BaseModel):
+    """A high-level system component."""
+    name: str = Field(..., description="Component name")
+    responsibility: str = Field(..., description="Primary responsibility")
+    interfaces: list[str] = Field(..., description="Key interfaces or dependencies")
+
+
+class DataEntityDefinition(BaseModel):
+    """A core data entity with key fields."""
+    name: str = Field(..., description="Entity name")
+    description: str = Field(..., description="Entity purpose")
+    key_fields: list[str] = Field(..., description="Key fields or attributes")
+
+
+class ExternalInterfaceDefinition(BaseModel):
+    """An external interface or integration."""
+    name: str = Field(..., description="Interface or integration name")
+    purpose: str = Field(..., description="Why this interface is used")
+    protocol: str = Field(..., description="Protocol or integration type")
+    data_format: str = Field(..., description="Data format or payload type")
 
 
 class Section2OverallDescription(BaseModel):
-    """SRS Section 2: Overall Description."""
-    system_environment: SystemEnvironment
-    primary_use_cases: list[UseCase] = Field(
-        ..., description="Primary use cases for each actor"
+    """SRS Section 2: Product Overview (Blueprint)."""
+    system_purpose: str = Field(..., description="System purpose and outcome")
+    target_users: list[str] = Field(..., description="Primary user types")
+    architecture_summary: str = Field(..., description="Architecture summary")
+    components: list[ComponentDefinition] = Field(
+        ..., description="Major components and responsibilities"
     )
-    user_characteristics: str = Field(..., description="Description of user characteristics")
-    non_functional_overview: str = Field(
-        ..., description="Overview of non-functional requirements"
+    core_flows: list[CoreFlow] = Field(..., description="Core user flows")
+    data_entities: list[DataEntityDefinition] = Field(
+        ..., description="Core data entities"
+    )
+    external_interfaces: list[ExternalInterfaceDefinition] = Field(
+        ..., description="External APIs, services, or systems"
+    )
+    constraints: list[str] = Field(..., description="Known constraints")
+    assumptions: list[str] = Field(..., description="Key assumptions")
+
+
+class RequirementItem(BaseModel):
+    """A concise requirement with acceptance criteria."""
+    requirement_id: str = Field(..., description="Requirement ID (e.g., F-001, SE-002)")
+    title: str = Field(..., description="Short requirement title")
+    statement: str = Field(..., description="Requirement statement")
+    acceptance_criteria: str = Field(..., description="Measurable acceptance criteria")
+
+
+class Section3FunctionalOutput(BaseModel):
+    """Section 3.2 Functional requirements."""
+    functional_requirements: list[RequirementItem] = Field(
+        ..., description="Functional requirement items"
     )
 
 
-class FunctionalRequirement(BaseModel):
-    """A detailed functional requirement with use case details."""
-    requirement_id: str = Field(..., description="Requirement ID (e.g., REQ-3.2.1)")
-    name: str = Field(..., description="Requirement name")
-    trigger: str = Field(..., description="What triggers this requirement")
-    precondition: str = Field(..., description="Precondition")
-    basic_flow: list[str] = Field(..., description="Basic flow steps")
-    alternative_flows: list[str] = Field(
-        default_factory=list, description="Alternative flow steps"
-    )
-    postcondition: str = Field(..., description="Expected state after requirement")
-    exception_paths: list[str] = Field(
-        default_factory=list, description="Exception handling paths"
+class Section3NonFunctionalOutput(BaseModel):
+    """Section 3.3 Non-functional requirements."""
+    non_functional_requirements: list[RequirementItem] = Field(
+        ..., description="Non-functional requirement items"
     )
 
 
-class NonFunctionalRequirement(BaseModel):
-    """A non-functional requirement (performance, security, scalability, etc.)."""
-    category: str = Field(..., description="Category (e.g., Performance, Security, Scalability)")
-    requirement: str = Field(..., description="The requirement statement")
-    rationale: str = Field(..., description="Why this requirement is important")
-
-
-class Section3Requirements(BaseModel):
-    """SRS Section 3: Requirements Specification."""
-    external_interfaces: str = Field(..., description="External interface requirements")
-    functional_requirements: list[FunctionalRequirement] = Field(
-        ..., description="Detailed functional requirements with use cases"
-    )
-    non_functional_requirements: list[NonFunctionalRequirement] = Field(
-        ..., description="Non-functional requirements"
+class Section3InterfaceOutput(BaseModel):
+    """Section 3.1 External interface requirements."""
+    interface_requirements: list[RequirementItem] = Field(
+        ..., description="External interface requirement items"
     )
 
 
@@ -163,10 +178,19 @@ class InitialElicitation(BaseModel):
     """Initial requirements elicitation output."""
     project_title: str = Field(..., description="Concise project title")
     project_purpose: str = Field(..., description="Purpose and goals of the project")
-    key_stakeholders: list[str] = Field(..., description="Key stakeholders involved")
-    main_features: list[str] = Field(..., description="Main features/functionality needed")
+    target_users: list[str] = Field(..., description="Primary users or personas")
+    success_criteria: list[str] = Field(..., description="Project success criteria")
+    architecture_summary: str = Field(..., description="High-level architecture summary")
+    components: list[str] = Field(..., description="Main system components")
+    core_flows: list[CoreFlow] = Field(..., description="Core user flows")
+    data_entities: list[str] = Field(..., description="Core data entities")
+    external_interfaces: list[str] = Field(..., description="External APIs or services")
     constraints: list[str] = Field(default_factory=list, description="Known constraints")
-    preliminary_glossary: list[GlossaryEntry] = Field(
+    assumptions: list[str] = Field(default_factory=list, description="Key assumptions")
+    requirement_candidates: list[str] = Field(
+        default_factory=list, description="High-value requirement candidates"
+    )
+    glossary_terms: list[GlossaryEntry] = Field(
         default_factory=list, description="Initial glossary terms"
     )
 
@@ -638,11 +662,9 @@ def _extract_project_title(parsed_payload: Any) -> str:
     if direct_title:
         return direct_title
 
-    preliminary = parsed_payload.get("preliminary_sections")
-    if isinstance(preliminary, dict):
-        nested_title = _normalize_project_title(preliminary.get("product_name"))
-        if nested_title:
-            return nested_title
+    alt_title = _normalize_project_title(parsed_payload.get("project_name"))
+    if alt_title:
+        return alt_title
 
     return ""
 
@@ -799,10 +821,17 @@ async def elicit_requirements(state: SRSState) -> dict:
                     buffer_dict = {
                         "project_title": parsed.get("project_title", ""),
                         "project_purpose": parsed.get("project_purpose", ""),
-                        "key_stakeholders": parsed.get("key_stakeholders", []),
-                        "main_features": parsed.get("main_features", []),
+                        "target_users": parsed.get("target_users", []),
+                        "success_criteria": parsed.get("success_criteria", []),
+                        "architecture_summary": parsed.get("architecture_summary", ""),
+                        "components": parsed.get("components", []),
+                        "core_flows": parsed.get("core_flows", []),
+                        "data_entities": parsed.get("data_entities", []),
+                        "external_interfaces": parsed.get("external_interfaces", []),
                         "constraints": parsed.get("constraints", []),
-                        "preliminary_glossary": parsed.get("preliminary_glossary", []),
+                        "assumptions": parsed.get("assumptions", []),
+                        "requirement_candidates": parsed.get("requirement_candidates", []),
+                        "glossary_terms": parsed.get("glossary_terms", []),
                     }
                     buffer = json.dumps(buffer_dict, indent=2)
                     project_title = _extract_project_title(parsed)
@@ -1084,16 +1113,45 @@ async def classify_requirements(state: SRSState) -> dict:
     # Build a stub requirement list from document_buffer if none exist yet
     existing: list[Requirement] = state.get("requirements", [])
     if not existing:
-        # Auto-generate stubs from document_buffer
         buffer = state.get("document_buffer", "")
-        lines = [
-            ln.strip()
-            for ln in buffer.splitlines()
-            if ln.strip() and len(ln.strip()) > 20
-        ]
+        candidates: list[str] = []
+
+        if buffer.strip().startswith("{"):
+            try:
+                parsed = _parse_json(buffer)
+            except Exception:
+                parsed = None
+
+            if isinstance(parsed, dict):
+                raw_candidates = parsed.get("requirement_candidates") or []
+                for item in raw_candidates:
+                    if isinstance(item, str) and item.strip():
+                        candidates.append(item.strip())
+
+                if not candidates:
+                    flows = parsed.get("core_flows") or []
+                    for flow in flows:
+                        if not isinstance(flow, dict):
+                            continue
+                        name = str(flow.get("name", "")).strip()
+                        goal = str(flow.get("goal", "")).strip()
+                        if name or goal:
+                            label = name or "Unnamed flow"
+                            desc = goal or "[NEEDS_SPECIFICATION]"
+                            candidates.append(f"Support flow: {label} - {desc}")
+
+        if not candidates:
+            # Auto-generate stubs from document_buffer lines as a last resort
+            lines = [
+                ln.strip()
+                for ln in buffer.splitlines()
+                if ln.strip() and len(ln.strip()) > 20
+            ]
+            candidates = lines[:50]
+
         existing = [
             Requirement(id=f"REQ-{i + 1:03d}", text=ln, labels=[], criteria="")
-            for i, ln in enumerate(lines[:50])  # cap at 50
+            for i, ln in enumerate(candidates[:50])
         ]
 
     if not existing:
@@ -1428,22 +1486,112 @@ async def draft_section_2(state: SRSState) -> dict:
                     parsed = None
 
                 if isinstance(parsed, dict):
-                    # Convert model dict to formatted text
-                    env = parsed.get("system_environment", {}) or {}
-                    section_text = f"""2.0. Overall Description
+                    purpose = str(parsed.get("system_purpose", "")).strip() or "[NEEDS_SPECIFICATION]"
+                    users = parsed.get("target_users", []) or []
+                    architecture = str(parsed.get("architecture_summary", "")).strip() or "[NEEDS_SPECIFICATION]"
+                    components = parsed.get("components", []) or []
+                    flows = parsed.get("core_flows", []) or []
+                    entities = parsed.get("data_entities", []) or []
+                    interfaces = parsed.get("external_interfaces", []) or []
+                    constraints = parsed.get("constraints", []) or []
+                    assumptions = parsed.get("assumptions", []) or []
 
-2.1 System Environment
-{env.get('description','')}
+                    section_text = "## 2. Product Overview\n\n"
+                    section_text += "### 2.1 System Purpose and Users\n"
+                    section_text += f"{purpose}\n\n"
+                    section_text += "Target users:\n"
+                    if users:
+                        for user in users:
+                            section_text += f"- {user}\n"
+                    else:
+                        section_text += "- [NEEDS_SPECIFICATION]\n"
 
-Actors: {', '.join(env.get('actors', []))}
-External Systems: {', '.join(env.get('external_systems', []))}
+                    section_text += "\n### 2.2 Architecture and Components\n"
+                    section_text += f"{architecture}\n\n"
+                    section_text += "Components:\n"
+                    if components:
+                        for comp in components:
+                            if isinstance(comp, dict):
+                                name = str(comp.get("name", "")).strip() or "[Unnamed component]"
+                                responsibility = str(comp.get("responsibility", "")).strip()
+                                interfaces_list = comp.get("interfaces", []) or []
+                                interfaces_text = ", ".join([str(i).strip() for i in interfaces_list if str(i).strip()])
+                                detail = responsibility or "[NEEDS_SPECIFICATION]"
+                                if interfaces_text:
+                                    detail += f". Interfaces: {interfaces_text}"
+                                section_text += f"- **{name}**: {detail}\n"
+                            else:
+                                section_text += f"- {comp}\n"
+                    else:
+                        section_text += "- [NEEDS_SPECIFICATION]\n"
 
-2.2 Functional Requirements Specification
-"""
-                    for uc in parsed.get("primary_use_cases", []):
-                        section_text += f"\nUse case: {uc.get('name','')}\nActor: {uc.get('actor','')}\nDescription: {uc.get('brief_description','')}\nTrigger: {uc.get('trigger','')}\n"
-                    section_text += f"\n2.3 User Characteristics\n{parsed.get('user_characteristics','')}"
-                    section_text += f"\n2.4 Non-Functional Requirements\n{parsed.get('non_functional_overview','')}"
+                    section_text += "\n### 2.3 Core Flows\n"
+                    if flows:
+                        for flow in flows:
+                            if not isinstance(flow, dict):
+                                section_text += f"- {flow}\n"
+                                continue
+                            flow_name = str(flow.get("name", "")).strip() or "[Unnamed flow]"
+                            goal = str(flow.get("goal", "")).strip() or "[NEEDS_SPECIFICATION]"
+                            success = str(flow.get("success_metric", "")).strip() or "[NEEDS_SPECIFICATION]"
+                            steps = flow.get("steps", []) or []
+                            section_text += f"- **{flow_name}**: {goal}\n"
+                            if steps:
+                                section_text += "  Steps:\n"
+                                for step in steps:
+                                    section_text += f"  - {step}\n"
+                            section_text += f"  Success metric: {success}\n"
+                    else:
+                        section_text += "- [NEEDS_SPECIFICATION]\n"
+
+                    section_text += "\n### 2.4 Data Model Overview\n"
+                    if entities:
+                        for entity in entities:
+                            if isinstance(entity, dict):
+                                name = str(entity.get("name", "")).strip() or "[Unnamed entity]"
+                                description = str(entity.get("description", "")).strip() or "[NEEDS_SPECIFICATION]"
+                                fields = entity.get("key_fields", []) or []
+                                fields_text = ", ".join([str(f).strip() for f in fields if str(f).strip()])
+                                if fields_text:
+                                    section_text += f"- **{name}**: {description}. Fields: {fields_text}\n"
+                                else:
+                                    section_text += f"- **{name}**: {description}\n"
+                            else:
+                                section_text += f"- {entity}\n"
+                    else:
+                        section_text += "- [NEEDS_SPECIFICATION]\n"
+
+                    section_text += "\n### 2.5 External Interfaces\n"
+                    if interfaces:
+                        for interface in interfaces:
+                            if isinstance(interface, dict):
+                                name = str(interface.get("name", "")).strip() or "[Unnamed interface]"
+                                purpose = str(interface.get("purpose", "")).strip() or "[NEEDS_SPECIFICATION]"
+                                protocol = str(interface.get("protocol", "")).strip() or "[NEEDS_SPECIFICATION]"
+                                data_format = str(interface.get("data_format", "")).strip() or "[NEEDS_SPECIFICATION]"
+                                section_text += (
+                                    f"- **{name}**: {purpose} (Protocol: {protocol}; Format: {data_format})\n"
+                                )
+                            else:
+                                section_text += f"- {interface}\n"
+                    else:
+                        section_text += "- [NEEDS_SPECIFICATION]\n"
+
+                    section_text += "\n### 2.6 Constraints and Assumptions\n"
+                    if constraints:
+                        section_text += "Constraints:\n"
+                        for item in constraints:
+                            section_text += f"- {item}\n"
+                    else:
+                        section_text += "Constraints:\n- [NEEDS_SPECIFICATION]\n"
+
+                    if assumptions:
+                        section_text += "\nAssumptions:\n"
+                        for item in assumptions:
+                            section_text += f"- {item}\n"
+                    else:
+                        section_text += "\nAssumptions:\n- [NEEDS_SPECIFICATION]\n"
+
                     logger.info(f"draft_section_2: Successfully converted to formatted text ({len(section_text)} chars)")
                     return {"sections": {"s2": section_text}}
         except Exception as e:
@@ -1481,25 +1629,30 @@ async def draft_section_3_fr(state: SRSState) -> dict:
         try:
             mod = getattr(llm.__class__, "__module__", "")
             if not mod.startswith("unittest.mock"):
-                logger.info("draft_section_3_fr: Using structured output with Section3Requirements")
-                structured = llm.with_structured_output(Section3Requirements)
+                logger.info("draft_section_3_fr: Using structured output with Section3FunctionalOutput")
+                structured = llm.with_structured_output(Section3FunctionalOutput)
                 response = await structured.ainvoke(messages)
                 logger.info(f"draft_section_3_fr: Response type = {type(response)}")
                 try:
-                    parsed = _unwrap_structured_response(response, model_class=Section3Requirements)
+                    parsed = _unwrap_structured_response(response, model_class=Section3FunctionalOutput)
                 except Exception:
                     parsed = None
 
                 if isinstance(parsed, dict):
-                    section_text = "3.0. Requirements Specification\n\n3.2 Functional Requirements\n"
-                    for req in parsed.get("functional_requirements", []):
-                        section_text += f"\n{req.get('requirement_id','')} {req.get('name','')}\n"
-                        section_text += f"Trigger: {req.get('trigger','')}\n"
-                        section_text += f"Precondition: {req.get('precondition','')}\n"
-                        section_text += f"Basic Flow: {'. '.join(req.get('basic_flow', []))}\n"
-                        if req.get('alternative_flows'):
-                            section_text += f"Alternative: {'. '.join(req.get('alternative_flows', []))}\n"
-                        section_text += f"Postcondition: {req.get('postcondition','')}\n"
+                    max_requirements = 8 if project_scope == "simple" else 12
+                    section_text = "### 3.2 Functional Requirements\n"
+                    requirements = parsed.get("functional_requirements", []) or []
+                    for index, req in enumerate(requirements[:max_requirements]):
+                        req_id = str(req.get("requirement_id", "")).strip()
+                        if not req_id.upper().startswith("F-"):
+                            req_id = f"F-{index + 1:03d}"
+                        title = str(req.get("title", "")).strip() or "[NEEDS_SPECIFICATION]"
+                        statement = str(req.get("statement", "")).strip() or "[NEEDS_SPECIFICATION]"
+                        criteria = str(req.get("acceptance_criteria", "")).strip() or "[NEEDS_SPECIFICATION]"
+
+                        section_text += f"\n#### {req_id}: {title}\n"
+                        section_text += f"**Requirement:** {statement}\n"
+                        section_text += f"**Acceptance Criteria:** {criteria}\n"
                     logger.info(f"draft_section_3_fr: Successfully converted to formatted text ({len(section_text)} chars)")
                     return {"sections": {"s3_fr": section_text}}
         except Exception as e:
@@ -1543,21 +1696,30 @@ async def draft_section_3_nfr(state: SRSState) -> dict:
         try:
             mod = getattr(llm.__class__, "__module__", "")
             if not mod.startswith("unittest.mock"):
-                logger.info("draft_section_3_nfr: Using structured output with Section3Requirements")
-                structured = llm.with_structured_output(Section3Requirements)
+                logger.info("draft_section_3_nfr: Using structured output with Section3NonFunctionalOutput")
+                structured = llm.with_structured_output(Section3NonFunctionalOutput)
                 response = await structured.ainvoke(messages)
                 logger.info(f"draft_section_3_nfr: Response type = {type(response)}")
                 try:
-                    parsed = _unwrap_structured_response(response, model_class=Section3Requirements)
+                    parsed = _unwrap_structured_response(response, model_class=Section3NonFunctionalOutput)
                 except Exception:
                     parsed = None
 
                 if isinstance(parsed, dict):
-                    section_text = "3.3 Detailed Non-Functional Requirements\n"
-                    for nfr in parsed.get("non_functional_requirements", []):
-                        section_text += f"\n{nfr.get('category','')}\n"
-                        section_text += f"Requirement: {nfr.get('requirement','')}\n"
-                        section_text += f"Rationale: {nfr.get('rationale','')}\n"
+                    max_requirements = 4 if project_scope == "simple" else 8
+                    section_text = "### 3.3 Quality of Service Requirements\n"
+                    requirements = parsed.get("non_functional_requirements", []) or []
+                    for index, req in enumerate(requirements[:max_requirements]):
+                        req_id = str(req.get("requirement_id", "")).strip()
+                        if not req_id or "-" not in req_id:
+                            req_id = f"NFR-{index + 1:03d}"
+                        title = str(req.get("title", "")).strip() or "[NEEDS_SPECIFICATION]"
+                        statement = str(req.get("statement", "")).strip() or "[NEEDS_SPECIFICATION]"
+                        criteria = str(req.get("acceptance_criteria", "")).strip() or "[NEEDS_SPECIFICATION]"
+
+                        section_text += f"\n#### {req_id}: {title}\n"
+                        section_text += f"**Requirement:** {statement}\n"
+                        section_text += f"**Acceptance Criteria:** {criteria}\n"
                     logger.info(f"draft_section_3_nfr: Successfully converted to formatted text ({len(section_text)} chars)")
                     return {"sections": {"s3_nfr": section_text}}
         except Exception as e:
@@ -1596,18 +1758,31 @@ async def draft_section_3_iface(state: SRSState) -> dict:
         try:
             mod = getattr(llm.__class__, "__module__", "")
             if not mod.startswith("unittest.mock"):
-                logger.info("draft_section_3_iface: Using structured output with Section3Requirements")
-                structured = llm.with_structured_output(Section3Requirements)
+                logger.info("draft_section_3_iface: Using structured output with Section3InterfaceOutput")
+                structured = llm.with_structured_output(Section3InterfaceOutput)
                 response = await structured.ainvoke(messages)
                 logger.info(f"draft_section_3_iface: Response type = {type(response)}")
                 try:
-                    parsed = _unwrap_structured_response(response, model_class=Section3Requirements)
+                    parsed = _unwrap_structured_response(response, model_class=Section3InterfaceOutput)
                 except Exception:
                     parsed = None
 
                 if isinstance(parsed, dict):
-                    section_text = "3.1 External Interface Requirements\n"
-                    section_text += f"{parsed.get('external_interfaces','')}"
+                    section_text = "### 3.1 External Interface Requirements\n"
+                    requirements = parsed.get("interface_requirements", []) or []
+                    if not requirements:
+                        section_text += "\n[NEEDS_SPECIFICATION]\n"
+                    for index, req in enumerate(requirements):
+                        req_id = str(req.get("requirement_id", "")).strip()
+                        if not req_id.upper().startswith("IF-"):
+                            req_id = f"IF-{index + 1:03d}"
+                        title = str(req.get("title", "")).strip() or "[NEEDS_SPECIFICATION]"
+                        statement = str(req.get("statement", "")).strip() or "[NEEDS_SPECIFICATION]"
+                        criteria = str(req.get("acceptance_criteria", "")).strip() or "[NEEDS_SPECIFICATION]"
+
+                        section_text += f"\n#### {req_id}: {title}\n"
+                        section_text += f"**Requirement:** {statement}\n"
+                        section_text += f"**Acceptance Criteria:** {criteria}\n"
                     logger.info(f"draft_section_3_iface: Successfully converted to formatted text ({len(section_text)} chars)")
                     return {"sections": {"s3_iface": section_text}}
         except Exception as e:
@@ -1784,7 +1959,7 @@ async def revise_selected_section(state: SRSState) -> dict:
 async def generate_mermaid(state: SRSState) -> dict:
     """Generate three Mermaid diagrams: architecture, sequence, ER."""
     llm = _get_llm(temperature=0.1)
-    context = _build_writing_context(state)
+    context = _build_diagram_context(state) or _build_writing_context(state)
 
     diagram_configs = [
         (
@@ -1835,14 +2010,15 @@ async def generate_mermaid(state: SRSState) -> dict:
         raw = _ai_text(response)
         code = _extract_mermaid_code(raw)
         if not code:
-            return _fallback_mermaid_code(index)
+            logger.warning("Mermaid generation returned empty code for diagram index %d.", index)
+            return ""
 
         if not _looks_like_expected_mermaid(index, code):
             logger.warning(
-                "Generated Mermaid diagram index %d had unexpected type; using fallback.",
+                "Generated Mermaid diagram index %d had unexpected type; discarding diagram.",
                 index,
             )
-            return _fallback_mermaid_code(index)
+            return ""
 
         return code
 
@@ -1856,11 +2032,11 @@ async def generate_mermaid(state: SRSState) -> dict:
     for idx, result in enumerate(generation_results):
         if isinstance(result, Exception):
             logger.exception(
-                "Mermaid generation failed for diagram index %d; using fallback.",
+                "Mermaid generation failed for diagram index %d; diagram will be unavailable.",
                 idx,
                 exc_info=result,
             )
-            blocks.append(_fallback_mermaid_code(idx))
+            blocks.append("")
             continue
         blocks.append(result)
 
@@ -1909,9 +2085,8 @@ async def correct_mermaid(state: SRSState) -> dict:
 
     async def _correct_one(index: int, block: str, error: str) -> tuple[int, str | None]:
         if is_final_correction_round:
-            # Last correction round: force a known-valid fallback to avoid
-            # omitting diagrams after retry budget exhaustion.
-            return index, _fallback_mermaid_code(index)
+            # Last correction round: keep the existing block so finalize can mark unavailable.
+            return index, None
 
         correction_prompt = prompts.CORRECTOR_SYSTEM.format(
             original_code=f"```mermaid\n{block}\n```",
@@ -1924,14 +2099,14 @@ async def correct_mermaid(state: SRSState) -> dict:
         )
         corrected = _extract_mermaid_code(_ai_text(response))
         if not corrected:
-            return index, _fallback_mermaid_code(index)
+            return index, None
 
         if not _looks_like_expected_mermaid(index, corrected):
             logger.warning(
-                "Corrected Mermaid diagram index %d had unexpected type; using fallback.",
+                "Corrected Mermaid diagram index %d had unexpected type; discarding correction.",
                 index,
             )
-            return index, _fallback_mermaid_code(index)
+            return index, None
 
         return index, corrected
 
@@ -2106,14 +2281,13 @@ async def finalize_document(state: SRSState) -> dict:
 
     diagrams_md = ""
     for index, title in enumerate(diagram_titles):
-        block = blocks[index] if index < len(blocks) else _fallback_mermaid_code(index)
+        block = blocks[index] if index < len(blocks) else ""
         error = errors[index] if index < len(errors) else ""
 
-        if error:
-            fallback_block = _fallback_mermaid_code(index)
+        if error or not str(block).strip():
             diagrams_md += (
-                f"\n\n> ⚠️ *{title} failed validation; a fallback diagram was inserted.*\n"
-                f"\n\n### {title}\n\n```mermaid\n{fallback_block}\n```\n"
+                f"\n\n### {title}\n"
+                "\n> ⚠️ *Diagram unavailable. Regenerate diagrams after updating the blueprint.*\n"
             )
         else:
             diagrams_md += f"\n\n### {title}\n\n```mermaid\n{block}\n```\n"
@@ -2420,6 +2594,32 @@ def _build_writing_context(state: SRSState) -> str:
             parts.append("## REQUIREMENTS\n" + "\n".join(req_lines))
 
     return "\n\n".join(parts) or "No context available yet."
+
+
+def _build_diagram_context(state: SRSState) -> str:
+    """Build a context string for diagram generation using drafted sections."""
+    sections = state.get("sections", {}) or {}
+    if not sections:
+        return ""
+
+    parts: list[str] = []
+    s2 = str(sections.get("s2", "") or "").strip()
+    if s2:
+        parts.append(f"## SECTION 2 - PRODUCT OVERVIEW\n{s2[:5000]}")
+
+    s3_iface = str(sections.get("s3_iface", "") or "").strip()
+    if s3_iface:
+        parts.append(f"## SECTION 3.1 - EXTERNAL INTERFACES\n{s3_iface[:3000]}")
+
+    s3_fr = str(sections.get("s3_fr", "") or "").strip()
+    if s3_fr:
+        parts.append(f"## SECTION 3.2 - FUNCTIONAL REQUIREMENTS\n{s3_fr[:4000]}")
+
+    s3_nfr = str(sections.get("s3_nfr", "") or "").strip()
+    if s3_nfr:
+        parts.append(f"## SECTION 3.3 - QUALITY OF SERVICE\n{s3_nfr[:2000]}")
+
+    return "\n\n".join(parts).strip()
 
 
 def _extract_mermaid_code(text: str) -> str:
