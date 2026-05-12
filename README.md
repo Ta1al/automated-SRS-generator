@@ -278,6 +278,38 @@ Supporting types:
   taxonomy prefix (e.g. `F-001`, `SE-003`).
 - **`ClarificationQuestion`** - `{category, question, suggested_options, rationale}`.
 
+### Structured output and Pydantic models
+
+All LLM-invoking nodes in `nodes.py` use LangChain's **`with_structured_output()`** method to enforce output validation through Pydantic models. This approach:
+
+- **Primary strategy**: Uses the LLM's native structured output mode (when available) to constrain responses to schema-validated Pydantic models.
+- **Fallback 1**: Text-based LLM call with manual JSON parsing if structured output fails.
+- **Fallback 2**: Raw text output if both structured and JSON parsing fail.
+- **Mock detection**: Detects unittest.mock objects to prevent test failures by forcing fallback paths.
+
+Implemented Pydantic models:
+
+| Model | Purpose | Used by |
+|---|---|---|
+| `InitialElicitation` | Project metadata extraction | `elicit_requirements` |
+| `Section1Introduction` | IEEE 830 Section 1 structure | `draft_section_1` |
+| `Section2OverallDescription` | Product overview with use cases | `draft_section_2` |
+| `Section3Requirements` | Requirements with flows and acceptance criteria | `draft_section_3_fr`, `draft_section_3_nfr`, `draft_section_3_iface` |
+| `Section4Verification` | Verification matrix with test mappings | `draft_section_4` |
+| `GlossaryEntry` | Term and definition pairs | `Section1Introduction` (nested) |
+| `UseCase` | System use case details | `Section2OverallDescription` (nested) |
+| `SystemEnvironment` | System context and actors | `Section2OverallDescription` (nested) |
+| `FunctionalRequirement` | Complete FR with flows | `Section3Requirements` (nested) |
+| `NonFunctionalRequirement` | NFR with category and rationale | `Section3Requirements` (nested) |
+| `VerificationEntry` | Test case and acceptance criteria | `Section4Verification` (nested) |
+
+Each model uses Pydantic `Field` descriptions to guide LLM output schema generation. The structured approach ensures:
+
+- Type safety at the LLM output boundary
+- Consistent JSON structure for parsing and formatting
+- Clear validation error messages when LLM outputs don't conform to schema
+- Backward compatibility through multi-level fallback strategy
+
 ### Graph nodes
 
 **`app/graph/nodes.py`** implements all node functions. Each is an async
@@ -305,12 +337,15 @@ function that receives `SRSState` and returns a partial state update.
 
 Key helper functions in `nodes.py`:
 
-- `_get_llm()` - Returns a `ChatOpenAI` instance pointed at OpenRouter with custom HTTP headers.
-- `_llm_invoke_with_retry()` - Retries transient LLM errors with exponential backoff (3 attempts, 2^n seconds).
+- `_get_llm()` - Returns a `ChatOpenAI` instance pointed at OpenRouter with custom HTTP headers and timeout configuration.
+- `_llm_invoke_with_retry()` - Retries transient LLM errors with exponential backoff (3 attempts, 2^n seconds); primary fallback for structured output failures.
 - `_build_writing_context()` - Constructs rich context for section writers from chat history, document buffer, requirements, and RAG context.
 - `_retrieve_draft_context()` - Lexical overlap retrieval from already-drafted sections.
 - `_normalize_section_output()` - Shared post-processor that unwraps fenced markdown, normalizes spacing, and enforces required section headings across s1/s2/s3/s4 outputs.
 - `_ensure_section_1_completeness()` - Section 1-specific completeness backfill used within the shared normalizer.
+- `_parse_json()` - Loose JSON parsing for fallback text-based LLM responses.
+- `_extract_project_title()` - Extracts project title from parsed responses or structured models.
+- `_detect_project_scope()` - Infers project scope from content (e.g., web, mobile, backend, data pipeline).
 
 ### RAG and vector store
 
