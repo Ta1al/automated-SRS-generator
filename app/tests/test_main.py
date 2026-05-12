@@ -263,12 +263,19 @@ class TestEvaluateCompleteness:
 
         from app.graph.nodes import evaluate_completeness
 
-        gaps = ["What authentication mechanism will be used?", "What is the expected concurrent user count?"]
+        gaps = [
+            {
+                "category": "General",
+                "question": "What is the primary success metric for the system's implementation?",
+                "suggested_options": ["Be successful", "It depends"],
+                "rationale": "This detail is required to complete the specification.",
+            }
+        ]
         mock_response = AIMessage(content=json.dumps({"missing": gaps}))
 
         state: Any = {
             "chat_history": [],
-            "document_buffer": "A simple todo app.",
+            "document_buffer": "I want to make a simple pacman game that works natively on windows only.",
             "missing_context": [],
             "requirements": [],
             "rag_context": "",
@@ -287,8 +294,15 @@ class TestEvaluateCompleteness:
         ):
             result = await evaluate_completeness(state)
 
-        assert [item["question"] for item in result["missing_context"]] == gaps
+        assert [item["question"] for item in result["missing_context"]] == [
+            "What should count as a successful game session?"
+        ]
         assert all(item["category"] == "General" for item in result["missing_context"])
+        assert len(result["missing_context"][0]["suggested_options"]) >= 3
+        assert any(
+            any(keyword in option.lower() for keyword in ["maze", "lives", "score", "points"])
+            for option in result["missing_context"][0]["suggested_options"]
+        )
 
     @pytest.mark.asyncio
     async def test_empty_gaps_means_complete(self):
