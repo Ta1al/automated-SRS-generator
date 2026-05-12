@@ -12,49 +12,49 @@ You are a senior business analyst and software architect conducting a requiremen
 elicitation session with a non-technical stakeholder.
 
 Your task is to extract the maximum possible structured information from the
-user's description of their software idea.
+user's description of their software idea, with a focus on project structure and flow.
 
 From the user's message, identify and document:
-1. Core entities (users, data objects, external systems)
-2. Primary actions / workflows the system must support
-3. Any performance, security, or legal constraints mentioned (even implicitly)
-4. Target platforms or deployment environment
-5. For EACH workflow: What is the success metric? How do you measure "done"?
+1. Problem and purpose (what outcome the system must achieve)
+2. Target users/stakeholders (who uses it and why)
+3. Core flows (name, goal, steps, success metric)
+4. Architecture summary and main components
+5. Data entities and key relationships
+6. External interfaces (APIs, third-party services, devices)
+7. Constraints and assumptions
+8. Success criteria (how you know the project is successful)
+9. High-value requirement candidates (keep short, max 10)
+10. Glossary terms (domain nouns worth defining)
 
 Produce a concise preliminary outline in this JSON format:
-{{
+{
   "project_title": "...",
-  "entities": ["..."],
-  "workflows": [
-    {{
-      "name": "Workflow name",
-      "description": "What the system does",
-      "success_metric": "How you measure success or null if unclear"
-    }}
+  "project_purpose": "...",
+  "target_users": ["..."],
+  "success_criteria": ["..."],
+  "architecture_summary": "...",
+  "components": ["..."],
+  "core_flows": [
+    {
+      "name": "Flow name",
+      "goal": "What success looks like",
+      "steps": ["..."],
+      "success_metric": "How you measure done or [NEEDS_SPECIFICATION]"
+    }
   ],
-  "constraints_mentioned": ["..."],
-  "platform_hints": ["..."],
-  "preliminary_requirement_candidates": [
-    {{
-      "type": "F|PE|SE|A|FT|L",
-      "description": "One key requirement",
-      "measurement_hint": "How it should be tested/measured or null if vague"
-    }}
-  ],
-  "preliminary_sections": {{
-    "product_name": "...",
-    "product_purpose": "...",
-    "target_users": ["..."],
-    "key_features": ["..."]
-  }}
-}}
+  "data_entities": ["..."],
+  "external_interfaces": ["..."],
+  "constraints": ["..."],
+  "assumptions": ["..."],
+  "requirement_candidates": ["..."],
+  "glossary_terms": ["..."]
+}
 
 Be objective. Do not invent information not present in the user's message.
 Always infer and provide a concise 3-8 word `project_title` from the user's prompt.
 If information is absent for other fields, use null for that field.
 
-IMPORTANT: For workflows and requirement candidates, capture any vague language
-(e.g., "fast", "secure", "easy") in the measurement_hint as "[NEEDS_SPECIFICATION]".
+IMPORTANT: For missing details that block clarity, use [NEEDS_SPECIFICATION].
 This helps downstream nodes flag quality gaps early.
 """
 
@@ -227,23 +227,22 @@ Return ONLY the Markdown content for Section 1.
 
 WRITER_S2_SYSTEM = """\
 You are a technical writer producing Section 2 of a Software Requirements
-Specification strictly aligned with IEEE 830 / ISO/IEC/IEEE 29148.
+Specification, optimized as a developer-ready blueprint.
 
 Write Section 2 - Product Overview - in Markdown.
 
 Required sub-sections:
 ## 2. Product Overview
-### 2.1 Product Perspective
-### 2.2 Product Functions
-(Bulleted high-level feature summary)
-### 2.3 User Characteristics
-(Describe each user persona with technical proficiency level)
-### 2.4 Assumptions and Dependencies
-(List with rationale for each assumption)
-### 2.5 Constraints
-(Technical, regulatory, and operational constraints)
+### 2.1 System Purpose and Users
+### 2.2 Architecture and Components
+### 2.3 Core Flows
+### 2.4 Data Model Overview
+### 2.5 External Interfaces
+### 2.6 Constraints and Assumptions
 
 Rules:
+- Keep content concrete and implementation-oriented (flows, components, entities).
+- Use short paragraphs and lists; avoid filler and formality.
 - Do NOT use vague words: fast, secure, easy, efficient, scalable (unless
   supported by specific numbers defined elsewhere in context).
 - Return ONLY the Markdown content for Section 2.
@@ -264,6 +263,7 @@ Format for EACH requirement:
 
 Rules:
 - Generate sequential IDs starting at F-001.
+- Include only high-value requirements. Aim for 8-12 total (simple projects: 5-8).
 - Cover ALL functional workflows identified in the context.
 - Each statement must be atomic, verifiable, and unambiguous.
 - Do NOT use: fast, secure, user-friendly, easy, efficient, scalable.
@@ -350,6 +350,11 @@ For EACH requirement in every 3.3.x subsection, use this exact block format:
 
 Where PREFIX is one of: PE, SE, A, SC, FT, MN, PO, O, US, LF, L.
 
+Global rules:
+- Include only high-value NFRs that change implementation decisions.
+- Aim for 4-8 total NFRs (simple projects: 2-4).
+- Avoid duplicates and vague language.
+
 GOOD EXAMPLES:
 
 #### PE-001: API response latency
@@ -413,6 +418,7 @@ Rules:
 - Be specific about API versions, protocols (REST/GraphQL/gRPC), and data formats (JSON/XML/Protobuf).
 - Generate sequential IDs starting at IF-001 and keep IDs unique within Section 3.1.
 - Every 3.1.x subsection must contain at least one IF-NNN requirement block when information is available.
+- Include only high-value interfaces that affect implementation decisions.
 - Return ONLY the Markdown content starting from the ### 3.1 heading.
 """
 
@@ -468,6 +474,11 @@ You are a software architect generating Mermaid.js diagram code.
 
 Generate {diagram_type} based on the provided system context.
 
+IMPORTANT CONTEXT RULES:
+1. Use ONLY component/entity names that appear in the provided context.
+2. Do NOT invent new services, databases, or actors that are not mentioned.
+3. If context is sparse, keep the diagram minimal (2-4 nodes) rather than guessing.
+
 STRICT RULES - violation causes rendering failure:
 1. Return ONLY the fenced Mermaid code block. No prose, no explanations,
    no text before or after the triple backticks.
@@ -496,9 +507,17 @@ flowchart TD
 ```
 """
 
-MERMAID_ARCHITECTURE_PROMPT = "a high-level system architecture diagram showing major system components and their connections."
-MERMAID_SEQUENCE_PROMPT = "a sequence diagram showing the primary user authentication and core workflow interaction."
-MERMAID_ER_PROMPT = "an entity-relationship diagram showing the main data entities and their relationships."
+MERMAID_ARCHITECTURE_PROMPT = (
+  "a high-level system architecture diagram based on the Architecture and Components section. "
+  "Include only components named in the context and show their connections."
+)
+MERMAID_SEQUENCE_PROMPT = (
+  "a sequence diagram for the primary core flow from the Core Flows section. "
+  "Use only named actors/components from the context."
+)
+MERMAID_ER_PROMPT = (
+  "an entity-relationship diagram using only entities listed in the Data Model Overview section."
+)
 
 # ── Mermaid Self-Corrector ────────────────────────────────────────────────────
 
