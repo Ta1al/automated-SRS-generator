@@ -267,6 +267,10 @@ def _unwrap_structured_response(response: Any, *, model_class: type | None = Non
 
     Returns a Python object (dict/list) when possible.
     """
+    # Check for .parsed attribute from LangChain structured output wrapper
+    if hasattr(response, "parsed") and response.parsed is not None:
+        response = response.parsed
+
     # If the model returned a Pydantic instance already
     try:
         from pydantic import BaseModel as _BaseModel
