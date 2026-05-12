@@ -11,6 +11,7 @@ Convention:
 from __future__ import annotations
 
 import asyncio
+import importlib
 import json
 import logging
 import re
@@ -23,10 +24,12 @@ import openai
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 try:
-    from langchain.output_parsers import StructuredOutputParser, ResponseSchema
+    from langchain_core.output_parsers import StructuredOutputParser, ResponseSchema
 except Exception:
     try:
-        from langchain_core.output_parsers import StructuredOutputParser, ResponseSchema
+        _output_parsers = importlib.import_module("langchain.output_parsers")
+        StructuredOutputParser = _output_parsers.StructuredOutputParser
+        ResponseSchema = _output_parsers.ResponseSchema
     except Exception:
         # LangChain structured parser not available in this environment.
         # Provide a lightweight shim so the code can fall back to legacy JSON parsing.
