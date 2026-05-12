@@ -345,9 +345,13 @@ def _clarification_topic(question: str, category: str, rationale: str) -> str:
             "success criteria",
             "win condition",
             "win/lose",
+            "win or lose",
             "measure success",
             "successful",
             "success",
+            "goal",
+            "complete",
+            "completion",
             "result",
             "done",
         ),
@@ -357,6 +361,7 @@ def _clarification_topic(question: str, category: str, rationale: str) -> str:
         "edge": ("edge case", "unhappy path", "error", "failure", "exception"),
         "integration": ("integration", "external system", "connect", "depends on"),
         "quality": ("specificity", "measurable", "testable", "acceptance", "vague"),
+        "performance": ("performance", "latency", "throughput", "response time", "ms", "milliseconds", "p95", "p99", "fps", "frame"),
     }
 
     for topic, keywords in topic_keywords.items():
@@ -364,6 +369,25 @@ def _clarification_topic(question: str, category: str, rationale: str) -> str:
             return topic
 
     return "other"
+
+
+def _option_matches_topic(option: str, topic: str) -> bool:
+    if topic == "other":
+        return True
+
+    keyword_map: dict[str, tuple[str, ...]] = {
+        "success": ("success", "goal", "complete", "completion", "win", "lose", "outcome"),
+        "workflow": ("flow", "step", "steps", "sequence", "stage", "phase", "start", "next", "end", "finish"),
+        "scope": ("scope", "include", "exclude", "version", "release", "phase", "v1"),
+        "data": ("data", "record", "records", "field", "fields", "entity", "entities", "info", "state", "track", "store"),
+        "edge": ("error", "failure", "exception", "retry", "fallback", "recover", "issue", "problem"),
+        "integration": ("integrat", "external", "connect", "dependency", "third-party", "api", "service"),
+        "quality": ("measurable", "threshold", "acceptance", "testable", "metric", "specific"),
+        "performance": ("performance", "latency", "throughput", "response", "ms", "milliseconds", "p95", "p99", "fps", "frame"),
+    }
+
+    lowered = option.lower()
+    return any(keyword in lowered for keyword in keyword_map.get(topic, ()))
 
 
 def _rewrite_clarification_question_text(
@@ -378,39 +402,19 @@ def _rewrite_clarification_question_text(
     cleaned = re.sub(r"\s+", " ", str(question or "")).strip()
     if not cleaned:
         return cleaned
-
-    if source != "evaluator":
-        return cleaned
-
-    haystack = f"{category} {cleaned} {rationale}".lower()
-    if any(keyword in haystack for keyword in ("success metric", "success criteria", "measure success", "win condition")):
-        return "What should count as a successful result for this feature?"
-
-    if any(keyword in haystack for keyword in ("workflow", "flow", "steps", "sequence")):
-        return "What should happen first, next, and last in this flow?"
-
-    if any(keyword in haystack for keyword in ("scope", "out of scope", "in scope", "boundary")):
-        return "What should be included in the first version?"
-
-    if any(keyword in haystack for keyword in ("edge case", "unhappy path", "error", "failure", "exception")):
-        return "What should happen when something goes wrong?"
-
-    if any(keyword in haystack for keyword in ("integration", "external system", "connect", "depends on")):
-        return "Does this need to connect to anything else, or stay standalone?"
-
-    if any(keyword in haystack for keyword in ("data", "entity", "business rule", "rules", "fields")):
-        return "What key data or rules need to be defined?"
-
     return cleaned
 
 
-def _is_helpful_suggested_option(option: str, question: str) -> bool:
+def _is_helpful_suggested_option(option: str, question: str, topic: str) -> bool:
     cleaned = re.sub(r"\s+", " ", str(option or "")).strip(" \t\n\r-•").strip()
     if len(cleaned) < 8:
         return False
 
     lowered = cleaned.lower()
-    if lowered in {"yes", "no", "maybe", "other", "n/a", "not sure", "unsure", "it depends"}:
+    if lowered in {"yes", "no", "maybe", "other", "n/a", "not sure", "unsure", "it depends", "be successful", "success"}:
+        return False
+
+    if lowered.rstrip(".!?") in {"be successful"}:
         return False
 
     if lowered.startswith("improve") or lowered.startswith("be more") or lowered.startswith("clarify"):
@@ -421,6 +425,9 @@ def _is_helpful_suggested_option(option: str, question: str) -> bool:
 
     question_haystack = str(question or "").lower()
     if "success" in question_haystack and any(token in lowered for token in {"success metric", "win condition"}):
+        return False
+
+    if not _option_matches_topic(cleaned, topic):
         return False
 
     return bool(re.search(r"[a-z0-9]", cleaned))
@@ -435,16 +442,16 @@ def _build_suggested_options(
 ) -> list[str]:
     if topic == "success":
         return [
-            "The main goal is completed successfully.",
-            "The user reaches a target score, count, or threshold.",
-            "The flow ends when the user confirms the task is done.",
+            "Success means the user completes the primary goal.",
+            "Success means a measurable target is reached (count or threshold).",
+            "Success means the workflow ends with a clear completion state.",
         ]
 
     if topic == "workflow":
         return [
-            "A simple linear flow with one main path.",
-            "A flow with a few decision points or branches.",
-            "A more flexible flow where users can choose different paths.",
+            "Start with a brief setup, then the core interaction loop, then a completion step.",
+            "A single continuous flow until the user completes the goal or exits.",
+            "Multiple stages with a clear transition or checkpoint between each stage.",
         ]
 
     if topic == "scope":
@@ -482,6 +489,13 @@ def _build_suggested_options(
             "Add a specific example or technical detail that can be tested.",
         ]
 
+    if topic == "performance":
+        return [
+            "Define a specific maximum latency for critical operations (e.g., X ms per update).",
+            "Set a percentile target such as P95 response time under typical load.",
+            "Note acceptable ranges for v1 and revisit exact thresholds later.",
+        ]
+
     return [
         "Keep the simplest version that covers the core use case.",
         "Include a few optional behaviors or extras.",
@@ -500,31 +514,14 @@ def _normalize_suggested_options(
     draft_context: str,
 ) -> list[str]:
     normalized: list[str] = []
+    topic = _clarification_topic(question, category, rationale)
 
     for option in suggested_options:
         cleaned = re.sub(r"\s+", " ", str(option or "")).strip()
         if not cleaned:
             continue
-        if _is_helpful_suggested_option(cleaned, question):
+        if _is_helpful_suggested_option(cleaned, question, topic):
             normalized.append(cleaned)
-
-    topic = _clarification_topic(question, category, rationale)
-    defaults = _build_suggested_options(
-        topic,
-        question=question,
-        project_scope=project_scope,
-        draft_context=draft_context,
-    )
-
-    for option in defaults:
-        if len(normalized) >= 3:
-            break
-        if option not in normalized:
-            normalized.append(option)
-
-    if not normalized and source == "qa":
-        normalized = defaults[:3]
-
     return normalized[:5]
 
 
@@ -2403,31 +2400,24 @@ def _build_writing_context(state: SRSState) -> str:
     if history:
         convo = "\n".join(
             f"{'USER' if isinstance(m, HumanMessage) else 'AI'}: {str(m.content)[:400]}"
-            for m in history[-10:]  # last 10 messages
+            for m in history[-10:]
         )
         parts.append(f"## CONVERSATION CONTEXT (last 10 messages)\n{convo}")
 
     reqs = state.get("requirements", [])
     if reqs:
-        req_lines = "\n".join(
-            f"- [{r['id']}] ({', '.join(r['labels'] or ['?'])}): {r['text'][:200]}"
-            for r in reqs[:30]
-        )
-        parts.append(f"## CLASSIFIED REQUIREMENTS\n{req_lines}")
-
-    pending_questions = state.get("missing_context", [])
-    if pending_questions:
-        question_lines = "\n".join(
-            f"- [{item.get('category', 'General')}] {item.get('question', '')}"
-            for item in pending_questions
-            if item.get("question")
-        )
-        if question_lines:
-            parts.append(
-                "## OPEN CLARIFICATIONS\n"
-                "Draft the strongest best-effort SRS you can, and make any uncertainty explicit as an assumption instead of omitting the requirement area.\n"
-                f"{question_lines}"
-            )
+        req_lines: list[str] = []
+        for req in reqs[:40]:
+            if not isinstance(req, dict):
+                continue
+            req_id = str(req.get("id", "")).strip()
+            text = str(req.get("text", "")).strip()
+            if req_id and text:
+                req_lines.append(f"- {req_id}: {text}")
+            elif text:
+                req_lines.append(f"- {text}")
+        if req_lines:
+            parts.append("## REQUIREMENTS\n" + "\n".join(req_lines))
 
     return "\n\n".join(parts) or "No context available yet."
 

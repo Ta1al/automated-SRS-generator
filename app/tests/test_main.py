@@ -295,14 +295,10 @@ class TestEvaluateCompleteness:
             result = await evaluate_completeness(state)
 
         assert [item["question"] for item in result["missing_context"]] == [
-            "What should count as a successful game session?"
+            "What is the primary success metric for the system's implementation?"
         ]
         assert all(item["category"] == "General" for item in result["missing_context"])
-        assert len(result["missing_context"][0]["suggested_options"]) >= 3
-        assert any(
-            any(keyword in option.lower() for keyword in ["maze", "lives", "score", "points"])
-            for option in result["missing_context"][0]["suggested_options"]
-        )
+        assert result["missing_context"][0]["suggested_options"] == []
 
     @pytest.mark.asyncio
     async def test_empty_gaps_means_complete(self):

@@ -757,6 +757,17 @@ function ClarificationFormCard({
             </p>
             <p className="mt-1 text-sm font-medium leading-snug">{question.question}</p>
 
+            {question.rationale ? (
+              <div className="mt-2 rounded-lg bg-[color:var(--surface-low)]/70 px-3 py-2 ring-1 ring-[color:var(--outline-variant)]/30">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[color:var(--on-surface-variant)]">
+                  Why this matters
+                </p>
+                <p className="mt-1 text-xs leading-relaxed text-[color:var(--on-surface-variant)]">
+                  {question.rationale}
+                </p>
+              </div>
+            ) : null}
+
             {question.suggested_options && question.suggested_options.length > 0 ? (
               <div className="mt-2">
                 <p className="mb-1 text-xs text-[color:var(--on-surface-variant)]">Suggested answers:</p>
@@ -784,9 +795,6 @@ function ClarificationFormCard({
               disabled={isSending}
             />
 
-            {question.rationale ? (
-              <p className="mt-2 text-xs text-[color:var(--on-surface-variant)] italic">{question.rationale}</p>
-            ) : null}
           </div>
         ))}
       </div>
