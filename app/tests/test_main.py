@@ -535,6 +535,143 @@ class TestGenerateMermaid:
         assert result["mermaid_errors"] == ["", "", ""]
 
 
+class TestOutlineHelpers:
+    @pytest.mark.asyncio
+    async def test_elicit_requirements_opens_grouped_clarification_round(self):
+        from langchain_core.messages import AIMessage, HumanMessage
+
+        from app.graph.nodes import elicit_requirements
+
+        intake = {
+            "project_title": "City Home-Cooked Food Delivery",
+            "domain": "Local Food Delivery Service",
+            "project_purpose": "Build a food ordering app for families and office workers",
+            "target_users": ["Home Cooks", "Office Workers", "Students"],
+            "suggested_actors": ["owner", "renter", "admin"],
+            "platform_needs": ["Mobile App", "Offline Capability"],
+            "success_criteria": ["Low latency", "High compatibility"],
+            "architecture_summary": "Modular design with focus on performance and compatibility",
+            "components": ["User Interface", "Order Management"],
+            "core_flows": [],
+            "data_entities": ["Order Details"],
+            "external_interfaces": ["Payment Gateway"],
+            "constraints": ["Performance requirements"],
+            "assumptions": ["Support for older Android versions"],
+            "requirement_candidates": ["Food Selection"],
+            "glossary_terms": [],
+        }
+        mock_response = AIMessage(content=json.dumps(intake))
+        captured: dict[str, Any] = {}
+
+        def fake_interrupt(payload):
+            captured["payload"] = payload
+            return {"message": "Use owner, renter, and admin"}
+
+        state: Any = {
+            "chat_history": [HumanMessage(content="I want to build a local food delivery app.")],
+            "rag_context": "",
+            "project_title": "",
+        }
+
+        with (
+            patch("app.graph.nodes._get_llm", return_value=MagicMock()),
+            patch("app.graph.nodes._llm_invoke_with_retry", return_value=mock_response),
+            patch("app.graph.nodes.interrupt", side_effect=fake_interrupt),
+        ):
+            result = await elicit_requirements(state)
+
+        payload = captured["payload"]
+        assert payload["type"] == "clarification_needed"
+        assert 3 <= len(payload["questions"]) <= 6
+        assert any("owner" in str(question.get("question", "")).lower() for question in payload["questions"])
+        assert any("cash" in str(question.get("question", "")).lower() or "jazzcash" in str(question.get("question", "")).lower() for question in payload["questions"])
+        assert result["major_decisions_asked"] is True
+        assert isinstance(result["chat_history"][0], HumanMessage)
+        assert "Use owner, renter, and admin" in str(result["chat_history"][0].content)
+
+    @pytest.mark.asyncio
+    async def test_grouped_clarification_questions_limits_round_size(self):
+        from app.graph.nodes import _group_clarification_questions
+
+        questions = [
+            {"category": "Core Workflow", "group": "Core Workflow", "question": f"Q{i}", "suggested_options": [], "rationale": "R"}
+            for i in range(4)
+        ] + [
+            {"category": "Roles", "group": "Roles", "question": f"R{i}", "suggested_options": [], "rationale": "R"}
+            for i in range(4)
+        ]
+
+        grouped = _group_clarification_questions(questions, max_questions=6)
+
+        assert len(grouped) == 6
+        assert {item["group"] for item in grouped} == {"Core Workflow", "Roles"}
+
+    def test_outline_text_renderer_includes_toggle_state(self):
+        from app.graph.nodes import _outline_proposal_to_text
+
+        text = _outline_proposal_to_text(
+            {
+                "title": "Marketplace SRS",
+                "toc": ["1. Introduction", "2. Product Overview"],
+                "accepted_stories": ["Renter can reserve a tool"],
+                "outline_items": [
+                    {
+                        "section": "1.1",
+                        "title": "Purpose",
+                        "included": True,
+                        "rationale": "Core doc section",
+                    },
+                    {
+                        "section": "2.3",
+                        "title": "Payments",
+                        "included": False,
+                        "rationale": "Deferred for MVP",
+                    },
+                ],
+                "actor_suggestions": ["owner", "renter", "admin"],
+            }
+        )
+
+        assert "Title: Marketplace SRS" in text
+        assert "- [x] 1.1 Purpose" in text
+        assert "- [ ] 2.3 Payments" in text
+        assert "Actor suggestions:" in text
+
+
+class TestButtonDrivenReviewActions:
+    @pytest.mark.asyncio
+    async def test_outline_approval_accepts_control_token(self):
+        from app.graph.nodes import OUTLINE_APPROVE_COMMAND, wait_for_outline_approval
+
+        state: Any = {
+            "chat_history": [],
+            "outline_items": [{"section_id": "1", "title": "Introduction", "included": True}],
+            "outline_approved": False,
+        }
+
+        with patch("app.graph.nodes.interrupt", return_value={"message": OUTLINE_APPROVE_COMMAND}):
+            result = await wait_for_outline_approval(state)
+
+        assert result["outline_approved"] is True
+        assert isinstance(result["chat_history"][-1].content, str)
+        assert "Outline approved" in result["chat_history"][-1].content
+
+    @pytest.mark.asyncio
+    async def test_finalize_accepts_control_token(self):
+        from app.graph.nodes import FINALIZE_COMMAND, process_review_feedback
+
+        state: Any = {
+            "chat_history": [],
+            "revision_targets": ["s1"],
+            "sections": {"s1": "# Draft"},
+        }
+
+        with patch("app.graph.nodes.interrupt", return_value={"message": FINALIZE_COMMAND}):
+            result = await process_review_feedback(state)
+
+        assert result["revision_targets"] == []
+
+
 # ════════════════════════════════════════════════════════════════════════════
 # Section 4 - API Route Tests
 # ════════════════════════════════════════════════════════════════════════════
@@ -598,6 +735,18 @@ class TestSessionRoutes:
         assert is_relevant is True
         assert redirect == ""
         assert source == "llm-fallback-allow"
+
+    @pytest.mark.asyncio
+    async def test_is_interrupted_treats_any_paused_state_as_resume(self, mock_app):
+        from types import SimpleNamespace
+
+        from app.api.routes import _is_interrupted
+
+        mock_app.state.graph.aget_state = AsyncMock(
+            return_value=SimpleNamespace(next=("elicit_requirements",))
+        )
+
+        assert await _is_interrupted(mock_app.state, "thread-test") is True
 
     @pytest.mark.asyncio
     async def test_create_session_returns_thread_id(self, mock_app):
@@ -765,3 +914,20 @@ flowchart TD
             "content-disposition", ""
         )
         assert len(response.content) > 0
+
+    @pytest.mark.asyncio
+    async def test_get_document_markdown_returns_attachment(self, mock_app):
+        fake_state = MagicMock(values={"final_document": "# Sample SRS\n\n## Section\nContent."})
+        mock_app.state.graph.aget_state = AsyncMock(return_value=fake_state)
+
+        async with AsyncClient(
+            transport=ASGITransport(app=mock_app), base_url="http://test"
+        ) as client:
+            response = await client.get("/api/sessions/test-thread/document.md")
+
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/markdown")
+        assert "attachment; filename=\"srs-test-thread.md\"" in response.headers.get(
+            "content-disposition", ""
+        )
+        assert response.text.startswith("# Sample SRS")
