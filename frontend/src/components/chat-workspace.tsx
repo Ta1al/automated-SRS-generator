@@ -81,6 +81,17 @@ type RevisionTarget = {
   sectionKey: string;
 };
 
+type OutlineItem = {
+  section_id?: string;
+  title?: string;
+  description?: string;
+  rationale?: string;
+  included?: boolean;
+};
+
+const OUTLINE_APPROVE_COMMAND = "[[approve_outline]]";
+const FINALIZE_COMMAND = "[[finalize_srs]]";
+
 const SECTION_TITLES: Record<string, string> = {
   s1: "Section 1 · Introduction",
   s2: "Section 2 · Product Overview",
@@ -813,6 +824,51 @@ function ClarificationFormCard({
   );
 }
 
+function ReviewActionCard({
+  title,
+  description,
+  primaryLabel,
+  secondaryLabel,
+  onPrimary,
+  onSecondary,
+  disabled,
+}: {
+  title: string;
+  description: string;
+  primaryLabel: string;
+  secondaryLabel: string;
+  onPrimary: () => void;
+  onSecondary: () => void;
+  disabled: boolean;
+}) {
+  return (
+    <div className="max-w-[90%] rounded-2xl bg-[color:var(--surface-highest)]/80 px-4 py-4 text-[color:var(--foreground)] ring-1 ring-[color:var(--outline-variant)]/35 backdrop-blur">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[color:var(--on-surface-variant)]">
+        {title}
+      </p>
+      <p className="mt-2 text-sm leading-relaxed">{description}</p>
+      <div className="mt-4 flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={onPrimary}
+          disabled={disabled}
+          className="rounded-md bg-[color:var(--primary)] px-4 py-2 text-sm text-white disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {primaryLabel}
+        </button>
+        <button
+          type="button"
+          onClick={onSecondary}
+          disabled={disabled}
+          className="rounded-md bg-[color:var(--surface-low)] px-4 py-2 text-sm text-[color:var(--foreground)] ring-1 ring-[color:var(--outline-variant)]/40 hover:bg-[color:var(--surface)] disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {secondaryLabel}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function ReceivingBubble({
   waitingOn,
   statuses,
@@ -989,6 +1045,27 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
   } | null>(null);
   const runPollTimerRef = useRef<number | null>(null);
   const sectionStreamRef = useRef<EventSource | null>(null);
+
+  const currentPhase = useMemo(() => {
+    if (!stateJson || typeof stateJson !== "object" || Array.isArray(stateJson)) {
+      return "";
+    }
+
+    return typeof (stateJson as Record<string, unknown>).current_phase === "string"
+      ? String((stateJson as Record<string, unknown>).current_phase)
+      : "";
+  }, [stateJson]);
+
+  const outlineItems = useMemo(() => {
+    if (!stateJson || typeof stateJson !== "object" || Array.isArray(stateJson)) {
+      return [] as OutlineItem[];
+    }
+
+    const value = (stateJson as Record<string, unknown>).outline_items;
+    return Array.isArray(value) ? (value as OutlineItem[]) : [];
+  }, [stateJson]);
+
+  const outlineNeedsApproval = outlineItems.length > 0 && !Boolean((stateJson as Record<string, unknown> | null)?.outline_approved);
 
   // Ref used to hold the latest selectedChatId inside the sendToBackend closure.
   const selectedChatIdRef = useRef(selectedChatId);
@@ -1216,7 +1293,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, questionMode]);
+  }, [messages.length, questionMode?.questions.length, questionMode?.introPrompt]);
 
   const selectedChat = useMemo(
     () => chats.find((chat) => chat.id === selectedChatId) ?? null,
@@ -1505,9 +1582,13 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
     const optimisticMessage: ChatMessage = {
       id: `optimistic-${Date.now()}`,
       role: "USER",
-      content: revisionTarget
-        ? `[Selected section: ${revisionTarget.title}]\n${messageText}`
-        : messageText,
+      content: messageText === OUTLINE_APPROVE_COMMAND
+        ? "Approve outline"
+        : messageText === FINALIZE_COMMAND
+          ? "Finalize document"
+          : revisionTarget
+            ? `[Selected section: ${revisionTarget.title}]\n${messageText}`
+            : messageText,
       createdAt: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, optimisticMessage]);
@@ -1560,6 +1641,15 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
       setIsSending(false);
       setIsGeneratingDiagrams(false);
     }
+  }
+
+  async function sendControlAction(messageText: string) {
+    const chatId = selectedChatIdRef.current;
+    if (!chatId || isSending) {
+      return;
+    }
+
+    await sendToBackend(chatId, messageText);
   }
 
   async function handleGenerateDiagrams() {
@@ -1721,11 +1811,15 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
   // bubbles below.
   const visibleMessages = useMemo(() => {
     if (questionMode === null) return messages;
-    const lastAssistantIdx = messages.reduce(
-      (acc, msg, i) => (msg.role === "ASSISTANT" ? i : acc),
+    const lastUserIdx = messages.reduce(
+      (acc, msg, i) => (msg.role === "USER" ? i : acc),
       -1,
     );
-    return lastAssistantIdx >= 0 ? messages.filter((_, i) => i !== lastAssistantIdx) : messages;
+    if (lastUserIdx < 0) {
+      return messages;
+    }
+
+    return messages.filter((msg, i) => !(i > lastUserIdx && msg.role === "ASSISTANT"));
   }, [messages, questionMode]);
 
   const displayMessages = useMemo(
@@ -1843,6 +1937,8 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
     () => documentText || buildDraftDocument(draftedSections),
     [documentText, draftedSections],
   );
+
+  const draftReadyForFinalize = Boolean(resolvedDocumentText.trim()) && currentPhase === "review_refine";
 
   const hasGeneratedDiagrams = useMemo(() => {
     const stateHasMermaidBlocks =
@@ -2000,6 +2096,37 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
               />
             ) : null}
 
+            {outlineNeedsApproval && !isSending && !shouldShowDraftingPlaceholders ? (
+              <ReviewActionCard
+                title="Outline approval"
+                description="Review the proposed outline, then approve it to move into formal drafting. Use the secondary button if you want to keep refining the wording in chat first."
+                primaryLabel="Approve outline"
+                secondaryLabel="Keep refining"
+                onPrimary={() => void sendControlAction(OUTLINE_APPROVE_COMMAND)}
+                onSecondary={() => {
+                  setInput("Please revise the outline with these changes:");
+                  const inputElement = document.querySelector<HTMLInputElement>("input.field-input");
+                  inputElement?.focus();
+                }}
+                disabled={isSending}
+              />
+            ) : null}
+
+            {draftReadyForFinalize && questionMode === null && !isSending && !shouldShowDraftingPlaceholders ? (
+              <ReviewActionCard
+                title="Review complete"
+                description="If the draft looks good, finalize it now. Otherwise, keep using the chat box to request targeted edits or section rewrites."
+                primaryLabel="Finalize document"
+                secondaryLabel="Request more edits"
+                onPrimary={() => void sendControlAction(FINALIZE_COMMAND)}
+                onSecondary={() => {
+                  const inputElement = document.querySelector<HTMLInputElement>("input.field-input");
+                  inputElement?.focus();
+                }}
+                disabled={isSending}
+              />
+            ) : null}
+
             {selectedDraftPart !== null && questionMode === null ? (
               <SelectedDraftBubble
                 part={selectedDraftPart}
@@ -2048,7 +2175,11 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
                     ? "Answer the clarification form above to continue."
                     : selectedDraftPart !== null
                       ? `Describe how to improve \"${selectedDraftPart.title}\".`
-                      : "Describe the software you want to build, including users and goals."
+                      : outlineNeedsApproval
+                        ? "Describe the outline changes you want before approval."
+                        : draftReadyForFinalize
+                          ? "Describe any final refinements, or use Finalize document."
+                          : "Describe the software you want to build, including users and goals."
                 }
                 className="field-input w-full rounded-md px-3 py-2 text-sm ring-1 ring-[color:var(--outline-variant)]/40 outline-none"
                 disabled={!selectedChatId || isSending || questionMode !== null}
@@ -2104,9 +2235,34 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
 
           <div className="mt-3 space-y-3">
             {visibleDraftSections.length === 0 ? (
-              <div className="rounded-md bg-[color:var(--surface-lowest)] p-3 text-xs text-[color:var(--on-surface-variant)] ring-1 ring-[color:var(--outline-variant)]/35">
-                Drafted sections will appear here once generation starts.
-              </div>
+              outlineItems.length > 0 ? (
+                <div className="rounded-md bg-[color:var(--surface-lowest)] p-3 ring-1 ring-[color:var(--outline-variant)]/35">
+                  <h3 className="text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--on-surface-variant)]">
+                    Proposed Outline
+                  </h3>
+                  <div className="mt-2 space-y-2">
+                    {outlineItems.map((item, index) => (
+                      <div key={index} className="block w-full rounded-xl border border-[color:var(--outline-variant)]/30 bg-[color:var(--surface-low)] px-3 py-2 text-left">
+                        <p className="text-xs font-medium text-[color:var(--foreground)]">{item.section_id ? `${item.section_id}. ` : ""}{item.title}</p>
+                        {item.description && (
+                          <p className="mt-1 text-xs leading-relaxed text-[color:var(--on-surface-variant)]">
+                            {item.description}
+                          </p>
+                        )}
+                        {item.rationale && (
+                          <div className="mt-2 rounded bg-[color:var(--surface-lowest)] px-2 py-1.5 text-[11px] italic text-[color:var(--on-surface-variant)]">
+                            Rationale: {item.rationale}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-md bg-[color:var(--surface-lowest)] p-3 text-xs text-[color:var(--on-surface-variant)] ring-1 ring-[color:var(--outline-variant)]/35">
+                  Drafted sections will appear here once generation starts.
+                </div>
+              )
             ) : (
               visibleDraftSections.map((section) => (
                 <div key={section.key} className="rounded-md bg-[color:var(--surface-lowest)] p-3 ring-1 ring-[color:var(--outline-variant)]/35">
