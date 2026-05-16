@@ -1,5 +1,12 @@
 """
-LangGraph state schema for the SRS generator workflow.
+LangGraph state schema for the 5-phase SRS generator workflow.
+
+Phases:
+1. Ingestion: Parse informal input, extract domain/actors/platform needs
+2. Elicitation: Interactive Q&A with 4 grouped batches (roles, boundaries, NFRs, edge cases)
+3. Outline Review: Generate IEEE 830 outline, user approval/modification
+4. Drafting: Synthesize into formal SRS sections via parallel drafters
+5. Review & Refine: User edits (inline or regeneration), finalize, export
 
 All nodes receive the full ``SRSState`` dict and return a partial update.
 LangGraph merges the partial update back using the annotated reducers.
@@ -7,7 +14,7 @@ LangGraph merges the partial update back using the annotated reducers.
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Any
 
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
@@ -25,136 +32,165 @@ def merge_sections(
     return base
 
 
-class Requirement(TypedDict):
-    """A single atomic requirement extracted from user input."""
+def merge_dicts(
+    current: dict[str, Any] | None,
+    update: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Generic dict merger for accumulating answers or metadata."""
+    base = dict(current or {})
+    if update:
+        base.update(update)
+    return base
 
-    id: str                   # e.g. "F-001", "SE-003"
-    text: str                 # The requirement statement
-    labels: list[str]         # e.g. ["SE", "L"]
-    criteria: str             # Boolean-testable acceptance criterion
+
+def merge_lists(
+    current: list[Any] | None,
+    update: list[Any] | None,
+) -> list[Any]:
+    """Reducer for lists: extend if update provided, otherwise keep current."""
+    if update is None:
+        return current or []
+    return update
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TypedDicts for Structured Data
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class CoreFlow(TypedDict, total=False):
+    """A single core flow with goal, steps, and success metric."""
+    name: str
+    goal: str
+    steps: list[str]
+    success_metric: str
+
+
+class IngestionSummary(TypedDict, total=False):
+    """Normalized intake summary from user's initial informal product idea."""
+    project_title: str
+    domain: str
+    project_purpose: str
+    target_users: list[str]
+    suggested_actors: list[str]
+    platform_needs: list[str]
+    success_criteria: list[str]
+    architecture_summary: str
+    components: list[str]
+    core_flows: list[CoreFlow]
+    data_entities: list[str]
+    external_interfaces: list[str]
+    constraints: list[str]
+    assumptions: list[str]
 
 
 class ClarificationQuestion(TypedDict, total=False):
-    """A targeted follow-up question needed to complete the SRS."""
-
-    category: str
+    """A targeted follow-up question in the elicitation phase."""
+    category: str  # e.g., "User Roles", "Functional Boundaries", "NFRs", "Edge Cases"
+    group: int  # 0-3 mapping to elicitation groups
+    priority: str  # e.g., "high", "medium", "low"
     question: str
     suggested_options: list[str]
     rationale: str
 
 
+class OutlineItem(TypedDict, total=False):
+    """An outline item representing a proposed SRS section."""
+    section_id: str  # e.g., "1", "2.1", "3.2"
+    title: str
+    description: str
+    included: bool  # Toggle: should this section be included in final SRS?
+    rationale: str  # Why include/exclude this section
+    subsection_suggestions: list[str]
+    user_notes: str  # User feedback/modifications
+
+
+class Requirement(TypedDict, total=False):
+    """A single atomic requirement extracted from user input."""
+    id: str  # e.g., "F-001", "SE-003"
+    text: str
+    labels: list[str]  # e.g., ["Functional", "Security"]
+    criteria: str  # Boolean-testable acceptance criterion
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Main SRSState
+# ─────────────────────────────────────────────────────────────────────────────
+
+
 class SRSState(TypedDict):
     """
-    Global state passed through every node in the LangGraph workflow.
+    Global state passed through every node in the 5-phase LangGraph workflow.
 
-    Fields:
-        chat_history:
-            Full message history between user and AI.  The ``add_messages``
-            reducer appends new messages rather than replacing the list.
-
-        document_buffer:
-            Raw working draft accumulated by the elicitor node on first pass.
-
-        missing_context:
-            List of structured follow-up questions identified by the evaluator node.
-            Empty list signals readiness to proceed to drafting.
-
-        requirements:
-            Parsed and classified atomic requirements.
-
-        rag_context:
-            Retrieved regulatory/standards text injected into prompts.
-
-        sections:
-            Keyed Markdown strings for each SRS section.
-            Keys: "s1", "s2", "s3_fr", "s3_nfr", "s3_iface", "s4"
-
-        mermaid_blocks:
-            Raw Mermaid diagram code strings (without fence markers).
-
-        mermaid_errors:
-            Validator error messages aligned by index with mermaid_blocks.
-            Empty string means the block at that index is valid.
-
-        mermaid_correction_attempts:
-            Counter preventing infinite correction loops.
-
-        generate_diagrams:
-            When True, run Mermaid generation/validation before finalizing.
-            Default False for normal drafting runs.
-
-        diagrams_only:
-            When True, bypass drafting and generate diagrams from existing sections.
-
-        revision_mode:
-            When True, bypass full drafting and only revise the selected section.
-
-        revision_target_section_key / revision_target_title / revision_target_content:
-            Metadata about the selected section to revise.
-
-        revision_request:
-            The user's requested change for the selected section.
-
-        is_complete:
-            Boolean flag set by the QA reviewer when the document passes.
-
-        qa_gaps:
-            List of structured follow-up questions returned by the QA reviewer when
-            is_complete is False.
-
-        final_document:
-            Fully assembled, validated Markdown SRS document.
-
-        project_title:
-            Short LLM-generated title inferred from the user's prompt.
-
-        project_scope:
-            Complexity level of the project: "simple" (hobby, single-user, local),
-            "medium" (moderate complexity), or "complex" (enterprise, multi-user, distributed).
-            Detected from initial requirements and used to filter evaluator questions.
-
-        major_decisions_asked:
-            True after the major-decision clarification round has been asked once.
-            Prevents repeated follow-up loops for minor details.
+    Phase Tracking:
+        current_phase: Enum tracking which phase the workflow is in
+        
+    Ingestion & Elicitation:
+        ingestion_summary: Extracted domain, actors, platform needs from initial input
+        pending_group_index: Current elicitation group index (0-3, or 4 = all complete)
+        elicitation_answers: Accumulated answers from user across all 4 Q&A groups
+        
+    Outline:
+        outline_items: Proposed IEEE 830 outline sections with include/exclude toggles
+        outline_approved: Boolean gate; False blocks drafting, True allows it
+        
+    Drafting & Sections:
+        sections: Keyed Markdown strings for each SRS section
+                 Keys: "s1", "s2", "s3_functional", "s3_external", "s3_nfr", "s4"
+        
+    Diagrams:
+        plantumul_diagrams: PlantUML diagram code (use case, etc.)
+        mermaid_blocks: Mermaid diagram code strings (ER, activity, dataflow)
+        
+    Review:
+        revision_targets: List of section keys user wants to regenerate
+        
+    History & Context:
+        chat_history: Full message history between user and AI
+        requirements: Parsed requirements extracted from conversation
+        rag_context: Retrieved regulatory/standards text injected into prompts
     """
 
-    # ── Conversation ──────────────────────────────────────────────────────────
+    # ────────────────────────────────────────────────────────────────────────
+    # Phase tracking
+    # ────────────────────────────────────────────────────────────────────────
+    current_phase: str  # "ingestion" | "elicitation" | "outline_review" | "drafting" | "review_refine" | "complete"
+
+    # ────────────────────────────────────────────────────────────────────────
+    # Ingestion & Elicitation
+    # ────────────────────────────────────────────────────────────────────────
+    ingestion_summary: Annotated[dict[str, Any], merge_dicts]
+    pending_group_index: int  # Current elicitation group (0-3, or 4 = complete)
+    elicitation_answers: Annotated[dict[str, Any], merge_dicts]  # group_0, group_1, group_2, group_3 answers
+    elicitation_question_plan: Annotated[list[str], merge_lists]  # Question topics for current group
+    elicitation_question_index: int  # Current question number within group
+
+    # ────────────────────────────────────────────────────────────────────────
+    # Outline
+    # ────────────────────────────────────────────────────────────────────────
+    outline_items: Annotated[list[OutlineItem], merge_lists]
+    outline_approved: bool  # Gate: prevents drafting until True
+
+    # ────────────────────────────────────────────────────────────────────────
+    # Sections & Drafts
+    # ────────────────────────────────────────────────────────────────────────
+    sections: Annotated[dict[str, str], merge_sections]  # s1, s2, s3_functional, s3_external, s3_nfr, s4
+
+    # ────────────────────────────────────────────────────────────────────────
+    # Diagrams
+    # ────────────────────────────────────────────────────────────────────────
+    plantumul_diagrams: Annotated[dict[str, str], merge_dicts]  # "usecase", etc.
+    mermaid_blocks: Annotated[list[str], merge_lists]  # ER, activity, dataflow diagrams
+    mermaid_errors: Annotated[list[str], merge_lists]  # Validation errors aligned with mermaid_blocks
+
+    # ────────────────────────────────────────────────────────────────────────
+    # Review & Refine
+    # ────────────────────────────────────────────────────────────────────────
+    revision_targets: Annotated[list[str], merge_lists]  # Sections user wants to regenerate
+
+    # ────────────────────────────────────────────────────────────────────────
+    # Conversation history & context
+    # ────────────────────────────────────────────────────────────────────────
     chat_history: Annotated[list[BaseMessage], add_messages]
-
-    # ── Elicitation ───────────────────────────────────────────────────────────
-    document_buffer: str
-    missing_context: list[ClarificationQuestion]
-    project_scope: str
-
-    # ── Requirements ──────────────────────────────────────────────────────────
-    requirements: list[Requirement]
-
-    # ── RAG ───────────────────────────────────────────────────────────────────
-    rag_context: str
-
-    # ── Section drafts ────────────────────────────────────────────────────────
-    sections: Annotated[dict[str, str], merge_sections]
-
-    # ── Mermaid ───────────────────────────────────────────────────────────────
-    mermaid_blocks: list[str]
-    mermaid_errors: list[str]
-    mermaid_correction_attempts: int
-    generate_diagrams: bool
-    diagrams_only: bool
-    revision_mode: bool
-
-    # ── Targeted revision ────────────────────────────────────────────────────
-    revision_target_section_key: str
-    revision_target_title: str
-    revision_target_content: str
-    revision_request: str
-
-    # ── Quality assurance ─────────────────────────────────────────────────────
-    is_complete: bool
-    qa_gaps: list[ClarificationQuestion]
-    major_decisions_asked: bool
-    requirement_quality_remediation_attempts: int
-
-    # ── Final output ──────────────────────────────────────────────────────────
-    final_document: str
-    project_title: str
+    requirements: Annotated[list[Requirement], merge_lists]
+    rag_context: str  # Retrieved standards/regulatory text for prompting
