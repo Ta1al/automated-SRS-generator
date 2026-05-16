@@ -322,9 +322,10 @@ async def _is_interrupted(app_state: Any, thread_id: str) -> bool:
     config = {"configurable": {"thread_id": thread_id}}
     try:
         state = await app_state.graph.aget_state(config)
-        # LangGraph sets next=('ask_clarifying_questions',) when interrupted
-        # before that node (because we used interrupt_before=[...])
-        return bool(state and state.next and "ask_clarifying_questions" in state.next)
+        # LangGraph snapshots expose a non-empty `next` tuple when execution is
+        # paused and ready to resume from an interrupt, regardless of which node
+        # triggered the interruption.
+        return bool(state and getattr(state, "next", None))
     except Exception:
         return False
 
@@ -335,6 +336,7 @@ async def _is_interrupted(app_state: Any, thread_id: str) -> bool:
 _NODE_DISPLAY_NAMES = {
     "retrieve_rag_context": "Retrieving regulatory context",
     "elicit_requirements": "Eliciting requirements from input",
+    "generate_outline": "Drafting outline for review",
     "classify_requirements": "Classifying requirements",
     "validate_and_enrich_requirements": "Validating & enriching requirements",
     "draft_section_1": "Drafting Introduction",
@@ -356,6 +358,7 @@ _NODE_DISPLAY_NAMES = {
 _TYPICAL_DURATION_MS = {
     "retrieve_rag_context": 2000,
     "elicit_requirements": 8000,
+    "generate_outline": 7000,
     "classify_requirements": 6000,
     "validate_and_enrich_requirements": 10000,
     "draft_section_1": 8000,
@@ -379,6 +382,7 @@ _PARALLEL_NODES = {"draft_section_1", "draft_section_2", "draft_section_3_iface"
 _NODE_SEQUENCE_FULL_WITH_DIAGRAMS = [
     "retrieve_rag_context",
     "elicit_requirements",
+    "generate_outline",
     "classify_requirements",
     "validate_and_enrich_requirements",
     "draft_section_1",  # These 5 run in parallel but count as 1 step
@@ -397,6 +401,7 @@ _NODE_SEQUENCE_FULL_WITH_DIAGRAMS = [
 _NODE_SEQUENCE_FULL_NO_DIAGRAMS = [
     "retrieve_rag_context",
     "elicit_requirements",
+    "generate_outline",
     "classify_requirements",
     "validate_and_enrich_requirements",
     "draft_section_1",  # These 5 run in parallel but count as 1 step
@@ -539,11 +544,21 @@ async def _stream_graph(
             # Fresh invocation
             inputs = {
                 "chat_history": [HumanMessage(content=message)],
+                "current_phase": "ingestion",
+                "pending_group_index": 0,
+                "elicitation_answers": {},
                 "document_buffer": "",
                 "missing_context": [],
+                "ingestion_summary": {},
+                "outline_buffer": "",
+                "outline_approved": False,
+                "outline_review_notes": "",
+                "outline_items": [],
+                "revision_targets": [],
                 "requirements": [],
                 "rag_context": "",
                 "sections": section_seed or {},
+                "plantumul_diagrams": {},
                 "mermaid_blocks": [],
                 "mermaid_errors": [],
                 "mermaid_correction_attempts": 0,
@@ -610,14 +625,16 @@ async def _stream_graph(
                             if not isinstance(payload, dict):
                                 payload = {}
 
+                            event_data: dict[str, Any] = {
+                                "questions": payload.get("questions", []),
+                                "prompt": payload.get("prompt", ""),
+                            }
+                            if payload.get("type") == "outline_review":
+                                event_data["outline"] = payload.get("outline", {})
+
                             yield {
                                 "event": "question",
-                                "data": json.dumps(
-                                    {
-                                        "questions": payload.get("questions", []),
-                                        "prompt": payload.get("prompt", ""),
-                                    }
-                                ),
+                                "data": json.dumps(event_data),
                             }
                         return  # Stop streaming; wait for user reply
 
@@ -1000,6 +1017,51 @@ async def get_document_docx(thread_id: str, request: Request) -> Response:
     )
 
 
+@router.get("/sessions/{thread_id}/document.md")
+async def get_document_markdown(thread_id: str, request: Request) -> Response:
+    """Return the final SRS document as a Markdown file."""
+    app_state = request.app.state
+    if not hasattr(app_state, "graph") or app_state.graph is None:
+        raise HTTPException(status_code=503, detail="Graph not initialised.")
+
+    config = {"configurable": {"thread_id": thread_id}}
+    try:
+        state = await app_state.graph.aget_state(config)
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail=f"Session not found: {exc}") from exc
+
+    if state is None or not state.values:
+        raise HTTPException(status_code=404, detail="Session not found.")
+
+    final_doc = state.values.get("final_document", "")
+    if not final_doc:
+        missing_context = state.values.get("missing_context", [])
+        qa_gaps = state.values.get("qa_gaps", [])
+        if missing_context or qa_gaps:
+            detail = "Document still being refined. Please answer the remaining clarification questions to finalize the SRS."
+        else:
+            detail = "Document not yet complete. Please wait for the generation process to finish or continue the elicitation session."
+        raise HTTPException(status_code=202, detail=detail)
+
+    settings = get_settings()
+    project_title = str(state.values.get("project_title", "")).strip()
+    resolved_title = project_title or settings.docx_title
+    download_name = (
+        f"{_slugify_for_filename(project_title)}.md"
+        if project_title
+        else f"srs-{thread_id}.md"
+    )
+
+    return Response(
+        content=final_doc,
+        media_type="text/markdown; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{download_name}"',
+            "X-Document-Title": resolved_title,
+        },
+    )
+
+
 @router.get("/sessions/{thread_id}/state")
 async def get_state(thread_id: str, request: Request) -> JSONResponse:
     """
@@ -1023,6 +1085,8 @@ async def get_state(thread_id: str, request: Request) -> JSONResponse:
             "thread_id": thread_id,
             "next": list(state.next) if state.next else [],
             "is_complete": state.values.get("is_complete", False),
+            "current_phase": state.values.get("current_phase", ""),
+            "pending_group_index": state.values.get("pending_group_index", 0),
             "missing_context_count": len(state.values.get("missing_context", [])),
             "requirements_count": len(state.values.get("requirements", [])),
             "sections_drafted": list(state.values.get("sections", {}).keys()),
@@ -1030,6 +1094,12 @@ async def get_state(thread_id: str, request: Request) -> JSONResponse:
             "missing_context": state.values.get("missing_context", []),
             "qa_gaps": state.values.get("qa_gaps", []),
             "sections": state.values.get("sections", {}),
+            "ingestion_summary": state.values.get("ingestion_summary", {}),
+            "outline_buffer": state.values.get("outline_buffer", ""),
+            "outline_items": state.values.get("outline_items", []),
+            "outline_approved": state.values.get("outline_approved", False),
+            "outline_review_notes": state.values.get("outline_review_notes", ""),
+            "revision_targets": state.values.get("revision_targets", []),
             "project_title": state.values.get("project_title", ""),
             "final_document": state.values.get("final_document", ""),
         }
