@@ -19,7 +19,16 @@ from __future__ import annotations
 import asyncio
 import logging
 import sys
+import warnings
 from contextlib import asynccontextmanager
+
+# Suppress Pydantic serialization warnings related to Langchain's AIMessage.parsed
+warnings.filterwarnings(
+    "ignore",
+    message=".*Expected `none` - serialized value may not be as expected.*",
+    category=UserWarning,
+    module="pydantic.*"
+)
 
 # psycopg3 (and other async DB drivers) are incompatible with Windows'
 # default ProactorEventLoop. Switch to SelectorEventLoop before any
