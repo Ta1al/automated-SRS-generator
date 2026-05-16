@@ -6,6 +6,10 @@ import { backendFetch } from "@/lib/backend";
 import { getLatestNonTerminalRun } from "@/lib/chat-runner";
 import { prisma } from "@/lib/prisma";
 
+// Cache for backend state responses (threadId -> { result, timestamp })
+const stateCache = new Map<string, { result: Record<string, unknown>; timestamp: number }>();
+const CACHE_TTL_MS = 2000; // Cache for 2 seconds to reduce redundant backend calls
+
 type Context = {
   params: Promise<{
     chatId: string;
@@ -65,21 +69,52 @@ export async function GET(_request: NextRequest, context: Context) {
 
       if (Object.keys(liveSections).length === 0 || !run.currentNode) {
         try {
-          const stateResponse = await backendFetch(`/api/sessions/${chat.backendThreadId}/state`, {
-            cache: "no-store",
-          });
+          // Check cache first
+          const cached = stateCache.get(chat.backendThreadId);
+          let statePayload: Record<string, unknown> | null = null;
 
-          if (stateResponse.ok) {
-            const statePayload = (await stateResponse.json()) as Record<string, unknown>;
+          if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+            // Use cached result
+            statePayload = cached.result;
+          } else {
+            // Fetch from backend and cache the result
+            const stateResponse = await backendFetch(
+              `/api/sessions/${chat.backendThreadId}/state`,
+              {
+                cache: "no-store",
+              },
+            );
+
+            if (stateResponse.ok) {
+              statePayload = (await stateResponse.json()) as Record<string, unknown>;
+              // Cache the result
+              stateCache.set(chat.backendThreadId, {
+                result: statePayload,
+                timestamp: Date.now(),
+              });
+            }
+          }
+
+          if (statePayload) {
             const sections = statePayload.sections;
             const next = statePayload.next;
 
-            if (Array.isArray(next) && next.length > 0 && typeof next[0] === "string") {
+            if (
+              Array.isArray(next) &&
+              next.length > 0 &&
+              typeof next[0] === "string"
+            ) {
               inferredCurrentNode = next[0];
             }
 
-            if (sections && typeof sections === "object" && !Array.isArray(sections)) {
-              for (const [key, value] of Object.entries(sections as Record<string, unknown>)) {
+            if (
+              sections &&
+              typeof sections === "object" &&
+              !Array.isArray(sections)
+            ) {
+              for (const [key, value] of Object.entries(
+                sections as Record<string, unknown>,
+              )) {
                 if (typeof value === "string") {
                   const trimmed = value.trim();
                   if (trimmed) {
