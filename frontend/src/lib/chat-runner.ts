@@ -722,10 +722,6 @@ export async function startBackgroundChatRun(params: {
     let persistedAssistantMessage = "";
     if (sawGuardrailRedirect && shouldPersistAssistantMessage(summary.assistantMessage)) {
       persistedAssistantMessage = summary.assistantMessage;
-    } else if (normalizedQuestions.length > 0) {
-      persistedAssistantMessage =
-        resolvedQuestionPrompt ||
-        "I need a few clarifications before continuing. Please answer them in the clarification form.";
     } else if (currentDocument || hasDraftSections) {
       persistedAssistantMessage =
         runMode === "diagrams_only"
