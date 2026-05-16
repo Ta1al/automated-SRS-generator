@@ -1,5 +1,8 @@
 """
-LangGraph node functions for the SRS generator workflow.
+LangGraph node functions for the 5-phase SRS generator workflow.
+
+Uses LangChain's structured output (with_structured_output) to ensure
+the LLM returns properly formatted data matching Pydantic models.
 
 Each node accepts the full ``SRSState`` and returns a partial dict that
 LangGraph merges back into the shared state via the declared reducers.
@@ -11,2695 +14,750 @@ Convention:
 from __future__ import annotations
 
 import asyncio
-import importlib
 import json
 import logging
-import re
-from collections import Counter
-from difflib import SequenceMatcher
+from pathlib import Path
 from typing import Any
 
-import httpx
-import openai
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
-try:
-    from langchain_core.output_parsers import StructuredOutputParser, ResponseSchema
-except Exception:
-    try:
-        _output_parsers = importlib.import_module("langchain.output_parsers")
-        StructuredOutputParser = _output_parsers.StructuredOutputParser
-        ResponseSchema = _output_parsers.ResponseSchema
-    except Exception:
-        # LangChain structured parser not available in this environment.
-        # Provide a lightweight shim so the code can fall back to legacy JSON parsing.
-        class _NoopParser:
-            @classmethod
-            def from_response_schemas(cls, schemas):
-                return cls()
-
-            def get_format_instructions(self):
-                return ""
-
-            def parse(self, text):
-                raise RuntimeError("StructuredOutputParser not available")
-
-        StructuredOutputParser = _NoopParser
-
-        def ResponseSchema(*args, **kwargs):
-            return None
-from pydantic import BaseModel, Field
 from langgraph.types import interrupt
+from pydantic import BaseModel, Field
 
 from app.config import get_settings
 from app.graph import prompts
-from app.graph.state import ClarificationQuestion, Requirement, SRSState
-from app.rag.mermaid_syntax import retrieve_mermaid_syntax
+from app.graph.state import SRSState, IngestionSummary, OutlineItem, ClarificationQuestion
 from app.rag.vectorstore import retrieve
-from app.validation.mermaid import validate_mermaid_syntax
 
 logger = logging.getLogger(__name__)
 
-# ── SRS Pydantic Models for structured LLM output ──────────────────────────────
+settings = get_settings()
+
+OUTLINE_APPROVE_COMMAND = "[[approve_outline]]"
+FINALIZE_COMMAND = "[[finalize_srs]]"
+REQUEST_REVIEW_EDIT_COMMAND = "[[request_review_edit]]"
 
 
-class GlossaryEntry(BaseModel):
-    """A single glossary term and definition."""
-    term: str = Field(..., description="The term being defined")
-    definition: str = Field(..., description="Clear definition of the term")
+def _latest_human_message(state: SRSState) -> HumanMessage | None:
+    for message in reversed(state.get("chat_history", [])):
+        if isinstance(message, HumanMessage):
+            return message
+    return None
 
 
-class Section1Introduction(BaseModel):
-    """SRS Section 1: Introduction."""
-    purpose: str = Field(..., description="Purpose of the document")
-    scope: str = Field(..., description="Scope of the project")
-    glossary: list[GlossaryEntry] = Field(
-        default_factory=list,
-        description="Key glossary terms and definitions"
-    )
-    overview: str = Field(..., description="Overview of the document structure")
+def _normalize_message_text(value: str) -> str:
+    return " ".join(value.split()).strip().lower()
 
 
-class CoreFlow(BaseModel):
-    """A single core flow with goal, steps, and success metric."""
+def _is_control_command(message_text: str, command: str) -> bool:
+    return _normalize_message_text(message_text) == command
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Pydantic Models for Structured Output
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class CoreFlowModel(BaseModel):
+    """A single core flow."""
     name: str = Field(..., description="Flow name")
     goal: str = Field(..., description="Flow goal or outcome")
     steps: list[str] = Field(..., description="Ordered steps of the flow")
     success_metric: str = Field(..., description="How success is measured")
 
 
-class ComponentDefinition(BaseModel):
-    """A high-level system component."""
-    name: str = Field(..., description="Component name")
-    responsibility: str = Field(..., description="Primary responsibility")
-    interfaces: list[str] = Field(..., description="Key interfaces or dependencies")
+class IngestionSummaryModel(BaseModel):
+    """Normalized intake summary from user's initial product idea."""
+    project_title: str = Field(..., description="Project name")
+    domain: str = Field(..., description="Business domain")
+    project_purpose: str = Field(..., description="What the system achieves")
+    target_users: list[Any] | str | Any = Field(default=[], description="Primary user types")
+    suggested_actors: list[Any] | str | Any = Field(default=[], description="System actors/roles")
+    platform_needs: list[Any] | str | Any = Field(default=[], description="Delivery platforms")
+    success_criteria: list[Any] | str | Any = Field(default=[], description="Success criteria")
+    architecture_summary: str = Field(default="", description="High-level architecture")
+    components: list[Any] | str | Any = Field(default=[], description="Major components")
+    core_flows: list[Any] | str | Any = Field(default=[], description="Core user workflows")
+    data_entities: list[Any] | str | Any = Field(default=[], description="Core data entities")
+    external_interfaces: list[Any] | str | Any = Field(default=[], description="External integrations")
+    constraints: list[Any] | str | Any = Field(default=[], description="Known constraints")
+    assumptions: list[Any] | str | Any = Field(default=[], description="Key assumptions")
 
 
-class DataEntityDefinition(BaseModel):
-    """A core data entity with key fields."""
-    name: str = Field(..., description="Entity name")
-    description: str = Field(..., description="Entity purpose")
-    key_fields: list[str] = Field(..., description="Key fields or attributes")
+class ClarificationQuestionModel(BaseModel):
+    """A targeted follow-up question."""
+    category: str = Field(..., description="Question category")
+    group: int = Field(..., description="Group index 0-3")
+    question: str = Field(..., description="The question itself")
+    suggested_options: list[str] = Field(default_factory=list, description="2-3 example answers")
+    rationale: str = Field(..., description="Why we need this info")
 
 
-class ExternalInterfaceDefinition(BaseModel):
-    """An external interface or integration."""
-    name: str = Field(..., description="Interface or integration name")
-    purpose: str = Field(..., description="Why this interface is used")
-    protocol: str = Field(..., description="Protocol or integration type")
-    data_format: str = Field(..., description="Data format or payload type")
+class QuestionPlanModel(BaseModel):
+    """Plan: list of question topics for a group."""
+    topics: list[str] = Field(..., description="2-3 question topics")
 
 
-class Section2OverallDescription(BaseModel):
-    """SRS Section 2: Product Overview (Blueprint)."""
-    system_purpose: str = Field(..., description="System purpose and outcome")
-    target_users: list[str] = Field(..., description="Primary user types")
-    architecture_summary: str = Field(..., description="Architecture summary")
-    components: list[ComponentDefinition] = Field(
-        ..., description="Major components and responsibilities"
-    )
-    core_flows: list[CoreFlow] = Field(..., description="Core user flows")
-    data_entities: list[DataEntityDefinition] = Field(
-        ..., description="Core data entities"
-    )
-    external_interfaces: list[ExternalInterfaceDefinition] = Field(
-        ..., description="External APIs, services, or systems"
-    )
-    constraints: list[str] = Field(..., description="Known constraints")
-    assumptions: list[str] = Field(..., description="Key assumptions")
+class ElicitationQuestionListModel(BaseModel):
+    """List of elicitation questions for a group."""
+    questions: list[ClarificationQuestionModel] = Field(..., description="Questions for this group")
 
 
-class RequirementItem(BaseModel):
-    """A concise requirement with acceptance criteria."""
-    requirement_id: str = Field(..., description="Requirement ID (e.g., F-001, SE-002)")
-    title: str = Field(..., description="Short requirement title")
-    statement: str = Field(..., description="Requirement statement")
-    acceptance_criteria: str = Field(..., description="Measurable acceptance criteria")
+class OutlineItemModel(BaseModel):
+    """A proposed SRS outline section."""
+    section_id: str = Field(..., description="Section identifier (e.g., 1, 2.1, 3.2)")
+    title: str = Field(..., description="Section title")
+    description: str = Field(..., description="What goes in this section")
+    included: bool = Field(default=True, description="Should this section be included?")
+    rationale: str = Field(..., description="Why include or exclude")
+    subsection_suggestions: list[str] = Field(default_factory=list, description="Suggested subsections")
+    user_notes: str = Field(default="", description="User feedback")
 
 
-class Section3FunctionalOutput(BaseModel):
-    """Section 3.2 Functional requirements."""
-    functional_requirements: list[RequirementItem] = Field(
-        ..., description="Functional requirement items"
-    )
+class OutlineListModel(BaseModel):
+    """List of outline items."""
+    outline_items: list[OutlineItemModel] = Field(..., description="All outline sections")
 
 
-class Section3NonFunctionalOutput(BaseModel):
-    """Section 3.3 Non-functional requirements."""
-    non_functional_requirements: list[RequirementItem] = Field(
-        ..., description="Non-functional requirement items"
-    )
+# ─────────────────────────────────────────────────────────────────────────────
+# Helper Functions
+# ─────────────────────────────────────────────────────────────────────────────
 
 
-class Section3InterfaceOutput(BaseModel):
-    """Section 3.1 External interface requirements."""
-    interface_requirements: list[RequirementItem] = Field(
-        ..., description="External interface requirement items"
-    )
-
-
-class VerificationEntry(BaseModel):
-    """A single entry in the verification matrix linking requirement to test."""
-    requirement_id: str = Field(..., description="Requirement ID being verified")
-    test_case: str = Field(..., description="Test case or verification method")
-    acceptance_criteria: str = Field(..., description="How to determine if requirement is met")
-
-
-class Section4Verification(BaseModel):
-    """SRS Section 4: Verification Matrix."""
-    title: str = Field(default="4.0 Verification Matrix", description="Section title")
-    description: str = Field(..., description="Overview of verification approach")
-    verification_entries: list[VerificationEntry] = Field(
-        ..., description="Matrix of requirements to test cases"
-    )
-
-
-class InitialElicitation(BaseModel):
-    """Initial requirements elicitation output."""
-    project_title: str = Field(..., description="Concise project title")
-    project_purpose: str = Field(..., description="Purpose and goals of the project")
-    target_users: list[str] = Field(..., description="Primary users or personas")
-    success_criteria: list[str] = Field(..., description="Project success criteria")
-    architecture_summary: str = Field(..., description="High-level architecture summary")
-    components: list[str] = Field(..., description="Main system components")
-    core_flows: list[CoreFlow] = Field(..., description="Core user flows")
-    data_entities: list[str] = Field(..., description="Core data entities")
-    external_interfaces: list[str] = Field(..., description="External APIs or services")
-    constraints: list[str] = Field(default_factory=list, description="Known constraints")
-    assumptions: list[str] = Field(default_factory=list, description="Key assumptions")
-    requirement_candidates: list[str] = Field(
-        default_factory=list, description="High-value requirement candidates"
-    )
-    glossary_terms: list[GlossaryEntry] = Field(
-        default_factory=list, description="Initial glossary terms"
-    )
-
-# ── Shared HTTP clients ────────────────────────────────────────────────────────
-# langchain_openai's internal _cached_async_httpx_client uses @lru_cache keyed
-# only by (base_url, timeout), ignoring event-loop identity.  When a cached
-# AsyncClient is reused across different event loops the connections from the
-# old (now-closed) loop cause "RuntimeError: Event loop is closed", which the
-# openai SDK re-raises as "APIError: Network connection lost".
-# Passing explicit clients here bypasses that cache entirely.
-# See: https://github.com/langchain-ai/langchain/issues/35783
-_async_http_client = httpx.AsyncClient()
-_sync_http_client = httpx.Client()
-
-# ── LLM factory ───────────────────────────────────────────────────────────────
-
-
-def _get_llm(temperature: float = 0.2, streaming: bool = True) -> ChatOpenAI:
-    """Return a ChatOpenAI instance pointed at OpenRouter."""
-    settings = get_settings()
-    return ChatOpenAI(
-        base_url=settings.openrouter_base_url,
-        api_key=settings.openrouter_api_key,
+async def _llm_invoke_structured(
+    system_prompt: str,
+    output_model: type[BaseModel],
+    user_message: str | None = None,
+    chat_history: list | None = None,
+    temperature: float = 0.5,
+    max_tokens: int | None = None,
+    max_retries: int = 2,
+) -> BaseModel:
+    """
+    Invoke LLM with structured output binding.
+    
+    Returns a Pydantic model instance matching the output_model schema.
+    Includes retry logic for validation errors and dumps raw output on failure.
+    
+    Args:
+        system_prompt: System message
+        output_model: Pydantic model to structure the response
+        user_message: Optional user message
+        chat_history: Optional message history
+        temperature: Sampling temperature
+        max_tokens: Maximum tokens for response (None = unlimited)
+        max_retries: Number of retries on validation failure
+    """
+    llm = ChatOpenAI(
         model=settings.model_name,
         temperature=temperature,
-        streaming=streaming,
-        timeout=45,  # fail fast on stalled requests; retry loop handles recovery
-        default_headers={
-            "HTTP-Referer": settings.openrouter_referer,
-            "X-Title": "SRS Generator",
-        },
-        http_async_client=_async_http_client,
-        http_client=_sync_http_client,
+        base_url=settings.openrouter_base_url,
+        api_key=settings.openrouter_api_key,
+        max_tokens=max_tokens or 8192,
     )
 
+    # Bind structured output
+    llm_structured = llm.with_structured_output(output_model, method="json_mode")
 
-async def _llm_invoke_with_retry(
-    llm: ChatOpenAI,
-    messages: list[Any],
-    *,
-    node_name: str,
-    max_attempts: int = 3,
-) -> Any:
-    """Invoke the LLM with bounded retries for transient transport/API failures."""
-    last_error: Exception | None = None
+    messages = []
 
-    for attempt in range(1, max_attempts + 1):
+    # Add system prompt
+    if system_prompt:
+        messages.append(SystemMessage(content=system_prompt))
+
+    # Add conversation history
+    if chat_history:
+        messages.extend(chat_history)
+
+    # Add current user message
+    if user_message:
+        messages.append(HumanMessage(content=user_message))
+
+    last_error = None
+    for attempt in range(max_retries + 1):
         try:
-            return await llm.ainvoke(messages)
-        except (openai.APIError, httpx.TransportError, httpx.TimeoutException) as exc:
-            last_error = exc
-            if attempt >= max_attempts:
-                logger.exception(
-                    "LLM call failed after %d attempts in node '%s'.",
-                    max_attempts,
-                    node_name,
+            response = await llm_structured.ainvoke(messages)
+            return response
+        except Exception as e:
+            last_error = e
+            error_str = str(e)
+            
+            # Try to extract the actual JSON that failed validation
+            if "input_value=" in error_str:
+                try:
+                    # Find the truncated JSON in the error message
+                    start = error_str.find("input_value='") + len("input_value='")
+                    end = error_str.find("'", start)
+                    truncated_json = error_str[start:end] if end > start else ""
+                    
+                    # Dump to file for debugging
+                    debug_dir = Path("debug_outputs")
+                    debug_dir.mkdir(exist_ok=True)
+                    
+                    import time
+                    timestamp = int(time.time() * 1000)
+                    debug_file = debug_dir / f"llm_response_{timestamp}_{output_model.__name__}.json"
+                    
+                    with open(debug_file, "w") as f:
+                        f.write(truncated_json)
+                    
+                    logger.error(f"JSON validation failed. Raw output dumped to: {debug_file}")
+                except Exception as dump_error:
+                    logger.error(f"Could not dump JSON: {dump_error}")
+            
+            if attempt < max_retries:
+                logger.warning(
+                    f"Structured output failed (attempt {attempt + 1}/{max_retries + 1}): {error_str[:200]}. "
+                    f"Retrying with adjusted temperature..."
                 )
+                # Retry with slightly lower temperature for more deterministic output
+                llm = ChatOpenAI(
+                    model=settings.model_name,
+                    temperature=max(0.1, temperature - 0.1),
+                    base_url=settings.openrouter_base_url,
+                    api_key=settings.openrouter_api_key,
+                    max_tokens=max_tokens or 8192,
+                )
+                llm_structured = llm.with_structured_output(output_model, method="json_mode")
+            else:
+                logger.error(f"Structured output failed after {max_retries + 1} attempts: {error_str}")
                 raise
 
-            backoff_seconds = float(2 ** (attempt - 1))
-            logger.warning(
-                "Transient LLM error in node '%s' (attempt %d/%d): %s. Retrying in %.1fs.",
-                node_name,
-                attempt,
-                max_attempts,
-                exc,
-                backoff_seconds,
-            )
-            await asyncio.sleep(backoff_seconds)
-
-    if last_error is not None:
-        raise last_error
-    raise RuntimeError("Unexpected retry state in _llm_invoke_with_retry.")
+    # Should not reach here, but just in case
+    raise last_error
 
 
-# ── Helper: extract text from last AI response ────────────────────────────────
-
-
-def _ai_text(response: Any) -> str:
-    if isinstance(response, AIMessage):
-        return str(response.content)
-    return str(response)
-
-
-def _parse_json(text: str) -> Any:
-    """Extract the first JSON object or array from a string."""
-    # Strip markdown fences if present
-    text = re.sub(r"```(?:json)?\s*", "", text).strip().rstrip("`").strip()
-    try:
-        return json.loads(text)
-    except Exception:
-        # Fallback: extract first {...} or [...] substring
-        m = re.search(r"(\{[\s\S]*\}|\[[\s\S]*\])", text)
-        if not m:
-            raise
-        return json.loads(m.group(0))
-
-
-def _unwrap_structured_response(response: Any, *, model_class: type | None = None, parser=None) -> Any:
-    """Normalize structured responses from model wrappers.
-
-    Returns a Python object (dict/list) when possible.
-    """
-    # Check for .parsed attribute from LangChain structured output wrapper
-    if hasattr(response, "parsed") and response.parsed is not None:
-        response = response.parsed
-
-    # If the model returned a Pydantic instance already
-    try:
-        from pydantic import BaseModel as _BaseModel
-
-        if model_class is not None and isinstance(response, model_class):
-            return response.dict()
-        if isinstance(response, _BaseModel):
-            return response.dict()
-    except Exception:
-        pass
-
-    # If it's already a dict/list, return as-is
-    if isinstance(response, (dict, list)):
-        return response
-
-    # If a parser is supplied and has parse(), try that first
-    if parser is not None:
-        try:
-            parsed = parser.parse(_ai_text(response))
-            # parser.parse may return dict-like or a stringified JSON
-            if isinstance(parsed, (dict, list)):
-                return parsed
-            if isinstance(parsed, str):
-                return _parse_json(parsed)
-        except Exception:
-            pass
-
-    # Otherwise, try to coerce text -> JSON
-    text = _ai_text(response)
-    try:
-        return _parse_json(text)
-    except Exception:
-        # No structured content available
-        raise
-
-
-def _normalize_questions(
-    raw_questions: Any,
-    *,
-    source: str = "evaluator",
-    project_scope: str = "complex",
-    draft_context: str = "",
-) -> list[ClarificationQuestion]:
-    """Normalize evaluator and QA gap output to a structured question shape."""
-    normalized: list[ClarificationQuestion] = []
-
-    if not isinstance(raw_questions, list):
-        return normalized
-
-    for item in raw_questions:
-        normalized_item = _normalize_clarification_question(
-            item,
-            source=source,
-            project_scope=project_scope,
-            draft_context=draft_context,
-        )
-        if normalized_item is not None:
-            normalized.append(normalized_item)
-
-    return normalized
-
-
-def _clarification_topic(question: str, category: str, rationale: str) -> str:
-    haystack = f"{category} {question} {rationale}".lower()
-
-    topic_keywords: dict[str, tuple[str, ...]] = {
-        "success": (
-            "success metric",
-            "success criteria",
-            "win condition",
-            "win/lose",
-            "win or lose",
-            "measure success",
-            "successful",
-            "success",
-            "goal",
-            "complete",
-            "completion",
-            "result",
-            "done",
-        ),
-        "workflow": ("workflow", "flow", "steps", "sequence", "process"),
-        "scope": ("scope", "out of scope", "in scope", "boundary", "include"),
-        "data": ("data", "entity", "business rule", "rules", "fields"),
-        "edge": ("edge case", "unhappy path", "error", "failure", "exception"),
-        "integration": ("integration", "external system", "connect", "depends on"),
-        "quality": ("specificity", "measurable", "testable", "acceptance", "vague"),
-        "performance": ("performance", "latency", "throughput", "response time", "ms", "milliseconds", "p95", "p99", "fps", "frame"),
-    }
-
-    for topic, keywords in topic_keywords.items():
-        if any(keyword in haystack for keyword in keywords):
-            return topic
-
-    return "other"
-
-
-def _option_matches_topic(option: str, topic: str) -> bool:
-    if topic == "other":
-        return True
-
-    keyword_map: dict[str, tuple[str, ...]] = {
-        "success": ("success", "goal", "complete", "completion", "win", "lose", "outcome"),
-        "workflow": ("flow", "step", "steps", "sequence", "stage", "phase", "start", "next", "end", "finish"),
-        "scope": ("scope", "include", "exclude", "version", "release", "phase", "v1"),
-        "data": ("data", "record", "records", "field", "fields", "entity", "entities", "info", "state", "track", "store"),
-        "edge": ("error", "failure", "exception", "retry", "fallback", "recover", "issue", "problem"),
-        "integration": ("integrat", "external", "connect", "dependency", "third-party", "api", "service"),
-        "quality": ("measurable", "threshold", "acceptance", "testable", "metric", "specific"),
-        "performance": ("performance", "latency", "throughput", "response", "ms", "milliseconds", "p95", "p99", "fps", "frame"),
-    }
-
-    lowered = option.lower()
-    return any(keyword in lowered for keyword in keyword_map.get(topic, ()))
-
-
-def _rewrite_clarification_question_text(
-    question: str,
-    *,
-    source: str,
-    project_scope: str,
-    draft_context: str,
-    category: str,
-    rationale: str,
+async def _llm_invoke_text(
+    system_prompt: str,
+    user_message: str | None = None,
+    chat_history: list | None = None,
+    temperature: float = 0.7,
 ) -> str:
-    cleaned = re.sub(r"\s+", " ", str(question or "")).strip()
-    if not cleaned:
-        return cleaned
-    return cleaned
-
-
-def _is_helpful_suggested_option(option: str, question: str, topic: str) -> bool:
-    cleaned = re.sub(r"\s+", " ", str(option or "")).strip(" \t\n\r-•").strip()
-    if len(cleaned) < 8:
-        return False
-
-    lowered = cleaned.lower()
-    if lowered in {"yes", "no", "maybe", "other", "n/a", "not sure", "unsure", "it depends", "be successful", "success"}:
-        return False
-
-    if lowered.rstrip(".!?") in {"be successful"}:
-        return False
-
-    if lowered.startswith("improve") or lowered.startswith("be more") or lowered.startswith("clarify"):
-        return False
-
-    if lowered.endswith("?"):
-        return False
-
-    question_haystack = str(question or "").lower()
-    if "success" in question_haystack and any(token in lowered for token in {"success metric", "win condition"}):
-        return False
-
-    if not _option_matches_topic(cleaned, topic):
-        return False
-
-    return bool(re.search(r"[a-z0-9]", cleaned))
-
-
-def _build_suggested_options(
-    topic: str,
-    *,
-    question: str,
-    project_scope: str,
-    draft_context: str,
-) -> list[str]:
-    if topic == "success":
-        return [
-            "Success means the user completes the primary goal.",
-            "Success means a measurable target is reached (count or threshold).",
-            "Success means the workflow ends with a clear completion state.",
-        ]
-
-    if topic == "workflow":
-        return [
-            "Start with a brief setup, then the core interaction loop, then a completion step.",
-            "A single continuous flow until the user completes the goal or exits.",
-            "Multiple stages with a clear transition or checkpoint between each stage.",
-        ]
-
-    if topic == "scope":
-        return [
-            "Keep only the core version for launch.",
-            "Include the core version plus a few extras.",
-            "Plan for a fuller first version with more features.",
-        ]
-
-    if topic == "data":
-        return [
-            "Keep the stored data minimal and only save what is needed.",
-            "Store the main records plus a few supporting details.",
-            "Track detailed state and history for later review.",
-        ]
-
-    if topic == "edge":
-        return [
-            "Show a simple error message and let the user retry.",
-            "Pause the flow and ask the user what to do next.",
-            "Recover automatically when possible and explain the fallback.",
-        ]
-
-    if topic == "integration":
-        return [
-            "Keep it standalone with no external connections.",
-            "Connect to one essential external service.",
-            "Allow optional integrations later.",
-        ]
-
-    if topic == "quality":
-        return [
-            "Make the requirement measurable with a concrete threshold.",
-            "State a clear pass/fail acceptance condition.",
-            "Add a specific example or technical detail that can be tested.",
-        ]
-
-    if topic == "performance":
-        return [
-            "Define a specific maximum latency for critical operations (e.g., X ms per update).",
-            "Set a percentile target such as P95 response time under typical load.",
-            "Note acceptable ranges for v1 and revisit exact thresholds later.",
-        ]
-
-    return [
-        "Keep the simplest version that covers the core use case.",
-        "Include a few optional behaviors or extras.",
-        "Leave room to refine the rule after the first version.",
-    ]
-
-
-def _normalize_suggested_options(
-    question: str,
-    category: str,
-    rationale: str,
-    suggested_options: list[str],
-    *,
-    source: str,
-    project_scope: str,
-    draft_context: str,
-) -> list[str]:
-    normalized: list[str] = []
-    topic = _clarification_topic(question, category, rationale)
-
-    for option in suggested_options:
-        cleaned = re.sub(r"\s+", " ", str(option or "")).strip()
-        if not cleaned:
-            continue
-        if _is_helpful_suggested_option(cleaned, question, topic):
-            normalized.append(cleaned)
-    return normalized[:5]
-
-
-def _normalize_clarification_question(
-    item: Any,
-    *,
-    source: str,
-    project_scope: str,
-    draft_context: str,
-) -> ClarificationQuestion | None:
-    if isinstance(item, str):
-        question = item.strip()
-        if not question:
-            return None
-        category = "General"
-        rationale = "This detail is required to complete the specification."
-        suggested_options: list[str] = []
-    elif isinstance(item, dict):
-        question = str(item.get("question", "")).strip()
-        if not question:
-            return None
-        category = str(item.get("category", "General")).strip() or "General"
-        rationale = str(item.get("rationale", "")).strip() or "This detail is required to complete the specification."
-        suggested_options = item.get("suggested_options", []) if isinstance(item.get("suggested_options", []), list) else []
-    else:
-        return None
-
-    normalized_question = _rewrite_clarification_question_text(
-        question,
-        source=source,
-        project_scope=project_scope,
-        draft_context=draft_context,
-        category=category,
-        rationale=rationale,
-    )
-    normalized_options = _normalize_suggested_options(
-        normalized_question,
-        category,
-        rationale,
-        [str(option).strip() for option in suggested_options if str(option).strip()],
-        source=source,
-        project_scope=project_scope,
-        draft_context=draft_context,
+    """Invoke LLM without structured output (returns plain text)."""
+    llm = ChatOpenAI(
+        model=settings.model_name,
+        temperature=temperature,
+        base_url=settings.openrouter_base_url,
+        api_key=settings.openrouter_api_key,
     )
 
-    return ClarificationQuestion(
-        category=category,
-        question=normalized_question,
-        suggested_options=normalized_options,
-        rationale=rationale,
-    )
+    messages = []
+
+    if system_prompt:
+        messages.append(SystemMessage(content=system_prompt))
+
+    if chat_history:
+        messages.extend(chat_history)
+
+    if user_message:
+        messages.append(HumanMessage(content=user_message))
+
+    response = await llm.ainvoke(messages)
+    return response.content
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 1: Ingestion
+# ─────────────────────────────────────────────────────────────────────────────
 
-def _filter_major_questions(questions: list[ClarificationQuestion], scope: str = "complex") -> list[ClarificationQuestion]:
-    """Keep only logic/direction-focused questions that clarify project goals and workflows.
-    
-    Filters out architecture, deployment, auth, compliance questions regardless of scope,
-    since the new evaluator prompt focuses on logic and direction instead.
+
+async def ingest_and_map_domain(state: SRSState) -> dict:
     """
-    return [item for item in questions if _is_high_impact_question(item)]
-
-
-def _is_high_impact_question(item: ClarificationQuestion, exclude_enterprise: bool = False) -> bool:
-    category = str(item.get("category", "")).strip().lower()
-    question = str(item.get("question", "")).strip().lower()
-    rationale = str(item.get("rationale", "")).strip().lower()
-
-    # Keywords that indicate architecture/deployment questions (not logic/direction)
-    # These should be filtered regardless of scope since the new evaluator prompt forbids them
-    forbidden_keywords = {
-        "performance", "peak load", "scalability", "concurrent", "throughput",
-        "deployment", "hosting", "cloud", "on-prem", "serverless",
-        "availability", "uptime", "sla", "region",
-        "compliance", "gdpr", "hipaa", "pci",
-        "auth", "oauth", "sso", "saml", "rbac",
-        "tech stack", "architecture", "infrastructure",
-    }
-    forbidden_categories = {
-        "technology", "tech stack", "stack", "architecture",
-        "deployment", "hosting", "infrastructure",
-        "authentication", "authorization", "identity",
-        "security", "privacy", "compliance", "legal",
-        "integrations", "integration",
-        "scalability", "performance", "availability", "sla",
-    }
+    Phase 1: Parse user's informal product description and extract domain mapping.
     
-    haystack = f"{category} {question} {rationale}"
-    # Reject if any forbidden keyword or category is found
-    if category in forbidden_categories or any(keyword in haystack for keyword in forbidden_keywords):
-        return False
-    
-    # Accept the question (it's logic/direction focused)
-    return True
+    Uses structured output to ensure IngestionSummaryModel is returned.
+    """
+    logger.info("=== INGESTION PHASE ===")
 
+    # Get user's initial message
+    user_messages = [msg for msg in state.get("chat_history", []) if isinstance(msg, HumanMessage)]
+    if not user_messages:
+        return {"current_phase": "ingestion", "ingestion_summary": {}}
 
-def _normalize_project_title(value: Any) -> str:
-    """Normalize a candidate project title into a concise single-line string."""
-    if not isinstance(value, str):
-        return ""
+    initial_input = user_messages[0].content
 
-    normalized = re.sub(r"\s+", " ", value).strip()
-    if not normalized:
-        return ""
-    return normalized[:120]
-
-
-def _extract_project_title(parsed_payload: Any) -> str:
-    """Read project title from elicitor JSON payload with reasonable fallbacks."""
-    if not isinstance(parsed_payload, dict):
-        return ""
-
-    direct_title = _normalize_project_title(parsed_payload.get("project_title"))
-    if direct_title:
-        return direct_title
-
-    alt_title = _normalize_project_title(parsed_payload.get("project_name"))
-    if alt_title:
-        return alt_title
-
-    return ""
-
-
-def _tokenize_for_overlap(text: str) -> list[str]:
-    return re.findall(r"[a-z0-9]+", text.lower())
-
-
-def _retrieve_draft_context(
-    sections: dict[str, str],
-    *,
-    target_key: str,
-    query: str,
-    top_k: int = 3,
-) -> str:
-    """Retrieve top-k relevant snippets from existing draft sections using lexical overlap."""
-    query_tokens = _tokenize_for_overlap(query)
-    if not query_tokens:
-        return ""
-
-    query_counts = Counter(query_tokens)
-    scored_chunks: list[tuple[float, str, str]] = []
-
-    for section_key, section_content in sections.items():
-        if section_key == target_key:
-            continue
-        text = str(section_content or "").strip()
-        if not text:
-            continue
-
-        chunks = [chunk.strip() for chunk in re.split(r"\n{2,}", text) if chunk.strip()]
-        if not chunks:
-            chunks = [text]
-
-        for chunk in chunks:
-            chunk_tokens = _tokenize_for_overlap(chunk)
-            if not chunk_tokens:
-                continue
-            chunk_counts = Counter(chunk_tokens)
-            overlap = sum(min(query_counts[token], chunk_counts[token]) for token in query_counts)
-            if overlap <= 0:
-                continue
-
-            score = overlap / max(8, len(chunk_tokens))
-            scored_chunks.append((score, section_key, chunk))
-
-    scored_chunks.sort(key=lambda item: item[0], reverse=True)
-    top = scored_chunks[:top_k]
-    if not top:
-        return ""
-
-    return "\n\n".join(
-        f"[From {section_key}]\n{chunk[:1400]}" for _, section_key, chunk in top
+    # Call LLM with structured output
+    response = await _llm_invoke_structured(
+        system_prompt=prompts.INGESTION_SYSTEM,
+        output_model=IngestionSummaryModel,
+        user_message=initial_input,  # Ingestion is comprehensive
     )
 
+    # Convert Pydantic model to dict
+    ingestion_data = response.model_dump(mode="json")
 
-# ── Node 1: Retrieve RAG context ──────────────────────────────────────────────
+    logger.info(f"Ingestion summary extracted: {ingestion_data.get('domain', 'unknown')}")
 
-
-async def retrieve_rag_context(state: SRSState) -> dict:
-    """Query ChromaDB with the latest user message to surface regulatory context."""
-    messages = state.get("chat_history", [])
-    query = ""
-    for msg in reversed(messages):
-        if isinstance(msg, HumanMessage):
-            query = str(msg.content)
-            break
-
-    if not query:
-        return {"rag_context": ""}
-
-    context = retrieve(query, n_results=5)
-    logger.debug("RAG retrieved %d chars for query: %.80s …", len(context), query)
-    return {"rag_context": context}
-
-
-# ── Scope Detection ───────────────────────────────────────────────────────────
-
-
-def _detect_project_scope(elicitation_data: str, user_input: str) -> str:
-    """
-    Detect project scope (simple, medium, or complex) from elicitation data and user input.
-    
-    Simple projects: hobby/personal, single user, offline/local, no auth, no integrations
-    Complex projects: enterprise, multi-user, distributed, auth required, integrations
-    Medium: everything in between
-    """
-    combined_text = f"{elicitation_data} {user_input}".lower()
-    
-    # Simple project indicators
-    simple_indicators = {
-        "game", "hobby", "personal project", "script", "tool", "weekend",
-        "local", "offline", "single user", "standalone", "simple", "basic",
-        "learning", "tutorial", "poc", "prototype", "demo",
-    }
-    
-    # Complex project indicators  
-    complex_indicators = {
-        "enterprise", "multi-user", "distributed", "cloud", "saas", "platform",
-        "auth", "oauth", "sso", "api", "integration", "payment", "compliance",
-        "gdpr", "hipaa", "pci", "scaling", "microservice", "database", "migration",
-        "production", "customer", "business", "commercial",
-    }
-    
-    simple_count = sum(1 for indicator in simple_indicators if indicator in combined_text)
-    complex_count = sum(1 for indicator in complex_indicators if indicator in combined_text)
-    
-    # Determine scope based on indicator counts
-    if simple_count >= 2 or (simple_count >= 1 and complex_count == 0):
-        return "simple"
-    elif complex_count >= 3 or (complex_count >= 2 and simple_count == 0):
-        return "complex"
-    else:
-        return "medium"
-
-
-# ── Node 2: Elicit requirements ───────────────────────────────────────────────
-
-
-async def elicit_requirements(state: SRSState) -> dict:
-    """Parse user input and produce a preliminary structured outline."""
-    llm = _get_llm(temperature=0.1)
-
-    context_block = ""
-    if state.get("rag_context"):
-        context_block = (
-            "\n\nRELEVANT REGULATORY / STANDARDS CONTEXT:\n" + state["rag_context"]
-        )
-
-    messages = [
-        SystemMessage(content=prompts.ELICITOR_SYSTEM),
-        *state.get("chat_history", []),
-    ]
-    if context_block:
-        messages.append(HumanMessage(content=context_block))
-
-    project_title = state.get("project_title", "")
-    buffer = ""
-
-    # Prefer using the model's `with_structured_output` helper when available
-    if hasattr(llm, "with_structured_output"):
-        try:
-            mod = getattr(llm.__class__, "__module__", "")
-            if not mod.startswith("unittest.mock"):
-                structured = llm.with_structured_output(InitialElicitation)
-                response = await structured.ainvoke(messages)
-                try:
-                    parsed = _unwrap_structured_response(response, model_class=InitialElicitation)
-                except Exception:
-                    parsed = None
-
-                if isinstance(parsed, dict):
-                    # Format structured response into JSON buffer
-                    buffer_dict = {
-                        "project_title": parsed.get("project_title", ""),
-                        "project_purpose": parsed.get("project_purpose", ""),
-                        "target_users": parsed.get("target_users", []),
-                        "success_criteria": parsed.get("success_criteria", []),
-                        "architecture_summary": parsed.get("architecture_summary", ""),
-                        "components": parsed.get("components", []),
-                        "core_flows": parsed.get("core_flows", []),
-                        "data_entities": parsed.get("data_entities", []),
-                        "external_interfaces": parsed.get("external_interfaces", []),
-                        "constraints": parsed.get("constraints", []),
-                        "assumptions": parsed.get("assumptions", []),
-                        "requirement_candidates": parsed.get("requirement_candidates", []),
-                        "glossary_terms": parsed.get("glossary_terms", []),
-                    }
-                    buffer = json.dumps(buffer_dict, indent=2)
-                    project_title = _extract_project_title(parsed)
-        except Exception:
-            pass
-
-    # Fallback to text-based LLM call if structured output failed
-    if not buffer:
-        response = await _llm_invoke_with_retry(
-            llm, messages, node_name="elicit_requirements"
-        )
-        raw = _ai_text(response)
-        try:
-            parsed = _parse_json(raw)
-            buffer = json.dumps(parsed, indent=2)
-            extracted_title = _extract_project_title(parsed)
-            if extracted_title:
-                project_title = extracted_title
-        except (json.JSONDecodeError, ValueError):
-            buffer = raw
-
-    # Extract user input for scope detection
-    user_input = ""
-    for msg in state.get("chat_history", []):
-        if isinstance(msg, HumanMessage):
-            user_input = str(msg.content)
-            break
-
-    # Detect project scope
-    project_scope = _detect_project_scope(buffer, user_input)
-    logger.info("Detected project scope: %s", project_scope)
+    # Format for display
+    summary_text = json.dumps(ingestion_data, indent=2)
 
     return {
-        "document_buffer": buffer,
-        "project_title": project_title,
-        "project_scope": project_scope,
-        "chat_history": [AIMessage(content=f"Elicitation result:\n{buffer}")],
+        "current_phase": "elicitation",
+        "ingestion_summary": ingestion_data,
+        "pending_group_index": 0,
+        "chat_history": state["chat_history"]
+        + [AIMessage(content=f"**✓ Ingestion Complete**\n\nDomain: **{ingestion_data.get('domain', 'Unknown')}**\n"
+                           f"Project: {ingestion_data.get('project_title', '')}\n"
+                           f"Key actors: {', '.join(ingestion_data.get('suggested_actors', []))}")],
     }
 
 
-# ── Node 3: Evaluate completeness ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 2: Elicitation (One Question at a Time)
+# ─────────────────────────────────────────────────────────────────────────────
 
 
-async def evaluate_completeness(state: SRSState) -> dict:
-    """Identify unresolved major decisions after the initial draft is produced."""
-    if state.get("major_decisions_asked", False):
-        return {"missing_context": [], "qa_gaps": []}
+async def generate_elicitation_plan(state: SRSState) -> dict:
+    """
+    Generate a question plan (list of 2-3 topics) for current group.
+    
+    This plan is lightweight and helps guide single-question generation.
+    If all questions in current group are done, advance to next group.
+    """
+    group_index = state.get("pending_group_index", 0)
+    question_index = state.get("elicitation_question_index", 0)
+    question_plan = state.get("elicitation_question_plan", [])
 
-    llm = _get_llm(temperature=0.0)
+    # If we've asked all questions in current plan, move to next group
+    if question_index >= len(question_plan) and question_index > 0:
+        group_index += 1
+        if group_index >= 4:
+            return {"pending_group_index": 4, "elicitation_question_index": 0}
 
-    sections = state.get("sections", {})
-    current_draft = "\n\n".join(
-        filter(
-            None,
-            [
-                sections.get("s1", ""),
-                sections.get("s2", ""),
-                sections.get("s3_iface", ""),
-                sections.get("s3_fr", ""),
-                sections.get("s3_nfr", ""),
-                sections.get("s4", ""),
-            ],
-        )
-    ).strip()
+    if group_index >= 4:
+        return {"pending_group_index": 4, "elicitation_question_index": 0}
 
-    if not current_draft:
-        current_draft = state.get("document_buffer", "(no draft yet)")
+    ingestion = state.get("ingestion_summary", {})
 
-    # Get project scope for evaluator context (default to "complex" for backward compatibility)
-    project_scope = state.get("project_scope", "complex")
-
-    user_prompt = (
-        "Current SRS draft (may be partial):\n"
-        f"{current_draft[:14000]}"
-        f"\n\nConversation history covers {len(state.get('chat_history', []))} messages."
-        "\n\nIdentify only high-impact unanswered decisions using the required JSON format."
-    )
-
-    # Prefer structured JSON output from evaluator
-    eval_schemas = [
-        ResponseSchema(name="missing", description="List of unanswered high-impact questions (array of objects)"),
+    # Select prompt for current group
+    plan_prompts = [
+        prompts.ELICITATION_PLAN_0_SYSTEM,
+        prompts.ELICITATION_PLAN_1_SYSTEM,
+        prompts.ELICITATION_PLAN_2_SYSTEM,
+        prompts.ELICITATION_PLAN_3_SYSTEM,
     ]
-    eval_parser = StructuredOutputParser.from_response_schemas(eval_schemas)
-    eval_fmt = eval_parser.get_format_instructions()
-
-    messages = [
-        SystemMessage(content=prompts.EVALUATOR_SYSTEM.format(project_scope=project_scope)),
-        HumanMessage(content=user_prompt),
+    
+    group_titles = [
+        "User Roles & Flows",
+        "Functional Boundaries",
+        "Non-Functional Requirements",
+        "Edge Cases & Risk Mitigation"
     ]
 
-    # Prefer model-level structured output when available
-    missing = []
-    if hasattr(llm, "with_structured_output"):
-        try:
-            try:
-                structured = llm.with_structured_output(eval_parser)
-            except Exception:
-                structured = llm.with_structured_output(eval_schemas)
-
-            # Avoid using mocks as real structured wrappers
-            mod = getattr(structured.__class__, "__module__", "")
-            if isinstance(structured, object) and mod.startswith("unittest.mock"):
-                raise RuntimeError("mocked structured wrapper; fallback")
-
-            resp = await structured.ainvoke(messages)
-            try:
-                parsed = _unwrap_structured_response(resp, parser=eval_parser)
-            except Exception:
-                parsed = None
-
-            if isinstance(parsed, dict):
-                missing_list = parsed.get("missing") or []
-            else:
-                # Try best-effort parsing of raw response
-                try:
-                    missing_list = _parse_json(_ai_text(resp)).get("missing", [])
-                except Exception:
-                    missing_list = []
-
-            missing = _normalize_questions(
-                missing_list,
-                source="evaluator",
-                project_scope=project_scope,
-                draft_context=current_draft,
-            )
-            missing = _filter_major_questions(missing, scope=project_scope)
-        except Exception:
-            # Structured wrapper unavailable or mocked; fall back to format-instruction flow
-            messages.append(HumanMessage(content=eval_fmt))
-            response = await _llm_invoke_with_retry(llm, messages, node_name="evaluate_completeness")
-
-            try:
-                parsed = eval_parser.parse(_ai_text(response))
-                missing_raw = parsed.get("missing")
-                if isinstance(missing_raw, str):
-                    missing_list = _parse_json(missing_raw)
-                else:
-                    missing_list = missing_raw or []
-
-                missing = _normalize_questions(
-                    missing_list,
-                    source="evaluator",
-                    project_scope=project_scope,
-                    draft_context=current_draft,
-                )
-            except Exception:
-                try:
-                    data = _parse_json(_ai_text(response))
-                    missing = _normalize_questions(
-                        data.get("missing", []),
-                        source="evaluator",
-                        project_scope=project_scope,
-                        draft_context=current_draft,
-                    )
-                except (json.JSONDecodeError, ValueError, AttributeError):
-                    logger.warning(
-                        "Evaluator returned non-JSON or unparsable structured output; treating as complete."
-                    )
-                    missing = []
-    else:
-        # Fallback: include format instructions and call normally
-        messages.append(HumanMessage(content=eval_fmt))
-        response = await _llm_invoke_with_retry(llm, messages, node_name="evaluate_completeness")
-
-        try:
-            parsed = eval_parser.parse(_ai_text(response))
-            missing_raw = parsed.get("missing")
-            # If the parser returned a JSON string, decode it
-            if isinstance(missing_raw, str):
-                missing_list = _parse_json(missing_raw)
-            else:
-                missing_list = missing_raw or []
-
-            missing = _normalize_questions(
-                missing_list,
-                source="evaluator",
-                project_scope=project_scope,
-                draft_context=current_draft,
-            )
-        except Exception:
-            # Fallback to legacy JSON parsing for environments without structured parser
-            try:
-                data = _parse_json(_ai_text(response))
-                missing = _normalize_questions(
-                    data.get("missing", []),
-                    source="evaluator",
-                    project_scope=project_scope,
-                    draft_context=current_draft,
-                )
-            except (json.JSONDecodeError, ValueError, AttributeError):
-                logger.warning("Evaluator returned non-JSON or unparsable structured output; treating as complete.")
-                missing = []
-
-    logger.info("Evaluator found %d gaps for scope '%s'.", len(missing), project_scope)
-    return {"missing_context": missing, "qa_gaps": []}
-
-
-# ── Node 4: Ask clarifying questions (HITL interrupt) ─────────────────────────
-
-
-async def ask_clarifying_questions(state: SRSState) -> dict:
-    """
-    Pause graph execution and surface clarifying questions to the user.
-
-    LangGraph's ``interrupt()`` serialises the current state to PostgreSQL and
-    yields control back to the FastAPI SSE stream.  Execution resumes when the
-    user provides answers via ``Command(resume=...)``.
-    """
-    missing = state.get("missing_context", [])
-    qa_gaps = state.get("qa_gaps", [])
-
-    combined_questions: list[ClarificationQuestion] = []
-    seen_questions: set[str] = set()
-    for item in [*missing, *qa_gaps]:
-        question_text = str(item.get("question", "")).strip()
-        if not question_text or question_text in seen_questions:
-            continue
-        seen_questions.add(question_text)
-        combined_questions.append(item)
-
-    if not combined_questions:
-        return {}
-
-    prompt_text = (
-        "I drafted an initial SRS using the best available information. "
-        "Please answer the clarification form so I can finalize it accurately."
+    system_prompt = plan_prompts[group_index].format(
+        ingestion_summary=json.dumps(ingestion, indent=2),
     )
 
-    # interrupt() raises GraphInterrupt internally - LangGraph catches it,
-    # saves state, and routes the payload back through the SSE stream.
-    payload = {
+    logger.info(f"Generating elicitation plan for group {group_index}: {group_titles[group_index]}")
+
+    # Get question plan (lightweight)
+    response = await _llm_invoke_structured(
+        system_prompt=system_prompt,
+        output_model=QuestionPlanModel,
+    )
+
+    topics = response.topics
+    logger.info(f"Plan for group {group_index}: {topics}")
+
+    return {
+        "pending_group_index": group_index,
+        "elicitation_question_plan": topics,
+        "elicitation_question_index": 0,
+    }
+
+
+async def generate_single_elicitation_question(state: SRSState) -> dict:
+    """
+    Generate a single elicitation question based on current plan topic.
+    
+    Ask one question, then interrupt for user response.
+    """
+    group_index = state.get("pending_group_index", 0)
+    question_index = state.get("elicitation_question_index", 0)
+    question_plan = state.get("elicitation_question_plan", [])
+    ingestion = state.get("ingestion_summary", {})
+
+    if question_index >= len(question_plan):
+        # All questions in this group asked, move to next group or outline
+        next_group_index = group_index + 1
+        if next_group_index >= 4:
+            return {"pending_group_index": 4}
+        else:
+            return {"pending_group_index": next_group_index}
+
+    topic = question_plan[question_index]
+
+    # Select prompt for current group
+    single_question_prompts = [
+        prompts.ELICITATION_SINGLE_QUESTION_0_SYSTEM,
+        prompts.ELICITATION_SINGLE_QUESTION_1_SYSTEM,
+        prompts.ELICITATION_SINGLE_QUESTION_2_SYSTEM,
+        prompts.ELICITATION_SINGLE_QUESTION_3_SYSTEM,
+    ]
+
+    group_titles = [
+        "User Roles & Flows",
+        "Functional Boundaries",
+        "Non-Functional Requirements",
+        "Edge Cases & Risk Mitigation"
+    ]
+
+    system_prompt = single_question_prompts[group_index].format(
+        ingestion_summary=json.dumps(ingestion, indent=2),
+        topic=topic,
+    )
+
+    logger.info(f"Generating question {question_index + 1}/{len(question_plan)} for group {group_index}")
+
+    # Get single question
+    response = await _llm_invoke_structured(
+        system_prompt=system_prompt,
+        output_model=ClarificationQuestionModel,
+    )
+
+    question = response
+
+    # Format as message
+    question_text = f"**Q{question_index + 1}. {question.question}**"
+    if question.suggested_options:
+        options_text = "\n".join([f"- {opt}" for opt in question.suggested_options])
+        question_text += f"\n\n{options_text}"
+
+    logger.info(f"Question for group {group_index}: {question.question[:100]}...")
+
+    group_titles = [
+        "User Roles & Flows",
+        "Functional Boundaries",
+        "Non-Functional Requirements",
+        "Edge Cases & Risk Mitigation"
+    ]
+
+    # Pause to wait for user answer - use frontend-compatible format
+    human_answer = interrupt({
         "type": "clarification_needed",
-        "questions": combined_questions,
-        "prompt": prompt_text,
-    }
-    human_answer: dict = interrupt(payload)
+        "group": group_index,
+        "prompt": f"Group {group_index + 1}: {group_titles[group_index]} (Q{question_index + 1}/{len(question_plan)})",
+        "questions": [question.model_dump(mode="json")],
+    })
 
-    # Require a non-empty clarification response before resuming workflow.
-    # This prevents downstream steps (including diagram generation) from
-    # running while major decision gaps are still unanswered.
-    answer_text = human_answer.get("message", "") if isinstance(human_answer, dict) else str(human_answer)
-    while not str(answer_text).strip():
-        reprompt = (
-            "Please answer the clarification questions before I continue with "
-            "the draft and diagram generation."
-        )
-        human_answer = interrupt(
-            {
-                "type": "clarification_needed",
-                "questions": combined_questions,
-                "prompt": reprompt,
-            }
-        )
-        answer_text = human_answer.get("message", "") if isinstance(human_answer, dict) else str(human_answer)
-
-    answer_text = str(answer_text).strip()
-
-    # Increment counter to limit QA refinement loops and prevent endless cycles
-    current_attempts = state.get("requirement_quality_remediation_attempts", 0)
-
-    # Merge the user's answer back into chat history
-    return {
-        "chat_history": [HumanMessage(content=answer_text)],
-        "document_buffer": state.get("document_buffer", "")
-        + f"\n\n--- USER CLARIFICATION ---\n{answer_text}",
-        "qa_gaps": [],
-        "major_decisions_asked": True,
-        "requirement_quality_remediation_attempts": current_attempts + 1,
-    }
-
-
-# ── Node 5: Classify requirements ─────────────────────────────────────────────
-
-
-async def classify_requirements(state: SRSState) -> dict:
-    """Assign 12-label taxonomy tags to every extracted requirement."""
-    llm = _get_llm(temperature=0.0)
-
-    # Build a stub requirement list from document_buffer if none exist yet
-    existing: list[Requirement] = state.get("requirements", [])
-    if not existing:
-        buffer = state.get("document_buffer", "")
-        candidates: list[str] = []
-
-        if buffer.strip().startswith("{"):
-            try:
-                parsed = _parse_json(buffer)
-            except Exception:
-                parsed = None
-
-            if isinstance(parsed, dict):
-                raw_candidates = parsed.get("requirement_candidates") or []
-                for item in raw_candidates:
-                    if isinstance(item, str) and item.strip():
-                        candidates.append(item.strip())
-
-                if not candidates:
-                    flows = parsed.get("core_flows") or []
-                    for flow in flows:
-                        if not isinstance(flow, dict):
-                            continue
-                        name = str(flow.get("name", "")).strip()
-                        goal = str(flow.get("goal", "")).strip()
-                        if name or goal:
-                            label = name or "Unnamed flow"
-                            desc = goal or "[NEEDS_SPECIFICATION]"
-                            candidates.append(f"Support flow: {label} - {desc}")
-
-        if not candidates:
-            # Auto-generate stubs from document_buffer lines as a last resort
-            lines = [
-                ln.strip()
-                for ln in buffer.splitlines()
-                if ln.strip() and len(ln.strip()) > 20
-            ]
-            candidates = lines[:50]
-
-        existing = [
-            Requirement(id=f"REQ-{i + 1:03d}", text=ln, labels=[], criteria="")
-            for i, ln in enumerate(candidates[:50])
-        ]
-
-    if not existing:
-        return {"requirements": []}
-
-    batch = [{"id": r["id"], "text": r["text"]} for r in existing]
-    user_prompt = f"Classify these requirements:\n{json.dumps(batch, indent=2)}"
-
-    # Ask classifier to return structured JSON and include parser instructions
-    cls_schema = [
-        ResponseSchema(name="classifications", description="Array of objects: {id: str, labels: [str], quality_issues?: [str]}"),
-    ]
-    cls_parser = StructuredOutputParser.from_response_schemas(cls_schema)
-    cls_fmt = cls_parser.get_format_instructions()
-
-    messages = [
-        SystemMessage(content=prompts.CLASSIFIER_SYSTEM),
-        HumanMessage(content=user_prompt),
-    ]
-
-    if hasattr(llm, "with_structured_output"):
-        try:
-            try:
-                structured = llm.with_structured_output(cls_parser)
-            except Exception:
-                structured = llm.with_structured_output(cls_schema)
-
-            # Avoid using mocks as real structured wrappers
-            mod = getattr(structured.__class__, "__module__", "")
-            if isinstance(structured, object) and mod.startswith("unittest.mock"):
-                raise RuntimeError("mocked structured wrapper; fallback")
-
-            resp = await structured.ainvoke(messages)
-            try:
-                parsed = _unwrap_structured_response(resp, parser=cls_parser)
-            except Exception:
-                parsed = None
-
-            if isinstance(parsed, dict):
-                classifications = parsed.get("classifications")
-            else:
-                # Best-effort: try to parse raw response as JSON
-                try:
-                    classifications = _parse_json(_ai_text(resp))
-                except Exception:
-                    classifications = None
-
-            if not classifications:
-                raise RuntimeError("No classifications parsed from structured response")
-        except Exception:
-            logger.warning("Classifier structured output failed; falling back to freeform JSON.")
-            # Fall back to the message-instruction flow
-            messages.append(HumanMessage(content=cls_fmt))
-            response = await _llm_invoke_with_retry(
-                llm,
-                messages,
-                node_name="classify_requirements",
-            )
-
-            try:
-                parsed = cls_parser.parse(_ai_text(response))
-                classifications = parsed.get("classifications")
-                if isinstance(classifications, str):
-                    classifications = _parse_json(classifications)
-            except Exception:
-                # Try a loose JSON parse as a final fallback
-                try:
-                    raw_text = _ai_text(response)
-                    classifications = _parse_json(raw_text)
-                except Exception:
-                    logger.warning("Classifier returned non-JSON or unparsable structured output; skipping label assignment.")
-                    return {"requirements": existing}
+    answer_text = ""
+    if isinstance(human_answer, dict):
+        answer_text = str(human_answer.get("message", "")).strip()
     else:
-        # Fallback to including format instructions in messages
-        messages.append(HumanMessage(content=cls_fmt))
-        response = await _llm_invoke_with_retry(
-            llm,
-            messages,
-            node_name="classify_requirements",
+        answer_text = str(human_answer or "").strip()
+
+    new_messages = state.get("chat_history", []) + [
+        AIMessage(content=question_text)
+    ]
+    if answer_text:
+        new_messages.append(HumanMessage(content=answer_text))
+
+    return {
+        "chat_history": new_messages,
+        "elicitation_question_index": question_index + 1,  # Advance to next question
+    }
+
+
+async def classify_and_store_answers(state: SRSState) -> dict:
+    """
+    Parse and store the latest user answer to the current elicitation group.
+    This node runs after each single question to accumulate answers.
+    """
+    group_index = state.get("pending_group_index", 0)
+    latest_message = state.get("chat_history", [])[-1] if state.get("chat_history") else None
+
+    if not isinstance(latest_message, HumanMessage):
+        logger.warning("No user message found; skipping classification")
+        return {"pending_group_index": group_index + 1}
+
+    user_response = latest_message.content
+
+    # Store answer
+    elicitation_answers = state.get("elicitation_answers", {})
+    elicitation_answers[f"group_{group_index}"] = {"response": user_response}
+
+    logger.info(f"Stored answers for group {group_index}")
+
+    # Confirmation message
+    confirmation = f"Got it! I've noted your answers for {['User Roles & Flows', 'Functional Boundaries', 'Non-Functional Requirements', 'Edge Cases'][group_index]}."
+
+    if group_index < 3:
+        confirmation += " Let me continue with the next question..."
+    else:
+        confirmation += " Now let me generate an outline for your SRS."
+
+    new_messages = state.get("chat_history", []) + [AIMessage(content=confirmation)]
+
+    return {
+        "elicitation_answers": elicitation_answers,
+        "chat_history": new_messages,
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 3: Outline Review
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+async def generate_outline(state: SRSState) -> dict:
+    """
+    Generate IEEE 830 outline from ingestion and elicitation data.
+    Uses structured output to ensure OutlineListModel is returned.
+    """
+    ingestion = state.get("ingestion_summary", {})
+    elicitation = state.get("elicitation_answers", {})
+
+    logger.info("Generating SRS outline")
+
+    system_prompt = prompts.OUTLINE_GENERATOR_SYSTEM.format(
+        user_context="Generating outline for project",
+        ingestion_summary=json.dumps(ingestion, indent=2),
+        elicitation_answers=json.dumps(elicitation, indent=2),
+    )
+
+    response = await _llm_invoke_structured(
+        system_prompt=system_prompt,
+        output_model=OutlineListModel,  # Outline can include full IEEE 830 structure
+    )
+
+    outline_data = response.outline_items
+
+    confirmation = (
+        "**✓ Proposed SRS Outline Generated**\n\n"
+        "Please review the outline in the right panel. You can:\n"
+        "- Ask me to include/exclude any section\n"
+        "- Request changes to rationales\n"
+        "- Suggest subsection adjustments\n\n"
+        "When ready, use the Approve outline button to start drafting."
+    )
+
+    new_messages = state.get("chat_history", []) + [AIMessage(content=confirmation)]
+
+    # Convert models to dicts for state storage
+    outline_items_dicts = [item.model_dump(mode="json") for item in outline_data]
+
+    return {
+        "outline_items": outline_items_dicts,
+        "chat_history": new_messages,
+    }
+
+
+async def wait_for_outline_approval(state: SRSState) -> dict:
+    """
+    Interrupt node: Wait for user to approve or modify outline.
+    """
+    outline_items = state.get("outline_items", [])
+    human_answer = interrupt(
+        {
+            "type": "outline_review",
+            "prompt": "Review the outline and use the Approve outline button when ready.",
+            "outline": outline_items,
+        }
+    )
+
+    if isinstance(human_answer, dict):
+        user_feedback = _normalize_message_text(str(human_answer.get("message", "")))
+    else:
+        user_feedback = _normalize_message_text(str(human_answer or ""))
+
+    # Check if user approved
+    if _is_control_command(user_feedback, OUTLINE_APPROVE_COMMAND) or any(
+        keyword in user_feedback
+        for keyword in ["looks good", "approved", "proceed", "ready", "draft", "okay"]
+    ):
+        logger.info("Outline approved by user")
+        confirmation = "✓ Outline approved. I am now drafting your SRS sections."
+        new_messages = state.get("chat_history", []) + [
+            HumanMessage(content=str(human_answer.get("message", "")) if isinstance(human_answer, dict) else str(human_answer or "")),
+            AIMessage(content=confirmation),
+        ]
+        return {
+            "outline_approved": True,
+            "chat_history": new_messages,
+        }
+    else:
+        # User wants modifications; acknowledge and re-interrupt
+        logger.info("Outline changes requested; re-interrupting")
+        acknowledgment = (
+            "I've noted your feedback. Update the outline details in chat, then click Approve outline "
+            "when you are ready to move to drafting."
         )
+        new_messages = state.get("chat_history", []) + [
+            HumanMessage(content=str(human_answer.get("message", "")) if isinstance(human_answer, dict) else str(human_answer or "")),
+            AIMessage(content=acknowledgment),
+        ]
 
-        try:
-            parsed = cls_parser.parse(_ai_text(response))
-            classifications = parsed.get("classifications")
-            if isinstance(classifications, str):
-                classifications = _parse_json(classifications)
-        except Exception:
-            # Try a loose JSON parse as a final fallback
-            try:
-                raw_text = _ai_text(response)
-                classifications = _parse_json(raw_text)
-            except Exception:
-                logger.warning("Classifier returned non-JSON or unparsable structured output; skipping label assignment.")
-                return {"requirements": existing}
+        return {"outline_approved": False, "chat_history": new_messages}
 
-    # Build lookup map
-    label_map: dict[str, list[str]] = {
-        item["id"]: item["labels"] for item in classifications if "id" in item
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 4: Drafting
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+async def draft_from_approved_outline(state: SRSState) -> dict:
+    """
+    Dispatch to 6 parallel section drafters once outline is approved.
+    """
+    logger.info("Starting parallel section drafting")
+
+    ingestion = state.get("ingestion_summary", {})
+    elicitation = state.get("elicitation_answers", {})
+    outline = state.get("outline_items", [])
+    chat_history_str = "\n".join([
+        f"{msg.__class__.__name__}: {msg.content[:80]}" 
+        for msg in state.get("chat_history", [])
+    ])
+
+    # Prepare context for all drafters
+    context = {
+        "outline": json.dumps(outline, indent=2),
+        "ingestion_summary": json.dumps(ingestion, indent=2),
+        "elicitation_answers": json.dumps(elicitation, indent=2),
+        "chat_history": chat_history_str,
     }
 
-    updated: list[Requirement] = []
-    for req in existing:
-        updated.append(
-            Requirement(
-                id=req["id"],
-                text=req["text"],
-                labels=label_map.get(req["id"], req.get("labels", [])),
-                criteria=req.get("criteria", ""),
-            )
-        )
+    # Run all 6 drafters in parallel
+    async def draft_section(section_key: str, prompt_template: str) -> tuple[str, str]:
+        prompt = prompt_template.format(**context)
+        response = await _llm_invoke_text(system_prompt=prompt, temperature=0.6)
+        return section_key, response
 
-    return {"requirements": updated}
-
-
-# ── Node 5.5: Validate and Enrich Requirements Quality ─────────────────────
-
-async def validate_and_enrich_requirements(state: SRSState) -> dict:
-    """
-    LLM-as-a-Judge pass to ensure requirements are measurable, specific, and testable.
-    
-    For each requirement flagged with quality_issues during classification, use LLM
-    to enrich or rewrite it with concrete, verifiable language.
-    """
-    llm = _get_llm(temperature=0.2)  # Some creativity for enrichment
-    
-    requirements: list[Requirement] = state.get("requirements", [])
-    if not requirements:
-        return {"requirements": []}
-    
-    context = _build_writing_context(state)
-    
-    # Check which requirements have quality issues
-    to_enrich: list[tuple[Requirement, list[str]]] = []
-    for req in requirements:
-        # If the requirement came with quality_issues flag (from enhanced classifier)
-        # Note: The enhanced classifier now returns quality_issues in the JSON
-        # We need to check if the original classification response included this
-        # For now, we'll do a heuristic check for vague language
-        text_lower = req["text"].lower()
-        vague_words = ["fast", "secure", "easy", "simple", "efficient", "scalable", 
-                       "user-friendly", "good", "nice", "modern"]
-        
-        has_vague = any(f" {word}" in f" {text_lower}" or f" {word}s" in f" {text_lower}" 
-                       for word in vague_words)
-        
-        if has_vague or not req.get("criteria"):
-            to_enrich.append((req, vague_words if has_vague else []))
-    
-    if not to_enrich:
-        return {"requirements": requirements}  # All requirements already good
-    
-    logger.info("Found %d requirements needing quality enrichment.", len(to_enrich))
-    
-    # Batch enrich (up to 10 at a time for efficiency)
-    enrichment_tasks = []
-    for req, vague_found in to_enrich[:10]:
-        enrichment_tasks.append(_enrich_single_requirement(llm, req, vague_found, context))
-    
-    enrichment_results = await asyncio.gather(*enrichment_tasks, return_exceptions=True)
-    
-    # Build enriched requirement map
-    enriched_map: dict[str, Requirement] = {}
-    for result in enrichment_results:
-        if isinstance(result, Exception):
-            logger.exception("Requirement enrichment task failed.", exc_info=result)
-            continue
-        if result:
-            enriched_map[result["id"]] = result
-    
-    # Merge enriched requirements back into list
-    final_requirements: list[Requirement] = []
-    for req in requirements:
-        if req["id"] in enriched_map:
-            final_requirements.append(enriched_map[req["id"]])
-        else:
-            final_requirements.append(req)
-    
-    return {"requirements": final_requirements}
-
-
-async def _enrich_single_requirement(
-    llm: ChatOpenAI,
-    requirement: Requirement,
-    vague_words: list[str],
-    context: str,
-) -> Requirement | None:
-    """
-    Use LLM to rewrite a requirement with concrete, measurable language.
-    """
-    label_hint = ", ".join(requirement.get("labels", ["F"]))
-    vague_hint = ", ".join(vague_words) if vague_words else "unmeasurable"
-    
-    enrichment_prompt = f"""\
-The following requirement is too vague and needs to be rewritten with specific, measurable language.
-
-Original: {requirement['text']}
-Issue: Uses vague language ({vague_hint}); lacks acceptance criteria.
-Requirement type: {label_hint}
-Project context: {context[:1000]}
-
-Rewrite this requirement to be:
-1. Specific with concrete details (not "fast", but "< 200ms at P95")
-2. Include an acceptance criterion with measurable outcome
-3. Atomic and testable
-
-Return ONLY the rewritten requirement text in this format:
-**Requirement:** [The system shall ...]
-**Acceptance Criteria:** Given [precondition], when [action], then [measurable outcome].
-
-Do not include any other text or explanation.
-"""
-    
-    response = await _llm_invoke_with_retry(
-        llm,
-        [HumanMessage(content=enrichment_prompt)],
-        node_name="validate_and_enrich_requirements",
-        max_attempts=2,
-    )
-    
-    enriched_text = _ai_text(response)
-    
-    # Extract requirement and criteria if possible
-    requirement_match = re.search(
-        r"\*\*Requirement:\*\*\s*(.+?)(?=\*\*Acceptance|$)",
-        enriched_text,
-        re.DOTALL | re.IGNORECASE,
-    )
-    criteria_match = re.search(
-        r"\*\*Acceptance\s+Criteria:\*\*\s*(.+?)(?=$)",
-        enriched_text,
-        re.DOTALL | re.IGNORECASE,
-    )
-    
-    new_text = requirement_match.group(1).strip() if requirement_match else enriched_text.strip()
-    new_criteria = criteria_match.group(1).strip() if criteria_match else ""
-    
-    if not new_text:
-        return None  # Enrichment failed
-    
-    return Requirement(
-        id=requirement["id"],
-        text=new_text,
-        labels=requirement.get("labels", ["F"]),
-        criteria=new_criteria,
-    )
-
-
-# ── Node 6: Draft Section 1 ───────────────────────────────────────────────────
-
-
-async def draft_section_1(state: SRSState) -> dict:
-    llm = _get_llm(temperature=0.3)
-    context = _build_writing_context(state)
-
-    messages = [
-        SystemMessage(content=prompts.WRITER_S1_SYSTEM),
-        HumanMessage(content=context),
+    drafters = [
+        ("s1", prompts.DRAFT_SECTION_1_SYSTEM),
+        ("s2", prompts.DRAFT_SECTION_2_SYSTEM),
+        ("s3_functional", prompts.DRAFT_SECTION_3_FUNCTIONAL_SYSTEM),
+        ("s3_external", prompts.DRAFT_SECTION_3_EXTERNAL_SYSTEM),
+        ("s3_nfr", prompts.DRAFT_SECTION_3_NFR_SYSTEM),
+        ("s4", prompts.DRAFT_SECTION_4_SYSTEM),
     ]
 
-    # Try structured output first
-    if hasattr(llm, "with_structured_output"):
-        try:
-            mod = getattr(llm.__class__, "__module__", "")
-            if not mod.startswith("unittest.mock"):
-                logger.info("draft_section_1: Using structured output with Section1Introduction")
-                structured = llm.with_structured_output(Section1Introduction)
-                response = await structured.ainvoke(messages)
-                logger.info(f"draft_section_1: Response type = {type(response)}")
-                try:
-                    parsed = _unwrap_structured_response(response, model_class=Section1Introduction)
-                except Exception:
-                    parsed = None
+    results = await asyncio.gather(*[draft_section(key, prompt) for key, prompt in drafters])
 
-                if isinstance(parsed, dict):
-                    # Convert model dict to formatted text
-                    section_text = f"""1.0. Introduction
+    sections = {key: content for key, content in results}
 
-1.1. Purpose
-{parsed.get('purpose','')}
+    logger.info(f"Completed drafting all sections")
 
-1.2. Scope of Project
-{parsed.get('scope','')}
-
-1.3. Glossary
-"""
-                    for entry in parsed.get("glossary", []):
-                        section_text += f"{entry.get('term', '')}: {entry.get('definition', '')}\n"
-                    section_text += f"\n1.5. Overview of Document\n{parsed.get('overview','')}"
-                    logger.info(f"draft_section_1: Successfully converted to formatted text ({len(section_text)} chars)")
-                    return {"sections": {"s1": section_text}}
-        except Exception as e:
-            logger.warning(f"draft_section_1: Structured output failed, falling back to text-based: {e}")
-
-    # Fallback to text-based LLM call
-    logger.info("draft_section_1: Using text-based LLM call")
-    response = await _llm_invoke_with_retry(
-        llm,
-        messages,
-        node_name="draft_section_1",
-    )
-    text_response = _ai_text(response)
-    logger.info(f"draft_section_1: Text response ({len(text_response)} chars), first 100 chars: {text_response[:100]}")
-    normalized_section = _normalize_section_output("s1", text_response, state)
-    logger.info(f"draft_section_1: Normalized section ({len(normalized_section)} chars), first 100 chars: {normalized_section[:100]}")
-    return {"sections": {"s1": normalized_section}}
-
-
-# ── Node 7: Draft Section 2 ───────────────────────────────────────────────────
-
-
-async def draft_section_2(state: SRSState) -> dict:
-    llm = _get_llm(temperature=0.3)
-    context = _build_writing_context(state)
-
-    messages = [
-        SystemMessage(content=prompts.WRITER_S2_SYSTEM),
-        HumanMessage(content=context),
-    ]
-
-    # Try structured output first
-    if hasattr(llm, "with_structured_output"):
-        try:
-            mod = getattr(llm.__class__, "__module__", "")
-            if not mod.startswith("unittest.mock"):
-                logger.info("draft_section_2: Using structured output with Section2OverallDescription")
-                structured = llm.with_structured_output(Section2OverallDescription)
-                response = await structured.ainvoke(messages)
-                logger.info(f"draft_section_2: Response type = {type(response)}")
-                try:
-                    parsed = _unwrap_structured_response(response, model_class=Section2OverallDescription)
-                except Exception:
-                    parsed = None
-
-                if isinstance(parsed, dict):
-                    purpose = str(parsed.get("system_purpose", "")).strip() or "[NEEDS_SPECIFICATION]"
-                    users = parsed.get("target_users", []) or []
-                    architecture = str(parsed.get("architecture_summary", "")).strip() or "[NEEDS_SPECIFICATION]"
-                    components = parsed.get("components", []) or []
-                    flows = parsed.get("core_flows", []) or []
-                    entities = parsed.get("data_entities", []) or []
-                    interfaces = parsed.get("external_interfaces", []) or []
-                    constraints = parsed.get("constraints", []) or []
-                    assumptions = parsed.get("assumptions", []) or []
-
-                    section_text = "## 2. Product Overview\n\n"
-                    section_text += "### 2.1 System Purpose and Users\n"
-                    section_text += f"{purpose}\n\n"
-                    section_text += "Target users:\n"
-                    if users:
-                        for user in users:
-                            section_text += f"- {user}\n"
-                    else:
-                        section_text += "- [NEEDS_SPECIFICATION]\n"
-
-                    section_text += "\n### 2.2 Architecture and Components\n"
-                    section_text += f"{architecture}\n\n"
-                    section_text += "Components:\n"
-                    if components:
-                        for comp in components:
-                            if isinstance(comp, dict):
-                                name = str(comp.get("name", "")).strip() or "[Unnamed component]"
-                                responsibility = str(comp.get("responsibility", "")).strip()
-                                interfaces_list = comp.get("interfaces", []) or []
-                                interfaces_text = ", ".join([str(i).strip() for i in interfaces_list if str(i).strip()])
-                                detail = responsibility or "[NEEDS_SPECIFICATION]"
-                                if interfaces_text:
-                                    detail += f". Interfaces: {interfaces_text}"
-                                section_text += f"- **{name}**: {detail}\n"
-                            else:
-                                section_text += f"- {comp}\n"
-                    else:
-                        section_text += "- [NEEDS_SPECIFICATION]\n"
-
-                    section_text += "\n### 2.3 Core Flows\n"
-                    if flows:
-                        for flow in flows:
-                            if not isinstance(flow, dict):
-                                section_text += f"- {flow}\n"
-                                continue
-                            flow_name = str(flow.get("name", "")).strip() or "[Unnamed flow]"
-                            goal = str(flow.get("goal", "")).strip() or "[NEEDS_SPECIFICATION]"
-                            success = str(flow.get("success_metric", "")).strip() or "[NEEDS_SPECIFICATION]"
-                            steps = flow.get("steps", []) or []
-                            section_text += f"- **{flow_name}**: {goal}\n"
-                            if steps:
-                                section_text += "  Steps:\n"
-                                for step in steps:
-                                    section_text += f"  - {step}\n"
-                            section_text += f"  Success metric: {success}\n"
-                    else:
-                        section_text += "- [NEEDS_SPECIFICATION]\n"
-
-                    section_text += "\n### 2.4 Data Model Overview\n"
-                    if entities:
-                        for entity in entities:
-                            if isinstance(entity, dict):
-                                name = str(entity.get("name", "")).strip() or "[Unnamed entity]"
-                                description = str(entity.get("description", "")).strip() or "[NEEDS_SPECIFICATION]"
-                                fields = entity.get("key_fields", []) or []
-                                fields_text = ", ".join([str(f).strip() for f in fields if str(f).strip()])
-                                if fields_text:
-                                    section_text += f"- **{name}**: {description}. Fields: {fields_text}\n"
-                                else:
-                                    section_text += f"- **{name}**: {description}\n"
-                            else:
-                                section_text += f"- {entity}\n"
-                    else:
-                        section_text += "- [NEEDS_SPECIFICATION]\n"
-
-                    section_text += "\n### 2.5 External Interfaces\n"
-                    if interfaces:
-                        for interface in interfaces:
-                            if isinstance(interface, dict):
-                                name = str(interface.get("name", "")).strip() or "[Unnamed interface]"
-                                purpose = str(interface.get("purpose", "")).strip() or "[NEEDS_SPECIFICATION]"
-                                protocol = str(interface.get("protocol", "")).strip() or "[NEEDS_SPECIFICATION]"
-                                data_format = str(interface.get("data_format", "")).strip() or "[NEEDS_SPECIFICATION]"
-                                section_text += (
-                                    f"- **{name}**: {purpose} (Protocol: {protocol}; Format: {data_format})\n"
-                                )
-                            else:
-                                section_text += f"- {interface}\n"
-                    else:
-                        section_text += "- [NEEDS_SPECIFICATION]\n"
-
-                    section_text += "\n### 2.6 Constraints and Assumptions\n"
-                    if constraints:
-                        section_text += "Constraints:\n"
-                        for item in constraints:
-                            section_text += f"- {item}\n"
-                    else:
-                        section_text += "Constraints:\n- [NEEDS_SPECIFICATION]\n"
-
-                    if assumptions:
-                        section_text += "\nAssumptions:\n"
-                        for item in assumptions:
-                            section_text += f"- {item}\n"
-                    else:
-                        section_text += "\nAssumptions:\n- [NEEDS_SPECIFICATION]\n"
-
-                    logger.info(f"draft_section_2: Successfully converted to formatted text ({len(section_text)} chars)")
-                    return {"sections": {"s2": section_text}}
-        except Exception as e:
-            logger.warning(f"draft_section_2: Structured output failed, falling back to text-based: {e}")
-
-    # Fallback to text-based LLM call
-    logger.info("draft_section_2: Using text-based LLM call")
-    response = await _llm_invoke_with_retry(
-        llm,
-        messages,
-        node_name="draft_section_2",
-    )
-    text_response = _ai_text(response)
-    logger.info(f"draft_section_2: Text response ({len(text_response)} chars), first 100 chars: {text_response[:100]}")
-    normalized_section = _normalize_section_output("s2", text_response, state)
-    logger.info(f"draft_section_2: Normalized section ({len(normalized_section)} chars), first 100 chars: {normalized_section[:100]}")
-    return {"sections": {"s2": normalized_section}}
-
-
-# ── Node 8a: Draft Section 3 - Functional Requirements ───────────────────────
-
-
-async def draft_section_3_fr(state: SRSState) -> dict:
-    llm = _get_llm(temperature=0.2)
-    context = _build_writing_context(state)
-    project_scope = state.get("project_scope", "complex")
-
-    messages = [
-        SystemMessage(content=prompts.WRITER_S3_FR_SYSTEM.format(project_scope=project_scope)),
-        HumanMessage(content=context),
-    ]
-
-    # Try structured output first
-    if hasattr(llm, "with_structured_output"):
-        try:
-            mod = getattr(llm.__class__, "__module__", "")
-            if not mod.startswith("unittest.mock"):
-                logger.info("draft_section_3_fr: Using structured output with Section3FunctionalOutput")
-                structured = llm.with_structured_output(Section3FunctionalOutput)
-                response = await structured.ainvoke(messages)
-                logger.info(f"draft_section_3_fr: Response type = {type(response)}")
-                try:
-                    parsed = _unwrap_structured_response(response, model_class=Section3FunctionalOutput)
-                except Exception:
-                    parsed = None
-
-                if isinstance(parsed, dict):
-                    max_requirements = 8 if project_scope == "simple" else 12
-                    section_text = "### 3.2 Functional Requirements\n"
-                    requirements = parsed.get("functional_requirements", []) or []
-                    for index, req in enumerate(requirements[:max_requirements]):
-                        req_id = str(req.get("requirement_id", "")).strip()
-                        if not req_id.upper().startswith("F-"):
-                            req_id = f"F-{index + 1:03d}"
-                        title = str(req.get("title", "")).strip() or "[NEEDS_SPECIFICATION]"
-                        statement = str(req.get("statement", "")).strip() or "[NEEDS_SPECIFICATION]"
-                        criteria = str(req.get("acceptance_criteria", "")).strip() or "[NEEDS_SPECIFICATION]"
-
-                        section_text += f"\n#### {req_id}: {title}\n"
-                        section_text += f"**Requirement:** {statement}\n"
-                        section_text += f"**Acceptance Criteria:** {criteria}\n"
-                    logger.info(f"draft_section_3_fr: Successfully converted to formatted text ({len(section_text)} chars)")
-                    return {"sections": {"s3_fr": section_text}}
-        except Exception as e:
-            logger.warning(f"draft_section_3_fr: Structured output failed, falling back to text-based: {e}")
-
-    # Fallback to text-based LLM call
-    logger.info("draft_section_3_fr: Using text-based LLM call")
-    response = await _llm_invoke_with_retry(
-        llm,
-        messages,
-        node_name="draft_section_3_fr",
-    )
-    text_response = _ai_text(response)
-    logger.info(f"draft_section_3_fr: Text response ({len(text_response)} chars), first 100 chars: {text_response[:100]}")
-    normalized_section = _normalize_section_output("s3_fr", text_response, state)
-    logger.info(f"draft_section_3_fr: Normalized section ({len(normalized_section)} chars), first 100 chars: {normalized_section[:100]}")
     return {
-        "sections": {"s3_fr": normalized_section}
+        "sections": sections,
+        "current_phase": "review_refine",
     }
 
 
-# ── Node 8b: Draft Section 3 - Non-Functional Requirements ───────────────────
-
-
-async def draft_section_3_nfr(state: SRSState) -> dict:
-    llm = _get_llm(temperature=0.2)
-    context = _build_writing_context(state)
-    project_scope = state.get("project_scope", "complex")
-
-    # Inject RAG context into NFR writing for regulatory grounding
-    rag = state.get("rag_context", "")
-    extra = f"\n\nREGULATORY CONTEXT (use to generate L-NNN, SE-NNN requirements):\n{rag}" if rag else ""
-
-    messages = [
-        SystemMessage(content=prompts.WRITER_S3_NFR_SYSTEM.format(project_scope=project_scope)),
-        HumanMessage(content=context + extra),
-    ]
-
-    # Try structured output first
-    if hasattr(llm, "with_structured_output"):
-        try:
-            mod = getattr(llm.__class__, "__module__", "")
-            if not mod.startswith("unittest.mock"):
-                logger.info("draft_section_3_nfr: Using structured output with Section3NonFunctionalOutput")
-                structured = llm.with_structured_output(Section3NonFunctionalOutput)
-                response = await structured.ainvoke(messages)
-                logger.info(f"draft_section_3_nfr: Response type = {type(response)}")
-                try:
-                    parsed = _unwrap_structured_response(response, model_class=Section3NonFunctionalOutput)
-                except Exception:
-                    parsed = None
-
-                if isinstance(parsed, dict):
-                    max_requirements = 4 if project_scope == "simple" else 8
-                    section_text = "### 3.3 Quality of Service Requirements\n"
-                    requirements = parsed.get("non_functional_requirements", []) or []
-                    for index, req in enumerate(requirements[:max_requirements]):
-                        req_id = str(req.get("requirement_id", "")).strip()
-                        if not req_id or "-" not in req_id:
-                            req_id = f"NFR-{index + 1:03d}"
-                        title = str(req.get("title", "")).strip() or "[NEEDS_SPECIFICATION]"
-                        statement = str(req.get("statement", "")).strip() or "[NEEDS_SPECIFICATION]"
-                        criteria = str(req.get("acceptance_criteria", "")).strip() or "[NEEDS_SPECIFICATION]"
-
-                        section_text += f"\n#### {req_id}: {title}\n"
-                        section_text += f"**Requirement:** {statement}\n"
-                        section_text += f"**Acceptance Criteria:** {criteria}\n"
-                    logger.info(f"draft_section_3_nfr: Successfully converted to formatted text ({len(section_text)} chars)")
-                    return {"sections": {"s3_nfr": section_text}}
-        except Exception as e:
-            logger.warning(f"draft_section_3_nfr: Structured output failed, falling back to text-based: {e}")
-
-    # Fallback to text-based LLM call
-    logger.info("draft_section_3_nfr: Using text-based LLM call")
-    response = await _llm_invoke_with_retry(
-        llm,
-        messages,
-        node_name="draft_section_3_nfr",
-    )
-    text_response = _ai_text(response)
-    logger.info(f"draft_section_3_nfr: Text response ({len(text_response)} chars), first 100 chars: {text_response[:100]}")
-    normalized_section = _normalize_section_output("s3_nfr", text_response, state)
-    logger.info(f"draft_section_3_nfr: Normalized section ({len(normalized_section)} chars), first 100 chars: {normalized_section[:100]}")
-    return {
-        "sections": {"s3_nfr": normalized_section}
-    }
-
-
-# ── Node 8c: Draft Section 3 - External Interfaces ───────────────────────────
-
-
-async def draft_section_3_iface(state: SRSState) -> dict:
-    llm = _get_llm(temperature=0.2)
-    context = _build_writing_context(state)
-
-    messages = [
-        SystemMessage(content=prompts.WRITER_S3_IFACE_SYSTEM),
-        HumanMessage(content=context),
-    ]
-
-    # Try structured output first
-    if hasattr(llm, "with_structured_output"):
-        try:
-            mod = getattr(llm.__class__, "__module__", "")
-            if not mod.startswith("unittest.mock"):
-                logger.info("draft_section_3_iface: Using structured output with Section3InterfaceOutput")
-                structured = llm.with_structured_output(Section3InterfaceOutput)
-                response = await structured.ainvoke(messages)
-                logger.info(f"draft_section_3_iface: Response type = {type(response)}")
-                try:
-                    parsed = _unwrap_structured_response(response, model_class=Section3InterfaceOutput)
-                except Exception:
-                    parsed = None
-
-                if isinstance(parsed, dict):
-                    section_text = "### 3.1 External Interface Requirements\n"
-                    requirements = parsed.get("interface_requirements", []) or []
-                    if not requirements:
-                        section_text += "\n[NEEDS_SPECIFICATION]\n"
-                    for index, req in enumerate(requirements):
-                        req_id = str(req.get("requirement_id", "")).strip()
-                        if not req_id.upper().startswith("IF-"):
-                            req_id = f"IF-{index + 1:03d}"
-                        title = str(req.get("title", "")).strip() or "[NEEDS_SPECIFICATION]"
-                        statement = str(req.get("statement", "")).strip() or "[NEEDS_SPECIFICATION]"
-                        criteria = str(req.get("acceptance_criteria", "")).strip() or "[NEEDS_SPECIFICATION]"
-
-                        section_text += f"\n#### {req_id}: {title}\n"
-                        section_text += f"**Requirement:** {statement}\n"
-                        section_text += f"**Acceptance Criteria:** {criteria}\n"
-                    logger.info(f"draft_section_3_iface: Successfully converted to formatted text ({len(section_text)} chars)")
-                    return {"sections": {"s3_iface": section_text}}
-        except Exception as e:
-            logger.warning(f"draft_section_3_iface: Structured output failed, falling back to text-based: {e}")
-
-    # Fallback to text-based LLM call
-    logger.info("draft_section_3_iface: Using text-based LLM call")
-    response = await _llm_invoke_with_retry(
-        llm,
-        messages,
-        node_name="draft_section_3_iface",
-    )
-    text_response = _ai_text(response)
-    logger.info(f"draft_section_3_iface: Text response ({len(text_response)} chars), first 100 chars: {text_response[:100]}")
-    normalized_section = _normalize_section_output("s3_iface", text_response, state)
-    logger.info(f"draft_section_3_iface: Normalized section ({len(normalized_section)} chars), first 100 chars: {normalized_section[:100]}")
-    return {
-        "sections": {"s3_iface": normalized_section}
-    }
-
-
-# ── Node 9: Draft Section 4 - Verification Matrix ────────────────────────────
-
-
-async def draft_section_4(state: SRSState) -> dict:
-    llm = _get_llm(temperature=0.1)
+async def present_draft_for_review(state: SRSState) -> dict:
+    """
+    Format completed sections into a readable SRS document and present for review.
+    """
     sections = state.get("sections", {})
 
-    section_3_combined = "\n\n".join(
-        [
-            sections.get("s3_iface", ""),
-            sections.get("s3_fr", ""),
-            sections.get("s3_nfr", ""),
-        ]
+    # Assemble document
+    document = ""
+    for key in ["s1", "s2", "s3_functional", "s3_external", "s3_nfr", "s4"]:
+        if key in sections:
+            document += sections[key] + "\n\n"
+
+    # Emit as message
+    review_message = (
+        "**✓ SRS Draft Complete!**\n\n" + document + "\n\n"
+        "Please review the draft. You can:\n"
+        "- Request section regeneration (e.g., 'Regenerate section 3.1')\n"
+        "- Request inline edits (e.g., 'In section 1.2, change X to Y')\n"
+        "- Ask clarifying questions\n\n"
+        "When satisfied, use the Finalize button to complete the document."
     )
 
-    messages = [
-        SystemMessage(content=prompts.WRITER_S4_SYSTEM),
-        HumanMessage(content=f"Generate the verification matrix for:\n\n{section_3_combined}"),
-    ]
+    new_messages = state.get("chat_history", []) + [AIMessage(content=review_message)]
 
-    # Try structured output first
-    if hasattr(llm, "with_structured_output"):
-        try:
-            mod = getattr(llm.__class__, "__module__", "")
-            if not mod.startswith("unittest.mock"):
-                logger.info("draft_section_4: Using structured output with Section4Verification")
-                structured = llm.with_structured_output(Section4Verification)
-                response = await structured.ainvoke(messages)
-                logger.info(f"draft_section_4: Response type = {type(response)}")
-                try:
-                    parsed = _unwrap_structured_response(response, model_class=Section4Verification)
-                except Exception:
-                    parsed = None
+    logger.info("Draft presented for review; awaiting feedback")
 
-                if isinstance(parsed, dict):
-                    section_text = f"{parsed.get('title','')}\n\n{parsed.get('description','')}\n\n"
-                    section_text += "| Requirement ID | Test Case | Acceptance Criteria |\n"
-                    section_text += "|---|---|---|\n"
-                    for entry in parsed.get('verification_entries', []):
-                        section_text += f"| {entry.get('requirement_id','')} | {entry.get('test_case','')} | {entry.get('acceptance_criteria','')} |\n"
-                    logger.info(f"draft_section_4: Successfully converted to formatted text ({len(section_text)} chars)")
-                    return {"sections": {"s4": section_text}}
-        except Exception as e:
-            logger.warning(f"draft_section_4: Structured output failed, falling back to text-based: {e}")
-
-    # Fallback to text-based LLM call
-    logger.info("draft_section_4: Using text-based LLM call")
-    response = await _llm_invoke_with_retry(
-        llm,
-        messages,
-        node_name="draft_section_4",
-    )
-    text_response = _ai_text(response)
-    logger.info(f"draft_section_4: Text response ({len(text_response)} chars), first 100 chars: {text_response[:100]}")
-    normalized_section = _normalize_section_output("s4", text_response, state)
-    logger.info(f"draft_section_4: Normalized section ({len(normalized_section)} chars), first 100 chars: {normalized_section[:100]}")
-    return {"sections": {"s4": normalized_section}}
-
-
-async def revise_selected_section(state: SRSState) -> dict:
-    """Revise only the selected section using context retrieved from the existing draft."""
-    sections = dict(state.get("sections", {}))
-    target_key = str(state.get("revision_target_section_key", "")).strip()
-    if not target_key:
-        return {"sections": {}}
-
-    current_text = str(state.get("revision_target_content", "")).strip() or str(
-        sections.get(target_key, "")
-    ).strip()
-    if not current_text:
-        return {"sections": {}}
-
-    requested_change = str(state.get("revision_request", "")).strip()
-    target_title = str(state.get("revision_target_title", "")).strip() or target_key
-
-    retrieval_query = "\n".join(
-        filter(None, [target_title, target_key, requested_change, current_text[:900]])
-    )
-    draft_context = _retrieve_draft_context(
-        sections,
-        target_key=target_key,
-        query=retrieval_query,
-        top_k=4,
-    )
-
-    llm = _get_llm(temperature=0.2)
-    prompt_parts = [
-        f"Selected section title: {target_title}",
-        f"Selected section key: {target_key}",
-        "Current section markdown:",
-        current_text,
-        "User requested change:",
-        requested_change or "(No additional instruction provided)",
-    ]
-
-    if draft_context:
-        prompt_parts.extend(
-            [
-                "Retrieved context from other draft sections:",
-                draft_context,
-            ]
-        )
-
-    response = await _llm_invoke_with_retry(
-        llm,
-        [
-            SystemMessage(content=prompts.REVISE_SECTION_SYSTEM),
-            HumanMessage(content="\n\n".join(prompt_parts)),
-        ],
-        node_name="revise_selected_section",
-    )
-    revised_section = _normalize_section_output(target_key, _ai_text(response), state).strip() or current_text
-
-    # If the model returns something too close to the original section,
-    # perform one stricter retry to force an observable revision.
-    if requested_change and not _is_material_revision(current_text, revised_section, requested_change):
-        stricter_prompt = "\n\n".join(
-            [
-                *prompt_parts,
-                (
-                    "IMPORTANT: The previous revision did not materially change the section. "
-                    "Apply the requested change concretely. Make multiple explicit edits, "
-                    "and ensure the updated section text reflects the request in a verifiable way."
-                ),
-            ]
-        )
-
-        retry_response = await _llm_invoke_with_retry(
-            llm,
-            [
-                SystemMessage(content=prompts.REVISE_SECTION_SYSTEM),
-                HumanMessage(content=stricter_prompt),
-            ],
-            node_name="revise_selected_section",
-            max_attempts=2,
-        )
-        retry_candidate = _ai_text(retry_response).strip()
-        if retry_candidate:
-            revised_section = _normalize_section_output(target_key, retry_candidate, state)
-
-        if not _is_material_revision(current_text, revised_section, requested_change):
-            logger.warning(
-                "Revision output remained very similar for section '%s'; using best-effort revised text.",
-                target_key,
-            )
-
-    return {"sections": {target_key: revised_section}}
-
-
-# ── Node 10: Generate Mermaid diagrams ────────────────────────────────────────
-
-
-async def generate_mermaid(state: SRSState) -> dict:
-    """Generate three Mermaid diagrams: architecture, sequence, ER."""
-    llm = _get_llm(temperature=0.1)
-    context = _build_diagram_context(state) or _build_writing_context(state)
-
-    diagram_configs = [
-        (
-            "flowchart",
-            "a high-level system architecture (flowchart TD) diagram",
-            prompts.MERMAID_ARCHITECTURE_PROMPT,
-        ),
-        (
-            "sequence",
-            "a sequence diagram for the primary user workflow",
-            prompts.MERMAID_SEQUENCE_PROMPT,
-        ),
-        (
-            "er",
-            "an entity-relationship diagram for core data entities",
-            prompts.MERMAID_ER_PROMPT,
-        ),
-    ]
-
-    async def _generate_one(
-        index: int,
-        diagram_kind: str,
-        diagram_label: str,
-        diagram_prompt: str,
-    ) -> str:
-        system_prompt = prompts.MERMAID_SYSTEM.format(diagram_type=diagram_label)
-        syntax_context = retrieve_mermaid_syntax(
-            diagram_type=diagram_kind,
-            query=f"{context}\n{diagram_prompt}",
-            top_k=3,
-        )
-        user_content = [f"System context:\n{context}"]
-        if syntax_context:
-            user_content.append(
-                "Mermaid syntax reference (follow strictly):\n"
-                f"{syntax_context}"
-            )
-        user_content.append(f"Generate: {diagram_prompt}")
-
-        response = await _llm_invoke_with_retry(
-            llm,
-            [
-                SystemMessage(content=system_prompt),
-                HumanMessage(content="\n\n".join(user_content)),
-            ],
-            node_name="generate_mermaid",
-        )
-        raw = _ai_text(response)
-        code = _extract_mermaid_code(raw)
-        if not code:
-            logger.warning("Mermaid generation returned empty code for diagram index %d.", index)
-            return ""
-
-        if not _looks_like_expected_mermaid(index, code):
-            logger.warning(
-                "Generated Mermaid diagram index %d had unexpected type; discarding diagram.",
-                index,
-            )
-            return ""
-
-        return code
-
-    generation_tasks = [
-        _generate_one(idx, diagram_kind, diagram_label, diagram_prompt)
-        for idx, (diagram_kind, diagram_label, diagram_prompt) in enumerate(diagram_configs)
-    ]
-    generation_results = await asyncio.gather(*generation_tasks, return_exceptions=True)
-
-    blocks: list[str] = []
-    for idx, result in enumerate(generation_results):
-        if isinstance(result, Exception):
-            logger.exception(
-                "Mermaid generation failed for diagram index %d; diagram will be unavailable.",
-                idx,
-                exc_info=result,
-            )
-            blocks.append("")
-            continue
-        blocks.append(result)
+    # Present the draft; the feedback node will handle the interrupt/resume.
+    pass
 
     return {
-        "mermaid_blocks": blocks,
-        "mermaid_errors": [""] * len(blocks),
-        "mermaid_correction_attempts": 0,
+        "chat_history": new_messages,
     }
 
 
-# ── Node 11: Validate Mermaid syntax ─────────────────────────────────────────
-
-
-async def validate_mermaid(state: SRSState) -> dict:
-    """Run mmdc (or heuristic fallback) on each generated diagram block."""
-    blocks = state.get("mermaid_blocks", [])
-    validation_tasks = [validate_mermaid_syntax(block) for block in blocks]
-    validation_results = await asyncio.gather(*validation_tasks, return_exceptions=True)
-
-    errors: list[str] = []
-    for result in validation_results:
-        if isinstance(result, Exception):
-            logger.exception("Unexpected Mermaid validation error.", exc_info=result)
-            errors.append("Unexpected Mermaid validator failure.")
-            continue
-
-        valid, error_msg = result
-        errors.append("" if valid else error_msg)
-
-    failed = sum(1 for e in errors if e)
-    logger.info("Mermaid validation: %d/%d diagrams valid.", len(blocks) - failed, len(blocks))
-    return {"mermaid_errors": errors}
-
-
-# ── Node 12: Correct Mermaid syntax ──────────────────────────────────────────
-
-
-async def correct_mermaid(state: SRSState) -> dict:
-    """Request LLM to fix each diagram that failed validation."""
-    llm = _get_llm(temperature=0.0)
-    blocks = list(state.get("mermaid_blocks", []))
-    errors = state.get("mermaid_errors", [])
-    attempts = state.get("mermaid_correction_attempts", 0)
-    settings = get_settings()
-    is_final_correction_round = attempts >= (settings.max_mermaid_retries - 1)
-
-    async def _correct_one(index: int, block: str, error: str) -> tuple[int, str | None]:
-        if is_final_correction_round:
-            # Last correction round: keep the existing block so finalize can mark unavailable.
-            return index, None
-
-        correction_prompt = prompts.CORRECTOR_SYSTEM.format(
-            original_code=f"```mermaid\n{block}\n```",
-            error_message=error,
-        )
-        response = await _llm_invoke_with_retry(
-            llm,
-            [HumanMessage(content=correction_prompt)],
-            node_name="correct_mermaid",
-        )
-        corrected = _extract_mermaid_code(_ai_text(response))
-        if not corrected:
-            return index, None
-
-        if not _looks_like_expected_mermaid(index, corrected):
-            logger.warning(
-                "Corrected Mermaid diagram index %d had unexpected type; discarding correction.",
-                index,
-            )
-            return index, None
-
-        return index, corrected
-
-    correction_tasks = [
-        _correct_one(i, block, error)
-        for i, (block, error) in enumerate(zip(blocks, errors))
-        if error
-    ]
-
-    if correction_tasks:
-        correction_results = await asyncio.gather(*correction_tasks, return_exceptions=True)
-        for result in correction_results:
-            if isinstance(result, Exception):
-                logger.exception("Mermaid correction task failed.", exc_info=result)
-                continue
-
-            index, corrected = result
-            if corrected:
-                blocks[index] = corrected
-
-    return {
-        "mermaid_blocks": blocks,
-        "mermaid_correction_attempts": attempts + 1,
-    }
-
-
-# ── Node 13: QA Review ───────────────────────────────────────────────────────
-
-
-async def qa_review(state: SRSState) -> dict:
+async def process_review_feedback(state: SRSState) -> dict:
     """
-    Two-pass LLM-as-a-Judge quality check:
-    1. Structural check: Coverage, traceability, formatting
-    2. Requirement quality check: Specificity, measurability, testability
-    
-    If either pass fails, populate qa_gaps with specific guidance.
+    Parse user feedback and route to regeneration or finalization.
     """
-    llm_structural = _get_llm(temperature=0.0)
-    llm_quality = _get_llm(temperature=0.0)
-    
     sections = state.get("sections", {})
-    draft = "\n\n".join(
-        [
-            sections.get("s1", ""),
-            sections.get("s2", ""),
-            sections.get("s3_iface", ""),
-            sections.get("s3_fr", ""),
-            sections.get("s3_nfr", ""),
-            sections.get("s4", ""),
-        ]
-    )
-    
-    # ── Pass 1: Structural check ──────────────────────────────────────────────
-    response_structural = await _llm_invoke_with_retry(
-        llm_structural,
-        [
-            SystemMessage(content=prompts.QA_REVIEWER_SYSTEM),
-            HumanMessage(content=f"Review this SRS draft:\n\n{draft[:12000]}"),
-        ],
-        node_name="qa_review_structural",
-    )
-    
-    structural_passed = False
-    structural_gaps = []
-    try:
-        data = _parse_json(_ai_text(response_structural))
-        structural_passed: bool = bool(data.get("passed", False))
-        structural_gaps = _normalize_questions(
-            data.get("gaps", []),
-            source="qa",
-            project_scope=project_scope,
-            draft_context=draft,
-        )
-    except (json.JSONDecodeError, ValueError):
-        logger.warning("QA structural reviewer returned non-JSON; defaulting to passed=True.")
-        structural_passed = True
-        structural_gaps = []
-    
-    logger.info("QA structural pass: passed=%s, gaps=%d", structural_passed, len(structural_gaps))
-    
-    # ── Pass 2: Requirement quality check ─────────────────────────────────────
-    # Extract top 30 requirements from draft for quality review
-    requirement_lines = [
-        line for line in draft.split("\n")
-        if re.match(r"^####\s+[A-Z]+-\d+:", line)
-    ]
-    requirements_sample = "\n".join(requirement_lines[:30])
-    
-    # Get project scope for quality checker context (default to "complex" for backward compatibility)
-    project_scope = state.get("project_scope", "complex")
-    
-    response_quality = await _llm_invoke_with_retry(
-        llm_quality,
-        [
-            SystemMessage(content=prompts.QA_REQUIREMENT_QUALITY_SYSTEM.format(project_scope=project_scope)),
-            HumanMessage(content=f"Review requirement quality:\n\n{requirements_sample}"),
-        ],
-        node_name="qa_review_quality",
-    )
-    
-    quality_passed = False
-    quality_issues = []
-    try:
-        data = _parse_json(_ai_text(response_quality))
-        quality_passed: bool = bool(data.get("passed", True))  # Default to pass if unclear
-        quality_issues_raw = data.get("quality_issues", [])
-        
-        # Count high-severity issues
-        high_severity_count = sum(
-            1 for issue in quality_issues_raw
-            if isinstance(issue, dict) and issue.get("severity") == "high"
-        )
-        
-        # Fail threshold depends on scope
-        # For simple projects: allow up to 30% high-severity issues (only checking Functional requirements)
-        # For complex: require ≤ 20% high-severity issues
-        if project_scope == "simple":
-            fail_threshold = max(2, len(requirement_lines) // 3)  # 33% threshold for simple
-        else:
-            fail_threshold = max(1, len(requirement_lines) // 5)  # 20% threshold for complex/medium
-        
-        if high_severity_count > fail_threshold:
-            quality_passed = False
-        
-        # Convert quality issues to ClarificationQuestion format
-        for issue in quality_issues_raw[:5]:  # Limit to 5 issues in output
-            if isinstance(issue, dict):
-                quality_question = f"{issue.get('requirement_id', 'REQ')}: {issue.get('problem', 'Quality issue')}"
-                quality_issue = ClarificationQuestion(
-                    category="Requirement Quality",
-                    question=quality_question,
-                    suggested_options=[issue.get("suggested_fix", "Make the requirement more specific")],
-                    rationale=issue.get("issue", "Requirement needs refinement"),
-                )
-                normalized_issue = _normalize_clarification_question(
-                    quality_issue,
-                    source="qa",
-                    project_scope=project_scope,
-                    draft_context=draft,
-                )
-                if normalized_issue:
-                    quality_issues.append(normalized_issue)
-    except (json.JSONDecodeError, ValueError):
-        logger.warning("QA quality reviewer returned non-JSON; defaulting to passed=True.")
-        quality_passed = True
-        quality_issues = []
-    
-    logger.info("QA quality pass: passed=%s, issues=%d", quality_passed, len(quality_issues))
-    
-    # ── Combine results ───────────────────────────────────────────────────────
-    overall_passed = structural_passed and quality_passed
-    all_gaps = structural_gaps + quality_issues
-    
-    logger.info("QA review complete: passed=%s, total_gaps=%d", overall_passed, len(all_gaps))
-    return {"is_complete": overall_passed, "qa_gaps": all_gaps}
-
-
-# ── Node 14: Finalize document ────────────────────────────────────────────────
-
-
-async def finalize_document(state: SRSState) -> dict:
-    """Assemble all validated sections and Mermaid diagrams into final Markdown."""
-    sections = state.get("sections", {})
-    blocks = state.get("mermaid_blocks", [])
-    errors = state.get("mermaid_errors", [])
-
-    diagram_titles = [
-        "System Architecture Diagram",
-        "Primary User Workflow - Sequence Diagram",
-        "Core Data Model - Entity Relationship Diagram",
-    ]
-
-    diagrams_md = ""
-    for index, title in enumerate(diagram_titles):
-        block = blocks[index] if index < len(blocks) else ""
-        error = errors[index] if index < len(errors) else ""
-
-        if error or not str(block).strip():
-            diagrams_md += (
-                f"\n\n### {title}\n"
-                "\n> ⚠️ *Diagram unavailable. Regenerate diagrams after updating the blueprint.*\n"
-            )
-        else:
-            diagrams_md += f"\n\n### {title}\n\n```mermaid\n{block}\n```\n"
-
-    final = "\n\n".join(
-        filter(
-            None,
-            [
-                sections.get("s1", ""),
-                sections.get("s2", ""),
-                "## 3. Requirements",
-                sections.get("s3_iface", ""),
-                sections.get("s3_fr", ""),
-                sections.get("s3_nfr", ""),
-                sections.get("s4", ""),
-                "## Appendix A - System Diagrams" + diagrams_md if diagrams_md.strip() else "",
-            ],
-        )
+    human_answer = interrupt(
+        {
+            "type": "draft_review",
+            "prompt": "Review the draft and use the Finalize document button when ready.",
+            "sections": sections,
+        }
     )
 
-    logger.info("Final document assembled: %d characters.", len(final))
-    return {"final_document": final}
+    if isinstance(human_answer, dict):
+        user_feedback = _normalize_message_text(str(human_answer.get("message", "")))
+    else:
+        user_feedback = _normalize_message_text(str(human_answer or ""))
 
+    # Check if user wants to finalize
+    if _is_control_command(user_feedback, FINALIZE_COMMAND) or any(
+        keyword in user_feedback for keyword in ["finalize", "done", "looks good", "ready", "complete"]
+    ):
+        logger.info("User approved final draft; proceeding to finalization")
+        return {
+            "revision_targets": [],
+        }
 
-# ── Internal helpers ──────────────────────────────────────────────────────────
+    # Check if regeneration requested
+    if _is_control_command(user_feedback, REQUEST_REVIEW_EDIT_COMMAND) or any(
+        word in user_feedback for word in ["regenerate", "rewrite", "redo"]
+    ):
+        logger.info("Regeneration requested")
+        return {
+            "revision_targets": ["s1"],  # Placeholder; would parse section numbers
+        }
 
-
-_SECTION_1_REQUIRED_HEADINGS = [
-    "## 1. Introduction",
-    "### 1.1 Purpose",
-    "### 1.2 Scope",
-    "### 1.3 Definitions, Acronyms, and Abbreviations",
-    "### 1.4 References",
-    "### 1.5 Overview",
-]
-
-
-def _normalize_heading_title(value: str) -> str:
-    return re.sub(r"\s+", " ", value.strip().lower())
-
-
-_SECTION_1_TITLE_TO_HEADING = {
-    _normalize_heading_title(heading.split(" ", 1)[1]): heading
-    for heading in _SECTION_1_REQUIRED_HEADINGS
-}
-
-
-def _unwrap_markdown_fence(markdown: str) -> str:
-    stripped = str(markdown or "").strip()
-    fence_match = re.match(
-        r"^```(?:markdown|md)?\s*\n([\s\S]*?)\n```\s*$",
-        stripped,
-        flags=re.IGNORECASE,
-    )
-    if fence_match:
-        return fence_match.group(1).strip()
-    return stripped
-
-
-def _normalize_markdown_general(markdown: str) -> str:
-    """Normalize common markdown variance from LLM outputs."""
-    source = _unwrap_markdown_fence(markdown).replace("\r\n", "\n").replace("\r", "\n")
-    source = re.sub(r"\n{3,}", "\n\n", source)
-    return source.strip()
-
-
-_SECTION_EXPECTED_HEADINGS: dict[str, str] = {
-    "s2": "## 2. Product Overview",
-    "s3_iface": "### 3.1 External Interface Requirements",
-    "s3_fr": "### 3.2 Functional Requirements",
-    "s3_nfr": "### 3.3 Quality of Service Requirements",
-    "s4": "## 4. Verification",
-}
-
-_SECTION_NUMBER_PREFIX: dict[str, str] = {
-    "s2": "2",
-    "s3_iface": "3.1",
-    "s3_fr": "3.2",
-    "s3_nfr": "3.3",
-    "s4": "4",
-}
-
-
-def _has_heading_for_section_number(markdown: str, section_number: str) -> bool:
-    pattern = re.compile(
-        rf"^\s{{0,3}}#{{1,6}}\s+{re.escape(section_number)}(?:\b|\.|\))",
-        flags=re.MULTILINE,
-    )
-    return bool(pattern.search(markdown))
-
-
-def _ensure_expected_section_heading(markdown: str, expected_heading: str, section_number: str) -> str:
-    if not markdown:
-        return expected_heading
-    if _has_heading_for_section_number(markdown, section_number):
-        return markdown
-    return f"{expected_heading}\n\n{markdown.lstrip()}"
-
-
-def _has_meaningful_markdown_body(lines: list[str]) -> bool:
-    for line in lines:
-        trimmed = line.strip()
-        if not trimmed:
-            continue
-
-        if re.match(r"^\s{0,3}[-*_]{3,}\s*$", trimmed):
-            continue
-
-        if re.match(r"^#{1,6}\s*$", trimmed):
-            continue
-
-        if re.match(r"^#{1,6}\s+", trimmed):
-            continue
-
-        normalized = re.sub(r"[`*_~|>#-]", " ", trimmed)
-        if re.search(r"[A-Za-z0-9]", normalized):
-            return True
-
-    return False
-
-
-def _normalize_section_output(section_key: str, markdown: str, state: SRSState) -> str:
-    """Apply consistent markdown cleanup and required heading enforcement by section."""
-    normalized = _normalize_markdown_general(markdown)
-
-    if section_key == "s1":
-        return _ensure_section_1_completeness(normalized, state)
-
-    expected_heading = _SECTION_EXPECTED_HEADINGS.get(section_key)
-    section_number = _SECTION_NUMBER_PREFIX.get(section_key)
-    if expected_heading and section_number:
-        return _ensure_expected_section_heading(normalized, expected_heading, section_number)
-
-    return normalized
-
-
-def _resolve_project_name(state: SRSState) -> str:
-    explicit_title = _normalize_project_title(state.get("project_title", ""))
-    if explicit_title:
-        return explicit_title
-
-    for message in state.get("chat_history", []):
-        if not isinstance(message, HumanMessage):
-            continue
-
-        text = re.sub(r"\s+", " ", str(message.content or "")).strip()
-        if not text:
-            continue
-
-        text = re.sub(
-            r"^i\s+want\s+to\s+(?:build|make|create)\s+",
-            "",
-            text,
-            flags=re.IGNORECASE,
-        )
-        text = text.strip(" .")
-        if text:
-            return text[:80]
-
-    return "the system"
-
-
-def _section_1_fallback_content(state: SRSState) -> dict[str, list[str]]:
-    project_name = _resolve_project_name(state)
-    references = [
-        "- IEEE Std 830-1998: IEEE Recommended Practice for Software Requirements Specifications.",
-        "- ISO/IEC/IEEE 29148: Systems and software engineering - Life cycle processes - Requirements engineering.",
-        "- Project elicitation notes and stakeholder clarification responses captured in this session.",
+    # Otherwise, acknowledge and re-interrupt
+    acknowledgment = "I'll make those changes. One moment..."
+    new_messages = state.get("chat_history", []) + [
+        HumanMessage(content=str(human_answer.get("message", "")) if isinstance(human_answer, dict) else str(human_answer or "")),
+        AIMessage(content=acknowledgment),
     ]
 
     return {
-        "## 1. Introduction": [
-            (
-                f"This Software Requirements Specification (SRS) defines the functional, interface, "
-                f"quality, and verification requirements for {project_name}. "
-                "It serves as the contractual baseline for implementation, validation, and acceptance."
-            ),
-        ],
-        "### 1.1 Purpose": [
-            (
-                f"The purpose of this SRS is to specify verifiable requirements for {project_name} "
-                "so that engineering, QA, and stakeholders can implement and validate a consistent solution."
-            ),
-        ],
-        "### 1.2 Scope": [
-            (
-                f"The scope includes browser-based gameplay behavior, input handling, obstacle interaction, "
-                f"scoring logic, and performance expectations for {project_name}."
-            ),
-            "Out-of-scope features include unrelated platform expansion unless explicitly requested in later revisions.",
-        ],
-        "### 1.3 Definitions, Acronyms, and Abbreviations": [
-            "| Term | Definition |",
-            "| --- | --- |",
-            f"| {project_name} | Target software product defined by this SRS. |",
-            "| Player | End user interacting with gameplay controls. |",
-            "| Game loop | Continuous update and render cycle executed during runtime. |",
-            "| Obstacle | Dynamic object that the player must avoid or navigate. |",
-        ],
-        "### 1.4 References": references,
-        "### 1.5 Overview": [
-            (
-                "Section 2 describes the product context and constraints, Section 3 captures detailed functional "
-                "and quality requirements, and Section 4 defines the verification approach for acceptance."
-            ),
-        ],
+        "chat_history": new_messages,
     }
 
 
-def _collect_section_1_blocks(markdown: str) -> dict[str, list[str]]:
-    blocks = {heading: [] for heading in _SECTION_1_REQUIRED_HEADINGS}
-    lines = markdown.splitlines()
-
-    current_heading: str | None = None
-    current_level: int | None = None
-
-    for line in lines:
-        stripped = line.strip()
-        heading_match = re.match(r"^(#{1,6})\s+(.+)$", stripped)
-
-        if heading_match:
-            level = len(heading_match.group(1))
-            title_key = _normalize_heading_title(heading_match.group(2))
-            mapped_heading = _SECTION_1_TITLE_TO_HEADING.get(title_key)
-
-            if current_heading is not None and current_level is not None and level <= current_level:
-                current_heading = None
-                current_level = None
-
-            if mapped_heading:
-                current_heading = mapped_heading
-                current_level = level
-                continue
-
-        if current_heading is not None:
-            blocks[current_heading].append(line)
-
-    return blocks
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 5: Finalization & Export
+# ─────────────────────────────────────────────────────────────────────────────
 
 
-def _ensure_section_1_completeness(markdown: str, state: SRSState) -> str:
-    source = _unwrap_markdown_fence(markdown).replace("\r\n", "\n").replace("\r", "\n")
-    existing_blocks = _collect_section_1_blocks(source)
-    fallback_blocks = _section_1_fallback_content(state)
+async def finalize_and_export(state: SRSState) -> dict:
+    """
+    Assemble final SRS document and prepare for export.
+    """
+    sections = state.get("sections", {})
 
-    missing_or_empty: list[str] = []
-    result_lines: list[str] = []
+    # Assemble final document
+    final_document = ""
+    for key in ["s1", "s2", "s3_functional", "s3_external", "s3_nfr", "s4"]:
+        if key in sections:
+            final_document += sections[key] + "\n\n"
 
-    for heading in _SECTION_1_REQUIRED_HEADINGS:
-        result_lines.append(heading)
+    logger.info("SRS finalized; ready for export")
 
-        body_lines = [line.rstrip() for line in existing_blocks.get(heading, [])]
-        if _has_meaningful_markdown_body(body_lines):
-            # Trim leading/trailing blank lines while preserving internal formatting.
-            while body_lines and not body_lines[0].strip():
-                body_lines.pop(0)
-            while body_lines and not body_lines[-1].strip():
-                body_lines.pop()
-            result_lines.extend(body_lines)
-        else:
-            missing_or_empty.append(heading)
-            result_lines.extend(fallback_blocks[heading])
-
-        result_lines.append("")
-
-    if missing_or_empty:
-        logger.info(
-            "Section 1 fallback content inserted for headings: %s",
-            ", ".join(missing_or_empty),
-        )
-
-    return "\n".join(result_lines).strip()
-
-
-def _build_writing_context(state: SRSState) -> str:
-    """Build a concise context string for writer node prompts."""
-    parts: list[str] = []
-
-    buffer = state.get("document_buffer", "")
-    if buffer:
-        parts.append(f"## ELICITATION OUTLINE\n{buffer[:3000]}")
-
-    history = state.get("chat_history", [])
-    if history:
-        convo = "\n".join(
-            f"{'USER' if isinstance(m, HumanMessage) else 'AI'}: {str(m.content)[:400]}"
-            for m in history[-10:]
-        )
-        parts.append(f"## CONVERSATION CONTEXT (last 10 messages)\n{convo}")
-
-    reqs = state.get("requirements", [])
-    if reqs:
-        req_lines: list[str] = []
-        for req in reqs[:40]:
-            if not isinstance(req, dict):
-                continue
-            req_id = str(req.get("id", "")).strip()
-            text = str(req.get("text", "")).strip()
-            if req_id and text:
-                req_lines.append(f"- {req_id}: {text}")
-            elif text:
-                req_lines.append(f"- {text}")
-        if req_lines:
-            parts.append("## REQUIREMENTS\n" + "\n".join(req_lines))
-
-    return "\n\n".join(parts) or "No context available yet."
-
-
-def _build_diagram_context(state: SRSState) -> str:
-    """Build a context string for diagram generation using drafted sections."""
-    sections = state.get("sections", {}) or {}
-    if not sections:
-        return ""
-
-    parts: list[str] = []
-    s2 = str(sections.get("s2", "") or "").strip()
-    if s2:
-        parts.append(f"## SECTION 2 - PRODUCT OVERVIEW\n{s2[:5000]}")
-
-    s3_iface = str(sections.get("s3_iface", "") or "").strip()
-    if s3_iface:
-        parts.append(f"## SECTION 3.1 - EXTERNAL INTERFACES\n{s3_iface[:3000]}")
-
-    s3_fr = str(sections.get("s3_fr", "") or "").strip()
-    if s3_fr:
-        parts.append(f"## SECTION 3.2 - FUNCTIONAL REQUIREMENTS\n{s3_fr[:4000]}")
-
-    s3_nfr = str(sections.get("s3_nfr", "") or "").strip()
-    if s3_nfr:
-        parts.append(f"## SECTION 3.3 - QUALITY OF SERVICE\n{s3_nfr[:2000]}")
-
-    return "\n\n".join(parts).strip()
-
-
-def _extract_mermaid_code(text: str) -> str:
-    """Extract raw Mermaid code from a fenced code block."""
-    match = re.search(r"```(?:mermaid)?\s*\n?(.*?)```", text, re.DOTALL)
-    if match:
-        return match.group(1).strip()
-    # If no fence, return stripped text as-is (might be raw code)
-    return text.strip()
-
-
-def _normalize_for_revision_comparison(value: str) -> str:
-    return re.sub(r"\s+", " ", str(value or "").strip().lower())
-
-
-def _is_material_revision(original: str, revised: str, requested_change: str) -> bool:
-    original_norm = _normalize_for_revision_comparison(original)
-    revised_norm = _normalize_for_revision_comparison(revised)
-    if not revised_norm:
-        return False
-    if original_norm == revised_norm:
-        return False
-
-    similarity = SequenceMatcher(None, original_norm, revised_norm).ratio()
-    if similarity <= 0.985:
-        return True
-
-    requested_tokens = [
-        token
-        for token in re.split(r"[^a-z0-9]+", requested_change.lower())
-        if len(token) >= 5
-    ][:10]
-
-    if not requested_tokens:
-        return similarity < 0.995
-
-    matched = sum(1 for token in requested_tokens if token in revised_norm)
-    required_matches = 2 if len(requested_tokens) >= 4 else 1
-    return matched >= required_matches or similarity < 0.995
-
-
-def _looks_like_expected_mermaid(index: int, code: str) -> bool:
-    first_line = (code.strip().splitlines() or [""])[0].strip().lower()
-    if index == 0:
-        return first_line.startswith("flowchart") or first_line.startswith("graph")
-    if index == 1:
-        return first_line.startswith("sequencediagram")
-    return first_line.startswith("erdiagram")
-
-
-def _fallback_mermaid_code(index: int) -> str:
-    """Return a minimal valid Mermaid diagram when LLM generation fails."""
-    if index == 0:
-        return "\n".join(
-            [
-                "flowchart TD",
-                "    User[User] --> API[API Layer]",
-                "    API --> Core[Core Services]",
-                "    Core --> DB[(Database)]",
-            ]
-        )
-
-    if index == 1:
-        return "\n".join(
-            [
-                "sequenceDiagram",
-                "    participant User",
-                "    participant System",
-                "    User->>System: Submit request",
-                "    System-->>User: Return response",
-            ]
-        )
-
-    return "\n".join(
-        [
-            "erDiagram",
-            "    USER ||--o{ REQUIREMENT : creates",
-            "    REQUIREMENT {",
-            "        string id",
-            "        string title",
-            "    }",
-        ]
+    export_message = (
+        "**✓ SRS Document Complete!**\n\n"
+        "Your Software Requirements Specification is ready.\n\n"
+        "Export options:\n"
+        "- **Markdown** — Copy the document above\n"
+        "- **JSON** — Structured data format\n"
+        "- **DOCX** — Formatted document (coming soon)\n"
+        "- **Jira/Confluence** — Ticket format (coming soon)"
     )
+
+    new_messages = state.get("chat_history", []) + [AIMessage(content=export_message)]
+
+    return {
+        "current_phase": "complete",
+        "chat_history": new_messages,
+    }
