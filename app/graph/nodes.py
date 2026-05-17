@@ -751,25 +751,19 @@ async def generate_mermaid_diagrams(state: SRSState) -> dict:
         diagram_code = response.model_dump(mode="json")
         mermaid_blocks: list[str] = []
 
-        diagram_labels = {
-            "usecase": "usecaseDiagram - Use Case Diagram",
-            "class_diagram": "classDiagram - Class Diagram",
-            "er": "erDiagram - Entity Relationship Diagram",
-            "activity": "stateDiagram-v2 - Activity Diagram",
+        diagram_type_prefixes = {
+            "usecase": "usecaseDiagram",
+            "class_diagram": "classDiagram",
+            "er": "erDiagram",
+            "activity": "stateDiagram-v2",
         }
 
-        for key, label in diagram_labels.items():
+        for key, expected_prefix in diagram_type_prefixes.items():
             code = str(diagram_code.get(key, "")).strip()
             if code:
-                if not code.startswith(tuple(d["key"] for d in [
-                    {"key": "usecaseDiagram"},
-                    {"key": "classDiagram"},
-                    {"key": "erDiagram"},
-                    {"key": "stateDiagram-v2"},
-                ] + [])):
-                    mermaid_blocks.append(code)
-                else:
-                    mermaid_blocks.append(code)
+                if not code.startswith(expected_prefix):
+                    code = f"{expected_prefix}\n{code}"
+                mermaid_blocks.append(code)
 
         if not mermaid_blocks:
             mermaid_blocks = _fallback_mermaid_diagrams_for_node(ingestion)
