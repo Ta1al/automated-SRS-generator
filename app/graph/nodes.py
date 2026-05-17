@@ -318,29 +318,6 @@ async def _llm_invoke_structured(
             last_error = e
             error_str = str(e)
             
-            # Try to extract the actual JSON that failed validation
-            if "input_value=" in error_str:
-                try:
-                    # Find the truncated JSON in the error message
-                    start = error_str.find("input_value='") + len("input_value='")
-                    end = error_str.find("'", start)
-                    truncated_json = error_str[start:end] if end > start else ""
-                    
-                    # Dump to file for debugging
-                    debug_dir = Path("debug_outputs")
-                    debug_dir.mkdir(exist_ok=True)
-                    
-                    import time
-                    timestamp = int(time.time() * 1000)
-                    debug_file = debug_dir / f"llm_response_{timestamp}_{output_model.__name__}.json"
-                    
-                    with open(debug_file, "w") as f:
-                        f.write(truncated_json)
-                    
-                    logger.error(f"JSON validation failed. Raw output dumped to: {debug_file}")
-                except Exception as dump_error:
-                    logger.error(f"Could not dump JSON: {dump_error}")
-            
             if attempt < max_retries:
                 logger.warning(
                     f"Structured output failed (attempt {attempt + 1}/{max_retries + 1}): {error_str[:200]}. "
