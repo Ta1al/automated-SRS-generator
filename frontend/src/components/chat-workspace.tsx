@@ -3,6 +3,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import pako from "pako";
 
 import {
   type BackendStatusEvent,
@@ -416,7 +417,22 @@ function MarkdownContent({ content }: { content: string }) {
   // from scratch (matching the backend `number_headings` in app/formatting.py).
   function numberHeadings(markdown: string) {
     const counters = [0, 0, 0, 0, 0, 0];
+    const numericPrefixPattern = /^[0-9]+(?:\.[0-9]+)*[\)\.:\-\s]+/;
+    const appendixPrefixPattern = /^([A-Z])[\)\.:\-\s]+(.+)$/;
+
+    const stripNumericPrefixes = (value: string) => {
+      let cleaned = value.trim();
+      while (true) {
+        const next = cleaned.replace(numericPrefixPattern, "").trim();
+        if (next === cleaned) {
+          return cleaned;
+        }
+        cleaned = next;
+      }
+    };
+
     const outLines: string[] = [];
+    let inAppendices = false;
     for (const line of markdown.split(/\r?\n/)) {
       const m = /^(#{1,6})\s*(.+)$/.exec(line);
       if (!m) {
@@ -424,7 +440,22 @@ function MarkdownContent({ content }: { content: string }) {
         continue;
       }
       const level = Math.min(6, m[1].length);
-      const title = m[2].replace(/^[0-9]+(?:\.[0-9]+)*[\)\.:\-\s]+/, "").trim();
+      const title = stripNumericPrefixes(m[2]);
+
+      if (level === 1) {
+        inAppendices = title.toLowerCase().includes("appendices");
+      }
+
+      if (level >= 2 && inAppendices) {
+        const appendixMatch = appendixPrefixPattern.exec(title);
+        if (appendixMatch) {
+          const letter = appendixMatch[1];
+          const appendixTitle = appendixMatch[2].trim();
+          outLines.push(`${m[1]} ${letter}. ${appendixTitle}`.trim());
+          continue;
+        }
+      }
+
       counters[level - 1] = (counters[level - 1] || 0) + 1;
       for (let i = level; i < counters.length; i++) counters[i] = 0;
       const numberParts = counters.slice(0, level).filter((n) => n > 0);
@@ -510,6 +541,10 @@ function MarkdownContent({ content }: { content: string }) {
             return <MermaidBlock chart={codeText} />;
           }
 
+          if (language === "plantuml") {
+            return <PlantUMLBlock chart={codeText} />;
+          }
+
           if (language) {
             return (
               <pre className="mb-2 overflow-x-auto rounded-md bg-black/90 p-3 text-xs text-white">
@@ -592,6 +627,77 @@ function MermaidBlock({ chart }: { chart: string }) {
   }, [chart]);
 
   return <div ref={elementRef} className="mb-2 overflow-x-auto rounded-md bg-[color:var(--surface-lowest)] p-2 ring-1 ring-[color:var(--outline-variant)]/30" />;
+}
+
+const PLANTUML_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_";
+
+function encodePlantuml(data: Uint8Array): string {
+  const encoded: string[] = [];
+  for (let i = 0; i < data.length; i += 3) {
+    const b1 = data[i];
+    const b2 = i + 1 < data.length ? data[i + 1] : 0;
+    const b3 = i + 2 < data.length ? data[i + 2] : 0;
+
+    encoded.push(PLANTUML_ALPHABET[b1 >> 2]);
+    encoded.push(PLANTUML_ALPHABET[((b1 & 0x03) << 4) | (b2 >> 4)]);
+    if (i + 1 < data.length) {
+      encoded.push(PLANTUML_ALPHABET[((b2 & 0x0F) << 2) | (b3 >> 6)]);
+    }
+    if (i + 2 < data.length) {
+      encoded.push(PLANTUML_ALPHABET[b3 & 0x3F]);
+    }
+  }
+  return encoded.join("");
+}
+
+function plantumlEncode(source: string): string {
+  const encoder = new TextEncoder();
+  const utf8 = encoder.encode(source);
+  const compressed = pako.deflateRaw(utf8);
+  return encodePlantuml(compressed);
+}
+
+function PlantUMLBlock({ chart }: { chart: string }) {
+  const src = useMemo(() => {
+    try {
+      const encoded = plantumlEncode(chart);
+      return `https://www.plantuml.com/plantuml/svg/${encoded}`;
+    } catch {
+      return null;
+    }
+  }, [chart]);
+
+  if (!src) {
+    return (
+      <div className="mb-2 rounded-md bg-[color:var(--surface-lowest)] p-3 ring-1 ring-[color:var(--outline-variant)]/30">
+        <p className="text-xs italic text-[color:var(--on-surface-variant)]">
+          PlantUML diagram unavailable.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mb-2 flex justify-center rounded-md bg-[color:var(--surface-lowest)] p-2 ring-1 ring-[color:var(--outline-variant)]/30">
+      <img
+        src={src}
+        alt="PlantUML diagram"
+        className="max-w-full h-auto"
+        style={{ maxHeight: 500 }}
+        onError={(e) => {
+          const target = e.currentTarget;
+          target.style.display = "none";
+          const parent = target.parentElement;
+          if (parent) {
+            const note = document.createElement("p");
+            note.className = "text-xs italic text-[color:var(--on-surface-variant)]";
+            note.textContent = "PlantUML diagram unavailable.";
+            parent.appendChild(note);
+          }
+        }}
+      />
+    </div>
+  );
 }
 
 function parseAssistantClarificationContent(content: string): {
@@ -2088,8 +2194,13 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
   );
 
   const previewDocumentText = useMemo(
-    () => draftedDocumentText || resolvedDocumentText,
-    [draftedDocumentText, resolvedDocumentText],
+    () => resolvedDocumentText || draftedDocumentText,
+    [resolvedDocumentText, draftedDocumentText],
+  );
+
+  const previewAlreadyIncludesDiagrams = useMemo(
+    () => /(^|\n)\s*#{1,6}\s*\d+\.?\s*Diagrams\b/i.test(previewDocumentText),
+    [previewDocumentText],
   );
 
   const draftReadyForFinalize = Boolean(resolvedDocumentText.trim()) && currentPhase === "review_refine";
@@ -2570,7 +2681,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
                   "The draft SRS document will appear here once sections are available."
                 }
               />
-              {mermaidBlocksFromState.length > 0 ? (
+              {mermaidBlocksFromState.length > 0 && !previewAlreadyIncludesDiagrams ? (
                 <div className="mt-6">
                   <h2 className="mb-2 text-base font-semibold">6. Diagrams</h2>
                   <div className="space-y-4">
