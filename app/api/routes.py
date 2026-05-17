@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import suppress
+from datetime import datetime, timezone
 import json
 import logging
 import re
@@ -83,6 +84,296 @@ Do not include markdown or extra keys.
 def _slugify_for_filename(value: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
     return slug[:80]
+
+
+def _assemble_document_from_sections(state_values: dict[str, Any]) -> str:
+    """Assemble an SRS Markdown document from stored section drafts."""
+    sections = state_values.get("sections", {}) or {}
+    ordered_keys = ["s1", "s2", "s3_functional", "s3_external", "s3_nfr", "s4"]
+    parts = [str(sections.get(key, "")).strip() for key in ordered_keys if str(sections.get(key, "")).strip()]
+    return "\n\n".join(parts).strip()
+
+
+def _markdown_table(headers: list[str], rows: list[list[str]]) -> str:
+    if not headers or not rows:
+        return ""
+
+    header_line = "| " + " | ".join(headers) + " |"
+    separator_line = "| " + " | ".join(["---"] * len(headers)) + " |"
+    body_lines = ["| " + " | ".join(row) + " |" for row in rows]
+    return "\n".join([header_line, separator_line, *body_lines])
+
+
+def _use_case_rows_from_ingestion(ingestion: dict[str, Any]) -> list[dict[str, str]]:
+    actors = [str(actor).strip() for actor in (ingestion.get("suggested_actors", []) or ingestion.get("target_users", []) or ["User"]) if str(actor).strip()]
+    core_flows = [flow for flow in (ingestion.get("core_flows", []) or []) if isinstance(flow, dict)]
+    components = [str(component).strip() for component in (ingestion.get("components", []) or []) if str(component).strip()]
+    interfaces = [str(interface).strip() for interface in (ingestion.get("external_interfaces", []) or []) if str(interface).strip()]
+
+    if not core_flows:
+        core_flows = [
+            {
+                "name": str(ingestion.get("project_purpose", "Primary workflow")).strip() or "Primary workflow",
+                "goal": str(ingestion.get("project_purpose", "Deliver the product's main value")).strip() or "Deliver the product's main value",
+                "steps": ["Capture user request", "Process request", "Return outcome"],
+                "success_metric": str((ingestion.get("success_criteria", []) or ["User completes the main task"])[0]),
+            }
+        ]
+
+    rows: list[dict[str, str]] = []
+    for index, flow in enumerate(core_flows[:6], start=1):
+        flow_name = str(flow.get("name", f"Use Case {index}")).strip() or f"Use Case {index}"
+        goal = str(flow.get("goal", "")).strip() or str(ingestion.get("project_purpose", "")).strip() or "Deliver the requested outcome"
+        steps = flow.get("steps", []) or []
+        if isinstance(steps, list):
+            step_text = "; ".join(str(step).strip() for step in steps[:4] if str(step).strip())
+        else:
+            step_text = str(steps).strip()
+        if not step_text:
+            step_text = "Capture request; process request; confirm outcome"
+        success_metric = str(flow.get("success_metric", "")).strip() or str((ingestion.get("success_criteria", []) or ["User completes the flow"])[0]).strip()
+        primary_actor = actors[(index - 1) % len(actors)] if actors else "User"
+        rows.append(
+            {
+                "id": f"UC-{index:02d}",
+                "actor": primary_actor,
+                "name": flow_name,
+                "goal": goal,
+                "steps": step_text,
+                "success": success_metric,
+                "components": ", ".join(components[:3]) if components else "Application Service",
+                "interfaces": ", ".join(interfaces[:3]) if interfaces else "None",
+            }
+        )
+
+    return rows
+
+
+def _append_use_case_tables_to_document(document_text: str, state_values: dict[str, Any]) -> str:
+    """Append a use-case appendix with catalog and detail tables."""
+    if "## 5. Use Case Tables" in document_text:
+        return document_text.strip()
+
+    ingestion = state_values.get("ingestion_summary", {}) or {}
+    use_case_rows = _use_case_rows_from_ingestion(ingestion)
+    if not use_case_rows:
+        return document_text.strip()
+
+    lines: list[str] = [document_text.strip(), "## 5. Use Case Tables"]
+
+    catalog_rows = [
+        [
+            row["id"],
+            row["actor"],
+            row["name"],
+            row["goal"],
+            row["steps"],
+            row["success"],
+        ]
+        for row in use_case_rows
+    ]
+    catalog_table = _markdown_table(
+        ["ID", "Primary Actor", "Use Case", "Goal", "Key Steps", "Success Criteria"],
+        catalog_rows,
+    )
+    if catalog_table:
+        lines.append("### Use Case Catalog")
+        lines.append(catalog_table)
+
+    for row in use_case_rows[:3]:
+        lines.append(f"### {row['id']} {row['name']}")
+        detail_table = _markdown_table(
+            ["Field", "Value"],
+            [
+                ["Primary Actor", row["actor"]],
+                ["Goal", row["goal"]],
+                ["Main Steps", row["steps"]],
+                ["Success Criteria", row["success"]],
+                ["Related Components", row["components"]],
+                ["External Interfaces", row["interfaces"]],
+            ],
+        )
+        if detail_table:
+            lines.append(detail_table)
+
+    return "\n\n".join(lines).strip()
+
+
+def _append_diagrams_to_document(document_text: str, state_values: dict[str, Any]) -> str:
+    """Append PlantUML diagrams to the end of a document body."""
+    if "## 6. Diagrams" in document_text:
+        return document_text.strip()
+
+    diagrams = state_values.get("plantumul_diagrams", {}) or {}
+    mermaid_blocks = state_values.get("mermaid_blocks", []) or []
+    ingestion = state_values.get("ingestion_summary", {}) or {}
+
+    if (not isinstance(diagrams, dict) or not diagrams) and not mermaid_blocks:
+        mermaid_blocks = _fallback_mermaid_diagrams(ingestion)
+
+    if (not isinstance(diagrams, dict) or not diagrams) and not mermaid_blocks:
+        return document_text.strip()
+
+    lines: list[str] = [document_text.strip(), "## 6. Diagrams"]
+    for diagram_key, diagram_code in diagrams.items():
+        cleaned_key = str(diagram_key).replace("_", " ").strip().title() or "Diagram"
+        cleaned_code = str(diagram_code or "").strip()
+        if not cleaned_code:
+            continue
+        lines.append(f"### {cleaned_key}")
+        lines.append("```plantuml")
+        lines.append(cleaned_code)
+        lines.append("```")
+
+    if mermaid_blocks:
+        lines.append("### Mermaid")
+        for index, mermaid_code in enumerate(mermaid_blocks, start=1):
+            cleaned_code = str(mermaid_code or "").strip()
+            if not cleaned_code:
+                continue
+            lines.append(f"#### Mermaid Diagram {index}")
+            lines.append("```mermaid")
+            lines.append(cleaned_code)
+            lines.append("```")
+
+    return "\n\n".join(line for line in lines if line is not None).strip()
+
+
+def _format_srs_document(document_text: str, state_values: dict[str, Any]) -> str:
+    """Wrap the SRS body with title metadata, a table of contents, and appendices."""
+    body = str(document_text or "").strip()
+    if not body:
+        return ""
+
+    if "## Table of Contents" in body:
+        return body
+
+    ingestion = state_values.get("ingestion_summary", {}) or {}
+    project_title = str(state_values.get("project_title") or ingestion.get("project_title") or "Software Requirements Specification").strip() or "Software Requirements Specification"
+    generated_on = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+    table_of_contents = _markdown_table(
+        ["Section", "Title"],
+        [
+            ["1", "Introduction"],
+            ["2", "Overall Description"],
+            ["3", "Specific Requirements"],
+            ["4", "Appendices"],
+            ["5", "Use Case Tables"],
+            ["6", "Diagrams"],
+        ],
+    )
+
+    front_matter = [
+        f"# {project_title}",
+        "Software Requirements Specification",
+        "",
+        "## Document Information",
+        _markdown_table(
+            ["Field", "Value"],
+            [
+                ["Project", project_title],
+                ["Generated", generated_on],
+                ["Status", "Complete Draft"],
+                ["Source", "Automated SRS generation"],
+            ],
+        ),
+        "",
+        "## Table of Contents",
+        table_of_contents,
+        "",
+    ]
+
+    return "\n\n".join(part for part in [*front_matter, body] if str(part).strip()).strip()
+
+
+def _fallback_mermaid_diagrams(ingestion: dict[str, Any]) -> list[str]:
+    project_title = str(ingestion.get("project_title", "System")).strip() or "System"
+    core_flows = ingestion.get("core_flows", []) or []
+    data_entities = ingestion.get("data_entities", []) or []
+    components = ingestion.get("components", []) or []
+    interfaces = ingestion.get("external_interfaces", []) or []
+    actors = ingestion.get("suggested_actors", []) or ingestion.get("target_users", []) or ["User"]
+
+    primary_flow = "Class Scheduling"
+    secondary_flow = "Check-In Process"
+    if core_flows and isinstance(core_flows[0], dict):
+        primary_flow = str(core_flows[0].get("name", primary_flow)).strip() or primary_flow
+    if len(core_flows) > 1 and isinstance(core_flows[1], dict):
+        secondary_flow = str(core_flows[1].get("name", secondary_flow)).strip() or secondary_flow
+
+    flowchart = (
+        "flowchart TD\n"
+        f'    A["{project_title}"] --> B["{primary_flow}"]\n'
+        f'    A --> C["{secondary_flow}"]\n'
+        '    B --> D["Schedule confirmation"]\n'
+        '    C --> E["Attendance record"]'
+    )
+
+    sequence = (
+        "sequenceDiagram\n"
+        "    actor Member\n"
+        "    participant App\n"
+        "    participant Backend\n"
+        "    Member->>App: Request class booking\n"
+        "    App->>Backend: Validate slot availability\n"
+        "    Backend-->>App: Reservation confirmed\n"
+        "    App-->>Member: Show confirmation"
+    )
+
+    er_lines = [
+        "erDiagram",
+        "    USER ||--o{ ATTENDANCE_RECORD : creates",
+        "    USER ||--o{ PAYMENT_RECORD : makes",
+        "    CLASS ||--o{ ATTENDANCE_RECORD : includes",
+    ]
+    if data_entities:
+        er_lines.append("    CLASS ||--o{ PAYMENT_RECORD : billed_for")
+
+    class_lines = [
+        "classDiagram",
+        "    class User",
+        "    class Request",
+        "    class Confirmation",
+        "    User --> Request : submits",
+        "    Request --> Confirmation : returns",
+    ]
+    if len(data_entities) > 1:
+        class_lines.append(f'    class {str(data_entities[0]).replace(" ", "")}')
+
+    state_lines = [
+        "stateDiagram-v2",
+        "    [*] --> Requested",
+        "    Requested --> Validated : input ok",
+        "    Requested --> Rejected : input invalid",
+        "    Validated --> Completed : processed",
+        "    Completed --> [*]",
+    ]
+
+    component_summary = [
+        "flowchart TD",
+        f'    A["{project_title}"] --> B["{primary_flow}"]',
+        f'    B --> C["{components[0] if components else "User Interface"}"]',
+        f'    C --> D["{components[1] if len(components) > 1 else "Backend Service"}"]',
+    ]
+    if interfaces:
+        component_summary.append(f'    D --> E["{interfaces[0]}"]')
+
+    flowchart_with_roles = [
+        "flowchart TD",
+        f'    A["{actors[0] if actors else "User"}"] --> B["{primary_flow}"]',
+        f'    B --> C["{secondary_flow}"]',
+        f'    C --> D["{project_title} outcome"]',
+    ]
+
+    return [
+        "\n".join(flowchart_with_roles),
+        sequence,
+        "\n".join(er_lines),
+        "\n".join(class_lines),
+        "\n".join(state_lines),
+        "\n".join(component_summary),
+    ]
 
 
 def _guardrail_ai_text(response: Any) -> str:
@@ -774,7 +1065,7 @@ async def _stream_graph(
                                         }
 
                     # If the graph just finalised, emit the document
-                    if node_name == "finalize_document":
+                    if node_name == "finalize_and_export":
                         final_doc = node_updates.get("final_document", "")
                         if final_doc:
                             yield {
@@ -945,6 +1236,11 @@ async def get_document(thread_id: str, request: Request) -> JSONResponse:
         raise HTTPException(status_code=404, detail="Session not found.")
 
     final_doc = state.values.get("final_document", "")
+    if not final_doc and state.values.get("current_phase") == "complete":
+        final_doc = _assemble_document_from_sections(state.values)
+    final_doc = _append_use_case_tables_to_document(final_doc, state.values)
+    final_doc = _append_diagrams_to_document(final_doc, state.values)
+    final_doc = _format_srs_document(final_doc, state.values)
     if not final_doc:
         raise HTTPException(
             status_code=202,
@@ -973,6 +1269,11 @@ async def get_document_docx(thread_id: str, request: Request) -> Response:
         raise HTTPException(status_code=404, detail="Session not found.")
 
     final_doc = state.values.get("final_document", "")
+    if not final_doc and state.values.get("current_phase") == "complete":
+        final_doc = _assemble_document_from_sections(state.values)
+    final_doc = _append_use_case_tables_to_document(final_doc, state.values)
+    final_doc = _append_diagrams_to_document(final_doc, state.values)
+    final_doc = _format_srs_document(final_doc, state.values)
     if not final_doc:
         # Provide more helpful error message based on generation state
         missing_context = state.values.get("missing_context", [])
@@ -1034,6 +1335,11 @@ async def get_document_markdown(thread_id: str, request: Request) -> Response:
         raise HTTPException(status_code=404, detail="Session not found.")
 
     final_doc = state.values.get("final_document", "")
+    if not final_doc and state.values.get("current_phase") == "complete":
+        final_doc = _assemble_document_from_sections(state.values)
+    final_doc = _append_use_case_tables_to_document(final_doc, state.values)
+    final_doc = _append_diagrams_to_document(final_doc, state.values)
+    final_doc = _format_srs_document(final_doc, state.values)
     if not final_doc:
         missing_context = state.values.get("missing_context", [])
         qa_gaps = state.values.get("qa_gaps", [])
@@ -1084,7 +1390,10 @@ async def get_state(thread_id: str, request: Request) -> JSONResponse:
         {
             "thread_id": thread_id,
             "next": list(state.next) if state.next else [],
-            "is_complete": state.values.get("is_complete", False),
+            "is_complete": bool(
+                state.values.get("is_complete", False)
+                or state.values.get("current_phase", "") == "complete"
+            ),
             "current_phase": state.values.get("current_phase", ""),
             "pending_group_index": state.values.get("pending_group_index", 0),
             "missing_context_count": len(state.values.get("missing_context", [])),
@@ -1094,6 +1403,8 @@ async def get_state(thread_id: str, request: Request) -> JSONResponse:
             "missing_context": state.values.get("missing_context", []),
             "qa_gaps": state.values.get("qa_gaps", []),
             "sections": state.values.get("sections", {}),
+            "plantumul_diagrams": state.values.get("plantumul_diagrams", {}),
+            "mermaid_blocks": state.values.get("mermaid_blocks", []),
             "ingestion_summary": state.values.get("ingestion_summary", {}),
             "outline_buffer": state.values.get("outline_buffer", ""),
             "outline_items": state.values.get("outline_items", []),
