@@ -130,6 +130,7 @@ const NODE_LABELS: Record<string, string> = {
   draft_section_2: "drafting product overview",
   draft_section_4: "building the verification matrix",
   revise_selected_section: "revising the selected section",
+  generate_mermaid_diagrams: "generating Mermaid diagrams",
   generate_mermaid: "generating diagrams",
   validate_mermaid: "validating diagram syntax",
   correct_mermaid: "repairing diagram syntax",
@@ -367,7 +368,8 @@ function getWaitingOnLabel(statuses: BackendStatusEvent[], activeNode: string | 
   const nextNodeMap: Record<string, string> = {
     retrieve_rag_context: "elicit_requirements",
     elicit_requirements: "draft_section_1",
-    draft_section_4: "generate_mermaid",
+    draft_section_4: "generate_mermaid_diagrams",
+    generate_mermaid_diagrams: "finalize_document",
     generate_mermaid: "validate_mermaid",
     validate_mermaid: "finalize_document",
   };
@@ -415,20 +417,24 @@ function MarkdownContent({ content }: { content: string }) {
     const lines = markdown.split(/\r?\n/);
     const counters = [0, 0, 0, 0, 0, 0];
 
-    const stripExistingNumber = (s: string) => s.replace(/^[0-9]+(?:\.[0-9]+)*[\).:\-\s]+/, "").trim();
+    const hasNumber = (s: string) => /^[0-9]+(?:\.[0-9]+)*[\)\.:\-\s]+/.test(s);
 
     return lines
       .map((line) => {
         const m = /^(#{1,6})\s*(.+)$/.exec(line);
         if (!m) return line;
         const level = Math.min(6, m[1].length);
-        const title = stripExistingNumber(m[2]);
+        const title = m[2].trim();
 
-        // increment counter for this level and reset deeper levels
+        // If heading already has a number, keep it unchanged
+        if (hasNumber(title)) {
+          return line;
+        }
+
+        // No existing number — add hierarchical number
         counters[level - 1] = (counters[level - 1] || 0) + 1;
         for (let i = level; i < counters.length; i++) counters[i] = 0;
 
-        // build number skipping leading zeros
         const numberParts = counters.slice(0, level).filter((n) => n > 0);
         const number = numberParts.join(".");
 
@@ -1912,22 +1918,16 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
     setIsExportingDocx(true);
 
     try {
-      const payload = { document: resolvedDocumentText };
       const response = await fetch(`/api/chats/${chatId}/export/docx`, {
-        method: "POST",
+        method: "GET",
         cache: "no-store",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
       });
 
       const contentType = response.headers.get("content-type") || "";
 
       if (
         !response.ok ||
-        response.status !== 200 ||
-        !contentType.includes(
-          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        )
+        response.status !== 200
       ) {
         throw new Error(await extractHttpErrorMessage(response, "Failed to export DOCX."));
       }
@@ -2114,22 +2114,20 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
 
   const draftReadyForFinalize = Boolean(resolvedDocumentText.trim()) && currentPhase === "review_refine";
 
-  const hasGeneratedDiagrams = useMemo(() => {
-    const stateHasMermaidBlocks =
-      !!stateJson &&
-      typeof stateJson === "object" &&
-      !Array.isArray(stateJson) &&
-      Array.isArray((stateJson as Record<string, unknown>).mermaid_blocks) &&
-      ((stateJson as Record<string, unknown>).mermaid_blocks as unknown[]).some(
-        (item) => typeof item === "string" && item.trim().length > 0,
-      );
+  const mermaidBlocksFromState = useMemo(() => {
+    if (!stateJson || typeof stateJson !== "object" || Array.isArray(stateJson)) return [];
+    const raw = (stateJson as Record<string, unknown>).mermaid_blocks;
+    if (!Array.isArray(raw)) return [];
+    return raw.filter((b): b is string => typeof b === "string" && b.trim().length > 0);
+  }, [stateJson]);
 
-    if (stateHasMermaidBlocks) {
+  const hasGeneratedDiagrams = useMemo(() => {
+    if (mermaidBlocksFromState.length > 0) {
       return true;
     }
 
     return /```mermaid\s*\n/i.test(resolvedDocumentText);
-  }, [stateJson, resolvedDocumentText]);
+  }, [mermaidBlocksFromState, resolvedDocumentText]);
 
   const waitingOnLabel = useMemo(
     () => getWaitingOnLabel(backendStatuses, activeBackendNode),
@@ -2441,6 +2439,27 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
               {isGeneratingDiagrams ? "Generating diagrams..." : "Generate diagrams"}
             </button>
           </div>
+
+          {/* Mermaid Diagrams Section */}
+          {mermaidBlocksFromState.length > 0 ? (
+            <div className="rounded-md bg-[color:var(--surface-lowest)] p-3 ring-1 ring-[color:var(--outline-variant)]/35">
+              <h3 className="text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--on-surface-variant)]">
+                Diagrams
+              </h3>
+              <div className="mt-2 space-y-3">
+                {mermaidBlocksFromState.map((code, index) => {
+                  const diagramLabels = ["Use Case Diagram", "Class Diagram", "ER Diagram", "Activity Diagram"];
+                  const label = diagramLabels[index] || `Diagram ${index + 1}`;
+                  return (
+                    <div key={index} className="rounded-lg bg-[color:var(--surface-low)] p-2 ring-1 ring-[color:var(--outline-variant)]/35">
+                      <p className="mb-1 text-[11px] font-semibold text-[color:var(--on-surface-variant)]">{label}</p>
+                      <MermaidBlock chart={code} />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
 
           <div className="mt-3 space-y-3">
             {visibleDraftSections.length === 0 ? (
