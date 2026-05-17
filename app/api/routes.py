@@ -1431,6 +1431,7 @@ async def get_state(thread_id: str, request: Request) -> JSONResponse:
             "missing_context": state.values.get("missing_context", []),
             "qa_gaps": state.values.get("qa_gaps", []),
             "sections": state.values.get("sections", {}),
+            "section_structures": state.values.get("section_structures", {}),
             "plantumul_diagrams": state.values.get("plantumul_diagrams", {}),
             "mermaid_blocks": state.values.get("mermaid_blocks", []),
             "ingestion_summary": state.values.get("ingestion_summary", {}),
