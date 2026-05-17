@@ -412,35 +412,26 @@ function formatEtaLabel(seconds: number | null) {
 
 function MarkdownContent({ content }: { content: string }) {
   const normalizedContent = normalizeMarkdownForPreview(content);
-  // Add hierarchical numbering to headings and render FR items as boxed cards
+  // Number headings consistently — always strip existing numbers and re-number
+  // from scratch (matching the backend `number_headings` in app/formatting.py).
   function numberHeadings(markdown: string) {
-    const lines = markdown.split(/\r?\n/);
     const counters = [0, 0, 0, 0, 0, 0];
-
-    const hasNumber = (s: string) => /^[0-9]+(?:\.[0-9]+)*[\)\.:\-\s]+/.test(s);
-
-    return lines
-      .map((line) => {
-        const m = /^(#{1,6})\s*(.+)$/.exec(line);
-        if (!m) return line;
-        const level = Math.min(6, m[1].length);
-        const title = m[2].trim();
-
-        // If heading already has a number, keep it unchanged
-        if (hasNumber(title)) {
-          return line;
-        }
-
-        // No existing number — add hierarchical number
-        counters[level - 1] = (counters[level - 1] || 0) + 1;
-        for (let i = level; i < counters.length; i++) counters[i] = 0;
-
-        const numberParts = counters.slice(0, level).filter((n) => n > 0);
-        const number = numberParts.join(".");
-
-        return `${m[1]} ${number} ${title}`.trim();
-      })
-      .join("\n");
+    const outLines: string[] = [];
+    for (const line of markdown.split(/\r?\n/)) {
+      const m = /^(#{1,6})\s*(.+)$/.exec(line);
+      if (!m) {
+        outLines.push(line);
+        continue;
+      }
+      const level = Math.min(6, m[1].length);
+      const title = m[2].replace(/^[0-9]+(?:\.[0-9]+)*[\)\.:\-\s]+/, "").trim();
+      counters[level - 1] = (counters[level - 1] || 0) + 1;
+      for (let i = level; i < counters.length; i++) counters[i] = 0;
+      const numberParts = counters.slice(0, level).filter((n) => n > 0);
+      const number = numberParts.join(".");
+      outLines.push(`${m[1]} ${number} ${title}`.trim());
+    }
+    return outLines.join("\n");
   }
 
   // Split paragraphs that contain multiple functional requirements into separate list items
@@ -1806,34 +1797,6 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
     await sendToBackend(chatId, messageText);
   }
 
-  async function handleGenerateDiagrams() {
-    const chatId = selectedChatIdRef.current;
-    if (!chatId || isSending || isGeneratingDiagrams) {
-      return;
-    }
-
-    if (questionMode !== null) {
-      setError("Please answer the clarification questions before generating diagrams.");
-      return;
-    }
-
-    if (hasGeneratedDiagrams) {
-      const confirmed = window.confirm(
-        "Diagrams have already been generated for this draft. Generate them again and replace the existing diagrams?",
-      );
-      if (!confirmed) {
-        return;
-      }
-    }
-
-    await sendToBackend(
-      chatId,
-      "Generate and append Mermaid diagrams for the current SRS draft.",
-      undefined,
-      { generateDiagrams: true, diagramsOnly: true },
-    );
-  }
-
   // ---------------------------------------------------------------------------
   // Form submit
   // ---------------------------------------------------------------------------
@@ -2072,11 +2035,6 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
     [draftSections, shouldShowDraftingPlaceholders],
   );
 
-  const hasRenderableDraftParts = useMemo(
-    () => draftSections.some((section) => section.parts.length > 0),
-    [draftSections],
-  );
-
   useEffect(() => {
     if (!selectedDraftPart) {
       return;
@@ -2120,14 +2078,6 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
     if (!Array.isArray(raw)) return [];
     return raw.filter((b): b is string => typeof b === "string" && b.trim().length > 0);
   }, [stateJson]);
-
-  const hasGeneratedDiagrams = useMemo(() => {
-    if (mermaidBlocksFromState.length > 0) {
-      return true;
-    }
-
-    return /```mermaid\s*\n/i.test(resolvedDocumentText);
-  }, [mermaidBlocksFromState, resolvedDocumentText]);
 
   const waitingOnLabel = useMemo(
     () => getWaitingOnLabel(backendStatuses, activeBackendNode),
@@ -2430,36 +2380,8 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
             >
               Open preview
             </button>
-            <button
-              type="button"
-              onClick={() => void handleGenerateDiagrams()}
-              disabled={!selectedChatId || isSending || isGeneratingDiagrams || !hasRenderableDraftParts || questionMode !== null}
-              className="rounded-md bg-[color:var(--surface-lowest)] px-3 py-1.5 text-xs font-medium text-[color:var(--foreground)] ring-1 ring-[color:var(--outline-variant)]/35 hover:bg-[color:var(--surface-low)] disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {isGeneratingDiagrams ? "Generating diagrams..." : "Generate diagrams"}
-            </button>
-          </div>
 
-          {/* Mermaid Diagrams Section */}
-          {mermaidBlocksFromState.length > 0 ? (
-            <div className="rounded-md bg-[color:var(--surface-lowest)] p-3 ring-1 ring-[color:var(--outline-variant)]/35">
-              <h3 className="text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--on-surface-variant)]">
-                Diagrams
-              </h3>
-              <div className="mt-2 space-y-3">
-                {mermaidBlocksFromState.map((code, index) => {
-                  const diagramLabels = ["Use Case Diagram", "Class Diagram", "ER Diagram", "Activity Diagram"];
-                  const label = diagramLabels[index] || `Diagram ${index + 1}`;
-                  return (
-                    <div key={index} className="rounded-lg bg-[color:var(--surface-low)] p-2 ring-1 ring-[color:var(--outline-variant)]/35">
-                      <p className="mb-1 text-[11px] font-semibold text-[color:var(--on-surface-variant)]">{label}</p>
-                      <MermaidBlock chart={code} />
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          ) : null}
+          </div>
 
           <div className="mt-3 space-y-3">
             {visibleDraftSections.length === 0 ? (
@@ -2492,27 +2414,76 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
                 </div>
               )
             ) : (
-              visibleDraftSections.map((section) => (
-                <div key={section.key} className="rounded-md bg-[color:var(--surface-lowest)] p-3 ring-1 ring-[color:var(--outline-variant)]/35">
-                  <h3 className="text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--on-surface-variant)]">
-                    {section.title}
-                  </h3>
+              <>
+                {visibleDraftSections.map((section) => (
+                  <div key={section.key} className="rounded-md bg-[color:var(--surface-lowest)] p-3 ring-1 ring-[color:var(--outline-variant)]/35">
+                    <h3 className="text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--on-surface-variant)]">
+                      {section.title}
+                    </h3>
 
-                  <div className="mt-2 space-y-2">
-                    {section.parts.length === 0 ? (
-                      <p className="text-xs text-[color:var(--on-surface-variant)]">
-                        Draft in progress for this section...
-                      </p>
-                    ) : (
-                      section.parts.map((part, partIndex) => {
-                        const isSelected = selectedDraftPart?.id === part.id;
-                        const mermaidChart = extractFirstMermaidChart(part.content);
+                    <div className="mt-2 space-y-2">
+                      {section.parts.length === 0 ? (
+                        <p className="text-xs text-[color:var(--on-surface-variant)]">
+                          Draft in progress for this section...
+                        </p>
+                      ) : (
+                        section.parts.map((part, partIndex) => {
+                          const isSelected = selectedDraftPart?.id === part.id;
+                          const mermaidChart = extractFirstMermaidChart(part.content);
 
+                          return (
+                            <button
+                              key={`${part.id}-${partIndex}`}
+                              type="button"
+                              onClick={() => setSelectedDraftPart(part)}
+                              disabled={questionMode !== null || isSending}
+                              className={`block w-full rounded-xl border px-3 py-2 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                                isSelected
+                                  ? "bg-[color:var(--surface-low)] ring-[color:var(--primary)]/45"
+                                  : "bg-[color:var(--surface-low)] ring-[color:var(--outline-variant)]/30 hover:bg-[color:var(--surface-lowest)]"
+                              }`}
+                            >
+                              <p className="text-xs font-medium text-[color:var(--foreground)]">
+                                {part.number ? <span className="mr-1 text-[color:var(--primary)]">{part.number}</span> : null}
+                                {part.title}
+                              </p>
+                              <p className="mt-1 max-h-16 overflow-hidden text-xs leading-relaxed text-[color:var(--on-surface-variant)]">
+                                {part.preview}
+                              </p>
+                              {mermaidChart ? (
+                                <div className="mt-2 pointer-events-none rounded-lg bg-[color:var(--surface-lowest)] p-2 ring-1 ring-[color:var(--outline-variant)]/35">
+                                  <MermaidBlock chart={mermaidChart} />
+                                </div>
+                              ) : null}
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                ))}
+                {mermaidBlocksFromState.length > 0 ? (
+                  <div className="rounded-md bg-[color:var(--surface-lowest)] p-3 ring-1 ring-[color:var(--outline-variant)]/35">
+                    <h3 className="text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--on-surface-variant)]">
+                      Diagrams
+                    </h3>
+                    <div className="mt-2 space-y-2">
+                      {mermaidBlocksFromState.map((code, index) => {
+                        const diagramLabels = ["Use Case Diagram", "Class Diagram", "ER Diagram", "Activity Diagram"];
+                        const label = diagramLabels[index] || `Diagram ${index + 1}`;
+                        const diagramPart: DraftPart = {
+                          id: `diagram-${index}`,
+                          title: label,
+                          content: code,
+                          sectionKey: "diagrams",
+                          preview: label,
+                        };
+                        const isSelected = selectedDraftPart?.id === diagramPart.id;
                         return (
                           <button
-                            key={`${part.id}-${partIndex}`}
+                            key={diagramPart.id}
                             type="button"
-                            onClick={() => setSelectedDraftPart(part)}
+                            onClick={() => setSelectedDraftPart(diagramPart)}
                             disabled={questionMode !== null || isSending}
                             className={`block w-full rounded-xl border px-3 py-2 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                               isSelected
@@ -2521,24 +2492,18 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
                             }`}
                           >
                             <p className="text-xs font-medium text-[color:var(--foreground)]">
-                              {part.number ? <span className="mr-1 text-[color:var(--primary)]">{part.number}</span> : null}
-                              {part.title}
+                              {label}
                             </p>
-                            <p className="mt-1 max-h-16 overflow-hidden text-xs leading-relaxed text-[color:var(--on-surface-variant)]">
-                              {part.preview}
-                            </p>
-                            {mermaidChart ? (
-                              <div className="mt-2 pointer-events-none rounded-lg bg-[color:var(--surface-lowest)] p-2 ring-1 ring-[color:var(--outline-variant)]/35">
-                                <MermaidBlock chart={mermaidChart} />
-                              </div>
-                            ) : null}
+                            <div className="mt-2 pointer-events-none rounded-lg bg-[color:var(--surface-lowest)] p-2 ring-1 ring-[color:var(--outline-variant)]/35">
+                              <MermaidBlock chart={code} />
+                            </div>
                           </button>
                         );
-                      })
-                    )}
+                      })}
+                    </div>
                   </div>
-                </div>
-              ))
+                ) : null}
+              </>
             )}
           </div>
 
@@ -2583,6 +2548,23 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
                   "The draft SRS document will appear here once sections are available."
                 }
               />
+              {mermaidBlocksFromState.length > 0 ? (
+                <div className="mt-6">
+                  <h2 className="mb-2 text-base font-semibold">6. Diagrams</h2>
+                  <div className="space-y-4">
+                    {mermaidBlocksFromState.map((code, index) => {
+                      const diagramLabels = ["Use Case Diagram", "Class Diagram", "ER Diagram", "Activity Diagram"];
+                      const label = diagramLabels[index] || `Diagram ${index + 1}`;
+                      return (
+                        <div key={index} className="rounded-lg bg-[color:var(--surface-lowest)] p-3 ring-1 ring-[color:var(--outline-variant)]/35">
+                          <h3 className="mb-1 text-sm font-semibold">{label}</h3>
+                          <MermaidBlock chart={code} />
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
             </div>
           </div>
         </div>
