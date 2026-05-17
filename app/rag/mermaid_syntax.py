@@ -51,7 +51,31 @@ _SYNTAX_SNIPPETS: dict[str, list[str]] = {
         "erDiagram starts an ER diagram. Entities are uppercase names and relationships are declared between entities.",
         "Relationship connectors include ||, |o, o|, }o, |{ with -- between entity names.",
         "Entity attributes are declared in braces: ENTITY { string id int version }.",
+        "Use crow's foot notation: ||--o{ (one to many), ||--|| (one to one), }o--o{ (many to many).",
         "Example: erDiagram\n    USER ||--o{ ORDER : places\n    ORDER ||--|{ ORDER_ITEM : contains\n    ORDER {\n      string id\n      datetime created_at\n    }",
+    ],
+    "class": [
+        "classDiagram starts a class diagram. Define classes and their relationships.",
+        "Class members: + public, - private, # protected. Syntax: +methodName() returnType",
+        "Relationships: <|-- inheritance, *-- composition, o-- aggregation, --> association, ..> dependency, <|.. realization.",
+        "Class labels with namespace: namespace App { class User { +login() } }.",
+        "Example: classDiagram\n    class User {\n      +String id\n      +login()\n      -hashPassword()\n    }\n    class AdminUser {\n      +banUser()\n    }\n    AdminUser <|-- User",
+    ],
+    "activity": [
+        "stateDiagram-v2 starts an activity/state diagram. Use states and transitions.",
+        "Transitions: State1 --> State2 : trigger/action",
+        "Use [*] for initial and final states: [*] --> State1, State2 --> [*].",
+        "Conditional branches: state if_state <<choice>> with multiple outgoing transitions.",
+        "Use fork and join for concurrency: state fork <<fork>>, state join <<join>>.",
+        "Example: stateDiagram-v2\n    [*] --> Idle\n    Idle --> Processing : submit\n    Processing --> Completed : success\n    Processing --> Failed : error\n    Completed --> [*]\n    Failed --> Idle : retry",
+    ],
+    "usecase": [
+        "Use case diagrams use actors and use cases with system boundaries.",
+        "Define actors: actor ActorName",
+        "Define use cases: usecase UC1 as \"Use Case Description\"",
+        "Relationships: Actor --> UC1 (association), UC1 <|-- UC2 (extension), UC1 ..> UC3 (include/dependency).",
+        "System boundary with rectangle: rectangle SystemName { ... }",
+        "Example: usecaseDiagram\n    actor User\n    actor Admin\n    rectangle System {\n      usecase UC1 as \"Login\"\n      usecase UC2 as \"Manage Users\"\n      usecase UC3 as \"View Reports\"\n    }\n    User --> UC1\n    Admin --> UC2\n    Admin --> UC3\n    UC1 ..> UC2 : includes",
     ],
 }
 
