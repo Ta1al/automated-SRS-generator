@@ -252,11 +252,13 @@ def _append_diagrams_to_document(document_text: str, state_values: dict[str, Any
 
     if mermaid_blocks:
         lines.append("### Mermaid")
+        mermaid_labels = ["Use Case Diagram", "Class Diagram", "ER Diagram", "Activity Diagram"]
         for index, mermaid_code in enumerate(mermaid_blocks, start=1):
             cleaned_code = str(mermaid_code or "").strip()
             if not cleaned_code:
                 continue
-            lines.append(f"#### Mermaid Diagram {index}")
+            label = mermaid_labels[index - 1] if index <= len(mermaid_labels) else f"Mermaid Diagram {index}"
+            lines.append(f"#### {label}")
             lines.append("```mermaid")
             lines.append(cleaned_code)
             lines.append("```")
@@ -666,6 +668,7 @@ _NODE_DISPLAY_NAMES = {
     "draft_section_4": "Drafting Verification Matrix",
     "evaluate_completeness": "Evaluating completeness",
     "ask_clarifying_questions": "Waiting for clarification",
+    "generate_mermaid_diagrams": "Generating Mermaid diagrams",
     "generate_mermaid": "Generating diagrams",
     "validate_mermaid": "Validating diagrams",
     "correct_mermaid": "Correcting diagrams",
@@ -687,6 +690,7 @@ _TYPICAL_DURATION_MS = {
     "draft_section_3_nfr": 12000,
     "draft_section_4": 5000,
     "evaluate_completeness": 5000,
+    "generate_mermaid_diagrams": 12000,
     "generate_mermaid": 15000,
     "validate_mermaid": 2000,
     "correct_mermaid": 8000,
@@ -711,6 +715,7 @@ _NODE_SEQUENCE_FULL_WITH_DIAGRAMS = [
     "draft_section_3_nfr",
     "draft_section_4",
     "evaluate_completeness",
+    "generate_mermaid_diagrams",
     "generate_mermaid",
     "validate_mermaid",
     "qa_review",
@@ -1297,7 +1302,7 @@ async def get_document_docx(thread_id: str, request: Request) -> Response:
         raise HTTPException(status_code=404, detail="Session not found.")
 
     final_doc = state.values.get("final_document", "")
-    if not final_doc and state.values.get("current_phase") == "complete":
+    if not final_doc:
         final_doc = _assemble_document_from_sections(state.values)
     final_doc = _append_use_case_tables_to_document(final_doc, state.values)
     final_doc = _append_diagrams_to_document(final_doc, state.values)
