@@ -719,10 +719,21 @@ export async function startBackgroundChatRun(params: {
     }
     const generatedProjectTitle = extractProjectTitleFromState(latestState);
 
+    const draftedDocument =
+      finishedNodes.has("finalize_document") ||
+      finishedNodes.has("draft_section_1") ||
+      finishedNodes.has("draft_section_2") ||
+      finishedNodes.has("draft_section_3_iface") ||
+      finishedNodes.has("draft_section_3_fr") ||
+      finishedNodes.has("draft_section_3_nfr") ||
+      finishedNodes.has("draft_section_4");
+    const generatedDiagramsInRun = finishedNodes.has("generate_mermaid");
+    const revisedSection = finishedNodes.has("revise_selected_section");
+
     let persistedAssistantMessage = "";
     if (sawGuardrailRedirect && shouldPersistAssistantMessage(summary.assistantMessage)) {
       persistedAssistantMessage = summary.assistantMessage;
-    } else if (currentDocument || hasDraftSections) {
+    } else if (draftedDocument || generatedDiagramsInRun || revisedSection) {
       persistedAssistantMessage =
         runMode === "diagrams_only"
           ? "I generated diagrams for the current draft. Open document preview to review them."
