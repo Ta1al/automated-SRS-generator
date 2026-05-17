@@ -174,15 +174,6 @@ def _fallback_plantuml_diagrams(ingestion: dict[str, Any]) -> dict[str, str]:
 # Pydantic Models for Structured Output
 # ─────────────────────────────────────────────────────────────────────────────
 
-
-class CoreFlowModel(BaseModel):
-    """A single core flow."""
-    name: str = Field(..., description="Flow name")
-    goal: str = Field(..., description="Flow goal or outcome")
-    steps: list[str] = Field(..., description="Ordered steps of the flow")
-    success_metric: str = Field(..., description="How success is measured")
-
-
 class IngestionSummaryModel(BaseModel):
     """Normalized intake summary from user's initial product idea."""
     project_title: str = Field(..., description="Project name")
