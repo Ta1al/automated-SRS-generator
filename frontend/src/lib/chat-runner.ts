@@ -369,7 +369,7 @@ export async function startBackgroundChatRun(params: {
     chatId,
     message,
     revisionTarget,
-    generateDiagrams = false,
+    generateDiagrams = true,
     diagramsOnly = false,
   } = params;
   const runMode: RunMode = diagramsOnly
