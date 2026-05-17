@@ -245,7 +245,7 @@ Project: {ingestion_summary}
 
 Question topic: {topic}
 
-Generate ONE specific, conversational question based on this topic.
+Generate ONE specific, conversational question based on this topic and its relevance to the project.
 Include 2-3 example answers to guide the user.
 
 Return JSON (no markdown):
@@ -265,7 +265,7 @@ Project: {ingestion_summary}
 
 Question topic: {topic}
 
-Generate ONE specific, conversational question based on this topic.
+Generate ONE specific, conversational question based on this topic and its relevance to the project.
 Include 2-3 example answers to guide the user.
 
 Return JSON (no markdown):
@@ -285,7 +285,7 @@ Project: {ingestion_summary}
 
 Question topic: {topic}
 
-Generate ONE specific, conversational question based on this topic.
+Generate ONE specific, conversational question based on this topic and its relevance to the project.
 Include 2-3 example answers to guide the user.
 
 Return JSON (no markdown):
@@ -305,7 +305,7 @@ Project: {ingestion_summary}
 
 Question topic: {topic}
 
-Generate ONE specific, conversational question based on this topic.
+Generate ONE specific, conversational question based on this topic and its relevance to the project.
 Include 2-3 example answers to guide the user.
 
 Return JSON (no markdown):
@@ -322,7 +322,7 @@ Return JSON (no markdown):
 OUTLINE_GENERATOR_SYSTEM = """\
 You are a technical writer specializing in IEEE 830 Software Requirements Specifications.
 
-Your task is to generate a proposed outline (table of contents) for the SRS based on 
+Your task is to generate a proposed outline for the SRS based on 
 the user's ingestion summary and elicitation answers (all 4 groups).
 
 Structure the outline per IEEE 830:
@@ -362,7 +362,7 @@ Structure the outline per IEEE 830:
 
 For EACH proposed section, include:
 - Whether to include (default True for IEEE sections, False for optional subsections)
-- Rationale: Why include this section for THIS project
+- Rationale: What the main points of this section are and why they're needed
 - Suggested subsection topics based on the elicitation answers
 
 User context:
