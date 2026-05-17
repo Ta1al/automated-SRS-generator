@@ -76,8 +76,8 @@ const PARALLEL_DRAFT_STAGES = [
 const DRAFT_NODE_TO_SECTION_KEY: Record<string, string> = {
   draft_section_1: "s1",
   draft_section_2: "s2",
-  draft_section_3_iface: "s3_iface",
-  draft_section_3_fr: "s3_fr",
+  draft_section_3_iface: "s3_external",
+  draft_section_3_fr: "s3_functional",
   draft_section_3_nfr: "s3_nfr",
   draft_section_4: "s4",
 };
