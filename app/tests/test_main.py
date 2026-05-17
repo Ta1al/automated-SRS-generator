@@ -896,6 +896,30 @@ flowchart TD
             assert "<dc:title>SRS</dc:title>" in core_xml
 
     @pytest.mark.asyncio
+    async def test_markdown_to_docx_bytes_renders_plantuml_blocks(self):
+        from app.export.docx import markdown_to_docx_bytes
+
+        tiny_png = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO8B6x0AAAAASUVORK5CYII="
+        )
+
+        markdown = """# Diagram Export
+
+```plantuml
+@startuml
+Alice -> Bob: Hi
+@enduml
+```
+"""
+
+        with patch("app.export.docx._render_plantuml_png", return_value=tiny_png):
+            payload = markdown_to_docx_bytes(markdown)
+
+        assert isinstance(payload, bytes)
+        with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+            assert any(name.startswith("word/media/image") for name in archive.namelist())
+
+    @pytest.mark.asyncio
     async def test_get_document_docx_returns_attachment(self, mock_app):
         fake_state = MagicMock(values={"final_document": "# Sample SRS\n\n## Section\nContent."})
         mock_app.state.graph.aget_state = AsyncMock(return_value=fake_state)

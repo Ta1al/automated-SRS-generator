@@ -155,11 +155,23 @@ if __name__ == "__main__":
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
     settings = get_settings()
-    uvicorn.run(
-        "app.main:app",
-        host=settings.app_host,
-        port=settings.app_port,
-        reload=settings.app_reload,
-        reload_dirs=["app"],   # watch only backend source; ignore frontend build output
-        log_level="info",
-    )
+    if sys.platform == "win32":
+        config = uvicorn.Config(
+            "app.main:app",
+            host=settings.app_host,
+            port=settings.app_port,
+            reload=False,
+            log_level="info",
+        )
+        server = uvicorn.Server(config)
+        with asyncio.Runner(loop_factory=asyncio.SelectorEventLoop) as runner:
+            runner.run(server.serve())
+    else:
+        uvicorn.run(
+            "app.main:app",
+            host=settings.app_host,
+            port=settings.app_port,
+            reload=settings.app_reload,
+            reload_dirs=["app"],   # watch only backend source; ignore frontend build output
+            log_level="info",
+        )
