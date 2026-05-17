@@ -82,7 +82,10 @@ User interrupts (`interrupt()`) occur at:
 
 ```mermaid
 flowchart TD
-    START([START]) --> ingest["ingest_and_map_domain"]
+    START([START])
+    START -->|revision_mode=false| ingest["ingest_and_map_domain"]
+    START -->|revision_mode=true| revise["revise_selected_section"]
+
     ingest --> plan["generate_elicitation_plan"]
     plan --> q["generate_single_elicitation_question"]
 
@@ -94,6 +97,7 @@ flowchart TD
 
     draft -->|6 parallel sections: s1, s2, s3_functional, s3_external, s3_nfr, s4| mermaid["generate_mermaid_diagrams"]
 
+    revise --> finalize["finalize_and_export"]
     mermaid --> finalize["finalize_and_export"]
 
     finalize --> END([END])
@@ -233,6 +237,16 @@ CORS is configured from `CORS_ORIGINS` (comma-separated). The app registers a `/
 | `mermaid_blocks` | `list[str]` | `merge_lists` | Mermaid diagram code strings |
 | `mermaid_errors` | `list[str]` | `merge_lists` | Validation errors aligned with blocks |
 | `revision_targets` | `list[str]` | `merge_lists` | Sections user wants to regenerate |
+| `revision_mode` | `bool` | replace | True when running a section revision |
+| `revision_target_section_key` | `str` | replace | Which section key to revise (s1, s2, s3_functional, etc.) |
+| `revision_target_title` | `str` | replace | Human-readable title of the section being revised |
+| `revision_target_content` | `str` | replace | Original content of the section being revised |
+| `revision_request` | `str` | replace | User's revision feedback/request |
+| `is_complete` | `bool` | replace | Whether the workflow is complete |
+| `generate_diagrams` | `bool` | replace | Whether diagrams should be generated |
+| `diagrams_only` | `bool` | replace | Whether running in diagrams-only mode |
+| `final_document` | `str` | replace | Final assembled SRS document |
+| `project_title` | `str` | replace | Project title |
 | `chat_history` | `list[BaseMessage]` | `add_messages` | Full user ↔ AI conversation |
 | `requirements` | `list[Requirement]` | `merge_lists` | Parsed atomic requirements |
 | `rag_context` | `str` | replace | Retrieved regulatory text from ChromaDB |
@@ -241,7 +255,7 @@ Supporting types: `CoreFlow`, `IngestionSummary`, `ClarificationQuestion`, `Requ
 
 ### Graph nodes
 
-**`app/graph/nodes.py`** implements 7 node functions. Each is async, receives `SRSState`, and returns a partial state update.
+**`app/graph/nodes.py`** implements 8 node functions. Each is async, receives `SRSState`, and returns a partial state update.
 
 | Node | Phase | LLM | Purpose |
 |---|---|---|---|
@@ -251,6 +265,7 @@ Supporting types: `CoreFlow`, `IngestionSummary`, `ClarificationQuestion`, `Requ
 | `classify_and_store_answers` | 2 (Elicitation) | - | Stores user answer in `elicitation_answers[group_N]` |
 | `draft_from_approved_outline` | 3 (Drafting) | ✓ | Runs 6 parallel section drafters via `asyncio.gather` using `DraftSectionModel` |
 | `generate_mermaid_diagrams` | 4 (Diagrams) | ✓ | Generates 4 Mermaid diagrams (usecase, class, ER, activity) via `MermaidDiagramSet` |
+| `revise_selected_section` | 3b (Revision) | ✓ | Rewrites a single targeted section based on user feedback, leaves other sections intact |
 | `finalize_and_export` | 5 (Finalization) | - | Assembles final SRS with use-case tables, diagrams, front matter |
 
 ### LLM structured output
