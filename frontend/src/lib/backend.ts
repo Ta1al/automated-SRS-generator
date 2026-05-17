@@ -20,7 +20,7 @@ export type BackendStatusEvent = {
 type SseConsumerOptions = {
   onEvent?: (eventName: string, data: unknown) => void;
   onProjectTitle?: (payload: { projectTitle: string }) => void;
-  onToken?: (payload: { content: string; node?: string }) => void;
+  onToken?: (payload: { content: string; node?: string; sectionKey?: string }) => void;
   onStatus?: (payload: BackendStatusEvent) => void;
   onQuestion?: (payload: {
     prompt: string;
@@ -179,9 +179,13 @@ export async function consumeSseResponse(
         typeof (parsed as { node?: unknown }).node === "string"
           ? ((parsed as { node?: string }).node ?? undefined)
           : undefined;
+      const sectionKey =
+        typeof (parsed as { section_key?: unknown }).section_key === "string"
+          ? (parsed as { section_key: string }).section_key
+          : undefined;
 
       assistantText += content;
-      options.onToken?.({ content, node });
+      options.onToken?.({ content, node, sectionKey });
     }
 
     if (currentEventName === "project_title" && parsed && typeof parsed === "object") {

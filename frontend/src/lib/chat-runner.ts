@@ -523,12 +523,13 @@ export async function startBackgroundChatRun(params: {
           );
         });
       },
-      onToken: ({ content, node }) => {
+      onToken: ({ content, node, sectionKey }) => {
         if (node === MESSAGE_GUARD_NODE) {
           sawGuardrailRedirect = true;
         }
 
         const targetSection =
+          sectionKey ||
           (node ? DRAFT_NODE_TO_SECTION_KEY[node] || "" : "") ||
           (node === "revise_selected_section" ? (revisionTarget?.sectionKey || "") : "");
 

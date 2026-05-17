@@ -73,6 +73,7 @@ type DraftPart = {
   content: string;
   sectionKey: string;
   preview: string;
+  number?: string;
 };
 
 type RevisionTarget = {
@@ -192,6 +193,26 @@ function extractFirstMermaidChart(content: string) {
   const normalized = normalizeMarkdownForPreview(content);
   const match = normalized.match(/```mermaid\s*\n([\s\S]*?)\n```/i);
   return match?.[1]?.trim() || "";
+}
+
+function structuredPartsToDraftParts(
+  sectionKey: string,
+  subsections: Array<{ number?: string; title?: string; content?: string }>,
+): DraftPart[] {
+  return subsections
+    .filter((sub) => sub.content && sub.content.trim())
+    .map((sub, index) => {
+      const title = sub.title?.trim() || formatSectionTitle(sectionKey);
+      const content = sub.content?.trim() || "";
+      return {
+        id: `${sectionKey}-${slugifyText(title)}-${index + 1}`,
+        title,
+        content,
+        sectionKey,
+        preview: buildDraftPreviewText(content),
+        number: sub.number?.trim(),
+      };
+    });
 }
 
 function extractDraftParts(sectionKey: string, content: string): DraftPart[] {
@@ -1118,7 +1139,10 @@ function SelectedDraftBubble({
           <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[color:var(--on-surface-variant)]">
             Selected SRS part
           </p>
-          <p className="mt-1 text-sm font-medium leading-snug">{part.title}</p>
+          <p className="mt-1 text-sm font-medium leading-snug">
+            {part.number ? <span className="mr-1.5 text-[color:var(--primary)]">{part.number}</span> : null}
+            {part.title}
+          </p>
         </div>
         <button
           type="button"
@@ -1998,12 +2022,28 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
       .sort((first, second) => getSectionOrderIndex(first.key) - getSectionOrderIndex(second.key));
   }, [stateJson, liveSectionDrafts]);
 
+  const sectionStructures = useMemo(() => {
+    if (!stateJson || typeof stateJson !== "object") return null;
+    const raw = (stateJson as Record<string, unknown>).section_structures;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+    return raw as Record<string, unknown>;
+  }, [stateJson]);
+
   const draftSections = useMemo(
     () =>
       draftedSections.map((section) => {
-        const parts = extractDraftParts(section.key, section.content).filter((part) =>
-          hasDraftPartBodyContent(part.content),
-        );
+        const structRaw = sectionStructures?.[section.key];
+        let parts: DraftPart[];
+        if (Array.isArray(structRaw) && structRaw.length > 0) {
+          parts = structuredPartsToDraftParts(
+            section.key,
+            structRaw as Array<{ number?: string; title?: string; content?: string }>,
+          ).filter((part) => hasDraftPartBodyContent(part.content));
+        } else {
+          parts = extractDraftParts(section.key, section.content).filter((part) =>
+            hasDraftPartBodyContent(part.content),
+          );
+        }
 
         return {
           ...section,
@@ -2011,7 +2051,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
           parts,
         };
       }),
-    [draftedSections],
+    [draftedSections, sectionStructures],
   );
 
   const allDraftParts = useMemo(
@@ -2461,7 +2501,10 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
                                 : "bg-[color:var(--surface-low)] ring-[color:var(--outline-variant)]/30 hover:bg-[color:var(--surface-lowest)]"
                             }`}
                           >
-                            <p className="text-xs font-medium text-[color:var(--foreground)]">{part.title}</p>
+                            <p className="text-xs font-medium text-[color:var(--foreground)]">
+                              {part.number ? <span className="mr-1 text-[color:var(--primary)]">{part.number}</span> : null}
+                              {part.title}
+                            </p>
                             <p className="mt-1 max-h-16 overflow-hidden text-xs leading-relaxed text-[color:var(--on-surface-variant)]">
                               {part.preview}
                             </p>
