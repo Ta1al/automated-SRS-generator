@@ -107,8 +107,32 @@ def _markdown_table(headers: list[str], rows: list[list[str]]) -> str:
 def _use_case_rows_from_ingestion(ingestion: dict[str, Any]) -> list[dict[str, str]]:
     actors = [str(actor).strip() for actor in (ingestion.get("suggested_actors", []) or ingestion.get("target_users", []) or ["User"]) if str(actor).strip()]
     core_flows = [flow for flow in (ingestion.get("core_flows", []) or []) if isinstance(flow, dict)]
-    components = [str(component).strip() for component in (ingestion.get("components", []) or []) if str(component).strip()]
-    interfaces = [str(interface).strip() for interface in (ingestion.get("external_interfaces", []) or []) if str(interface).strip()]
+    
+    # Extract components as text, handling both strings and dicts
+    components = []
+    for component in (ingestion.get("components", []) or []):
+        if isinstance(component, dict):
+            # Extract name or description from component dict
+            comp_name = str(component.get("name", "")).strip() or str(component.get("description", "")).strip()
+            if comp_name:
+                components.append(comp_name)
+        else:
+            comp_str = str(component).strip()
+            if comp_str:
+                components.append(comp_str)
+    
+    # Extract interfaces as text, handling both strings and dicts
+    interfaces = []
+    for interface in (ingestion.get("external_interfaces", []) or []):
+        if isinstance(interface, dict):
+            # Extract name or description from interface dict
+            iface_name = str(interface.get("name", "")).strip() or str(interface.get("description", "")).strip()
+            if iface_name:
+                interfaces.append(iface_name)
+        else:
+            iface_str = str(interface).strip()
+            if iface_str:
+                interfaces.append(iface_str)
 
     if not core_flows:
         core_flows = [
