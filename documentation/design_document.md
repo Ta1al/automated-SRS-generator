@@ -1,226 +1,262 @@
-# Design Document
+# Software Design Document: AI-Driven SRS Generator
 
-## 1. System Overview
+## 1. Overview and Context
 
-The Automated SRS Generator (ASG) is a full-stack system that converts informal stakeholder ideas into IEEE 830-compliant Software Requirements Specification documents through a 5-phase interactive chat workflow.
+### 1.1 Purpose
 
-```mermaid
-flowchart LR
-    User[User] --> FE[Next.js Frontend]
-    FE --> API[FastAPI Backend]
-    API --> Graph[LangGraph Runtime]
-    Graph --> RAG[ChromaDB RAG Store]
-    API --> DB[(PostgreSQL)]
-    API --> Export[DOCX/Markdown Export]
-    Export --> User
-```
+The AI-Driven Software Requirements Specification (SRS) Generator is a full-stack interactive system that transforms informal stakeholder ideas into IEEE 830 / ISO 29148-compliant SRS documents. It utilizes a recursive multi-agent elicitation workflow, human-in-the-loop (HITL) interrupts, Retrieval-Augmented Generation (RAG) grounded in regulatory context, and automated diagram generation.
 
-### Key Capabilities
+### 1.2 Problem Statement
 
-- **Interactive Elicitation**: 4-phase Q&A (one question at a time) covering user roles, functional boundaries, NFRs, and edge cases
-- **IEEE 830 Compliance**: Auto-generates structured SRS with introduction, overall description, functional/NFR/external interface requirements, and appendices
-- **Human-in-the-Loop**: Interrupts at each elicitation question for user feedback
-- **RAG Grounding**: Semantic search against seeded regulatory standards (HIPAA, GDPR, PCI-DSS, WCAG, IEEE 830)
-- **Dual Diagram Support**: Mermaid diagrams (usecase, class, ER, activity) generated from domain data
-- **Multiple Export Formats**: Markdown (JSON or file download) and DOCX with embedded diagrams
+Stakeholders typically express product ideas informally. Manually producing a structured, standards-compliant SRS requires significant effort, deep knowledge of requirements engineering, and multiple rounds of manual clarification. Currently, there is a lack of accessible tools that interactively guide users through this complex process while guaranteeing a compliant output.
 
-## 2. Architecture Design
+### 1.3 Solution Overview
 
-The solution follows a layered architecture with clear separation between presentation, API, orchestration, and infrastructure concerns.
+The solution is a **5-phase LangGraph workflow**:
 
-### Architecture Layers
+1. **Ingestion:** Parse the informal description into structured domain metadata.
+2. **Elicitation:** Ask targeted clarification questions (User Roles, Functional Boundaries, NFRs, Edge Cases), pausing for user input.
+3. **Drafting:** Run 6 parallel LLM-based section writers.
+4. **Diagram Generation:** Create Mermaid and PlantUML diagrams from domain data.
+5. **Finalization:** Assemble the document with front matter, tables, and diagrams.
 
-- **Presentation Layer**: Next.js pages and chat workspace components.
-- **API Gateway Layer**: Next.js API routes and backend FastAPI routes.
-- **Orchestration Layer**: LangGraph nodes, state transitions, and interruption handling.
-- **Data and Integration Layer**: Prisma/PostgreSQL, ChromaDB, Mermaid rendering, and document export.
+**Key Capabilities:**
+
+* **Interactive Elicitation:** One question at a time across 4 groups.
+* **IEEE 830 Compliance:** Structured sections (Introduction, Description, Specific Reqs, Appendices).
+* **RAG Grounding:** ChromaDB semantic search against 6 regulatory standards (HIPAA, GDPR, PCI-DSS, WCAG, IEEE 830).
+* **Guardrail Classifier:** LLM-based input filter (relevant, small_talk, out_of_scope, unsafe).
+* **Dual Diagram Support:** Mermaid (usecase, class, ER, activity) and PlantUML.
+* **Export:** Raw Markdown, JSON, and DOCX (with embedded diagrams).
+
+---
+
+## 2. System Architecture
+
+The system utilizes a 4-tier layered architecture, decoupling the client UI from the orchestration backend.
+
+### 2.1 Technology Stack
+
+| Tier | Technologies | Primary Purpose |
+| --- | --- | --- |
+| **Frontend** | Next.js 16, React 19, Tailwind CSS 4 | UI, routing, client state |
+| **Gateway** | Next.js API Routes | Auth, request proxying |
+| **Backend** | FastAPI, Uvicorn, LangGraph, LangChain | REST/SSE endpoints, orchestration |
+| **Infrastructure** | PostgreSQL 16, ChromaDB, OpenRouter API | State checkpointing, RAG, LLM |
+| **Rendering** | Mermaid CLI, PlantUML, python-docx | Inline/export diagrams, DOCX generation |
+
+### 2.2 Layered Architecture Map
 
 ```mermaid
 flowchart TB
-    subgraph Client[Client Tier]
-        UI[Next.js App Router UI]
-        Auth[Auth Pages and JWT Session]
+    subgraph Client["Client Tier (Next.js 16)"]
+        Pages["/ (Landing) | /login | /chat"]
+        ChatWS["ChatWorkspace Component"]
+        Mermaid["Mermaid Renderer"]
     end
 
-    subgraph Edge[Application API Tier]
-        NAPI[Next.js API Routes]
-        BAPI[FastAPI Routes]
+    subgraph Gateway["API Gateway Tier (Next.js API Routes)"]
+        AuthRoutes["/api/auth/*"]
+        ChatRoutes["/api/chats/*"]
+        Proxy["Backend Proxy"]
     end
 
-    subgraph Core[Orchestration Tier]
-        Guard[Guardrail Classifier]
-        LG[LangGraph Workflow]
-        Check[Checkpoint and Run State]
+    subgraph Backend["Backend Tier (FastAPI + LangGraph)"]
+        REST["REST Endpoints"]
+        SSE["SSE Streaming"]
+        Guardrail["Guardrail Classifier"]
+        Graph["LangGraph Runtime (7 nodes)"]
     end
 
-    subgraph Infra[Data and Integration Tier]
-        PG[(PostgreSQL + Prisma)]
-        VS[(ChromaDB Vector Store)]
-        DOCX[DOCX Exporter]
-        MMD[Mermaid Renderer]
+    subgraph Infrastructure["Infrastructure Tier"]
+        PG[("PostgreSQL 16")]
+        Chroma[("ChromaDB")]
+        OpenRouter["OpenRouter API"]
     end
 
-    UI --> NAPI
-    Auth --> NAPI
-    NAPI --> BAPI
-    BAPI --> Guard
-    Guard --> LG
-    LG --> Check
-    LG --> VS
-    BAPI --> PG
-    BAPI --> DOCX
-    DOCX --> MMD
+    Pages --> ChatWS
+    ChatWS --> ChatRoutes
+    ChatRoutes --> Proxy
+    Proxy --> REST & SSE
+    REST --> Guardrail --> Graph
+    Graph --> PG & Chroma & OpenRouter
+
 ```
 
-### Interaction Sequence
+### 2.3 Happy Path Request Flow
 
 ```mermaid
 sequenceDiagram
     participant U as User
-    participant FE as Frontend Chat Workspace
-    participant N as Next.js API Routes
-    participant B as FastAPI Backend
-    participant G as Guardrail
-    participant L as LangGraph Runtime
-    participant V as Vector Store
-    participant E as Export Service
+    participant FE as Frontend
+    participant B as Backend
+    participant L as LangGraph
+    participant O as OpenRouter API
 
-    U->>FE: Submit idea / revision request
-    FE->>N: POST /api/chats/{chatId}/interact
-    N->>B: Proxy request with auth context
-    B->>G: Classify input
-
-    alt Relevant input
-        G-->>B: relevant
-        B->>L: Start graph execution
-        L->>V: Retrieve contextual references
-        V-->>L: Retrieved context
-        L-->>B: Stream node progress + final document
-        B-->>N: SSE/event chunks
-        N-->>FE: Stream updates and output
-    else Redirect path
-        G-->>B: small_talk/out_of_scope/unsafe
-        B-->>N: Redirect response
-        N-->>FE: Show guardrail message
+    U->>FE: Describe product idea
+    FE->>B: POST /api/chats/{id}/interact
+    B->>L: Invoke graph
+    Note over L,O: Phase 1: Ingestion
+    L->>O: ExtractIngestionSummary
+    
+    Note over L,O: Phase 2: Elicitation
+    loop For each question
+        L->>O: Ask ClarificationQuestion
+        L-->>B: INTERRUPT
+        B-->>FE: SSE event: question
+        U->>FE: Answer question
+        FE->>B: Forward answer
+        B->>L: Resume with Command(resume)
     end
 
-    opt Export requested
-        FE->>N: GET /api/chats/{chatId}/export/docx
-        N->>B: Proxy export request
-        B->>E: Convert markdown + diagrams
-        E-->>B: DOCX bytes
-        B-->>FE: File download
+    Note over L,O: Phase 3 & 4: Drafting & Diagrams
+    par 6 Sections
+        L->>O: DraftSection(s1...s4)
     end
+    L->>O: Generate Mermaid diagrams
+    
+    Note over L,B: Phase 5: Finalization
+    L->>L: Assemble document
+    L-->>B: Complete signal
+    B-->>FE: SSE event: complete(document)
+
 ```
 
-## 3. Component Design
+---
 
-### Key Components
+## 3. Data Design
 
-- **Frontend Chat Workspace**: Sends user prompts and displays streaming progress/results with live section preview.
-- **API Route Proxy**: Validates user session and forwards requests to backend endpoints.
-- **Guardrail Classifier**: Filters irrelevant/unsafe input before expensive orchestration (LLM-based, 4 labels).
-- **Graph Runtime**: Executes 7-node LangGraph graph for full generation, diagram-only, or revision mode.
-- **Vector Store Retriever**: ChromaDB-based semantic search injecting standards-compliant context into prompts.
-- **Document Assembly Pipeline**: Combines section drafts, use-case tables, diagrams, and front matter into final SRS.
-- **Export Service**: Produces Markdown (JSON/file) and DOCX with embedded Mermaid diagrams.
-
-### LLM Structured Output Strategy
-
-All LLM-invoking nodes use LangChain's `with_structured_output(method="json_mode")` to enforce Pydantic schema validation:
+### 3.1 Entity-Relationship Diagram (Application Data)
 
 ```mermaid
-flowchart TD
-    Start([LLM Node Invoked]) --> Retry{Retry<br/>attempts left?}
-    Retry -->|Yes| Call["LLM.with_structured_output<br/>(Pydantic model, json_mode)"]
-    Call --> Success{Valid<br/>Pydantic?}
-    Success -->|Yes| Return([Return formatted<br/>section/data])
-    Success -->|No| Retry
-    Retry -->|No, all exhausted| Raise["Log error and raise"]
+erDiagram
+    User ||--o{ Chat : has
+    Chat ||--o{ ChatMessage : contains
+    Chat ||--o{ ChatRun : executes
+
+    User {
+        string id PK
+        string email UK
+        string passwordHash
+    }
+    Chat {
+        string id PK
+        string userId FK
+        string backendThreadId UK
+        json stateJson
+    }
+    ChatMessage {
+        string id PK
+        enum role "USER | ASSISTANT"
+        string content
+    }
+    ChatRun {
+        string id PK
+        enum status "RUNNING | COMPLETED | FAILED | NEEDS_INPUT"
+        string inputMessage
+        int etaSeconds
+    }
+
 ```
 
-Retry strategy:
-1. Initial call with `temperature=0.5`
-2. Each retry reduces temperature by 0.1 (down to 0.1 minimum)
-3. Maximum 2 retries (3 total attempts)
-4. `max_tokens` set to 8192 for full section generation
+### 3.2 Workflow State Schema (`SRSState`)
 
-### Pydantic Models
+The core state object flows through all LangGraph nodes. Key components include:
 
-| Model | Fields | Purpose |
-|---|---|---|
-| `IngestionSummaryModel` | project_title, domain, project_purpose, target_users, suggested_actors, platform_needs, success_criteria, architecture_summary, components, core_flows, data_entities, external_interfaces, constraints, assumptions | Extracts full project metadata from initial user input |
-| `ClarificationQuestionModel` | category, group (0-3), priority, question, suggested_options[], rationale | Single elicitation question |
-| `QuestionPlanModel` | topics[] | 2-3 question topics for a group |
-| `SubsectionContent` | number, title, content | Numbered subsection |
-| `DraftSectionModel` | subsections[] | Drafted SRS section |
-| `MermaidDiagramSet` | usecase, class_diagram, er, activity | Set of 4 Mermaid diagrams |
+* **`ingestion_summary`:** 14 domain metadata fields (project_title, target_users, constraints, etc.).
+* **`elicitation_answers`:** Stored context mapping back to generated questions.
+* **`sections`:** Document fragments generated during Phase 3 parallel drafting.
+* **`mermaid_blocks` / `plantumul_diagrams`:** Validated diagram syntaxes.
+* **`rag_context`:** Strings retrieved from ChromaDB.
 
-## 4. 5-Phase Workflow Design
+### 3.3 Vector Store (RAG)
 
-### Phase 1: Ingestion
-- Node: `ingest_and_map_domain`
-- Extracts structured project summary from user's initial informal description
-- Output: `IngestionSummaryModel` with title, domain, actors, flows, entities, constraints
+ChromaDB is utilized with the `all-MiniLM-L6-v2` embedding model. It initializes by seeding 6 core documents (IEEE 830, GDPR, HIPAA, PCI-DSS, WCAG, and an extended SRS template). Queries perform a cosine similarity search (`top-5`, `k=5`) to inject context into LLM system prompts.
 
-### Phase 2: Elicitation (4 Groups, One Question at a Time)
-- Nodes: `generate_elicitation_plan` → `generate_single_elicitation_question` → `classify_and_store_answers`
-- Each group has 2-3 question topics generated as a lightweight plan
-- Questions are asked one-at-a-time with `interrupt()` pauses
-- User answers are accumulated in `elicitation_answers[group_N]`
-- Groups: User Roles & Flows, Functional Boundaries, NFRs, Edge Cases & Risk Mitigation
+---
 
-### Phase 3: Drafting (6 Parallel Section Writers)
-- Node: `draft_from_approved_outline`
-- Runs 6 parallel section drafters via `asyncio.gather`:
-  - **s1**: Introduction (1.1-1.5)
-  - **s2**: Overall Description (2.1-2.5)
-  - **s3_functional**: Functional Requirements (3.1.x)
-  - **s3_external**: External Interface Requirements (3.2.1-3.2.4)
-  - **s3_nfr**: Non-Functional Requirements (3.3-3.6)
-  - **s4**: Appendices (A, B, C)
-- Each drafter returns structured `SubsectionContent` objects with explicit numbering
+## 4. API & Integration Design
 
-### Phase 4: Diagram Generation
-- Node: `generate_mermaid_diagrams`
-- Generates 4 Mermaid diagrams (usecase, class, ER, activity) based on domain data
-- Falls back to template-based diagrams if LLM generation fails
+### 4.1 Backend Endpoints (FastAPI)
 
-### Phase 5: Finalization
-- Node: `finalize_and_export`
-- Assembles final document with use-case tables, diagrams, and front matter
+* **`POST /api/sessions`**: Create a new elicitation session thread.
+* **`POST /api/sessions/{thread_id}/interact`**: Send messages and stream Server-Sent Events (SSE). Accepts full generation, diagrams-only, or section-revision modes.
+* **`GET /api/sessions/{thread_id}/document.docx`**: Assemble and download the final DOCX, triggering server-side diagram rendering (`mmdc`).
 
-## 5. Diagram Generation
+### 4.2 SSE Streaming
 
-### Mermaid Diagrams
-Generated by `generate_mermaid_diagrams` node in `nodes.py` with fallback in `_fallback_mermaid_diagrams_for_node()`:
-- **Use Case Diagram**: Actors, use cases, system boundary
-- **Class Diagram**: Core data entities and relationships
-- **ER Diagram**: Entity-relationship model with crow's foot notation
-- **Activity Diagram**: Main workflow with states and transitions
+Real-time progress is relayed back to the Next.js client via EventSource:
 
-Fallback diagrams in `routes.py` (`_fallback_mermaid_diagrams()`) produce a richer set: flowchart, sequence, ER, class, state, and component diagrams.
+* `token`: Streamed text chunks for live reading.
+* `status`: Current node execution, step count, and EMA-based ETA calculation.
+* `question`: Human-in-the-loop interruption payloads.
+* `complete`: The final compiled SRS Markdown document.
 
-### PlantUML Diagrams
-Generated by `_fallback_plantuml_diagrams()` in `nodes.py`:
-- **Use Case Diagram**: Actors, use cases, relationships
-- **Component Diagram**: System components and external interfaces
-- **Sequence Diagram**: Primary flow interaction
-- **Activity Diagram**: Primary workflow with validation branching
+### 4.3 Authentication
 
-## 6. Document Assembly
+Stateless authentication uses JWTs (HS256 signature, 7-day expiry). Next.js API routes (`/api/auth/login`, `/api/auth/signup`) handle password hashing (bcrypt, 12 rounds) and set `httpOnly` secure cookies.
 
-The final SRS document is assembled by `_format_srs_document()` in `routes.py`:
-1. Section drafts are concatenated in order by `assemble_document_from_sections()` in `formatting.py` (s1, s2, s3_functional, s3_external, s3_nfr, s4)
-2. Backend formatting applies heading numbering and requirement splitting
-3. Use-case catalog and detail tables are appended as Section 5
-4. PlantUML and Mermaid diagrams are appended as Section 6
-5. Front matter wraps the body with title, document info table, and table of contents
+---
 
-## 7. Progress Tracking and ETA
+## 5. User Interface (UI) Design
 
-The backend tracks node execution progress with:
-- **Node sequences**: Ordered lists of nodes for each run mode (full with/without diagrams, diagrams-only, section revision)
-- **Parallel node handling**: 5 drafting nodes counted as a single step
-- **Exponential Moving Average**: Per-node duration estimates updated after each run with `alpha=0.2`
-- **SSE status events**: Emit `started`/`finished` events with step number, total steps, elapsed time, and estimated remaining time
+### 5.1 Workspace Layout
+
+The core workspace (`/chat`) utilizes a 3-column responsive grid:
+
+1. **Left (260px):** Chat history sidebar (CRUD operations for past documents).
+2. **Center (Flexible):** Interactive generation zone. Displays chat bubbles, clarification forms, and the active generation progress indicator (ReceivingBubble with ETA).
+3. **Right (420px):** SRS Draft preview. Features section accordions, inline Mermaid SVG rendering, and targeted revision editing tools.
+
+### 5.2 Interaction States
+
+* **Empty:** Prompt for the initial product description paragraph.
+* **Elicitation:** Form cards displaying priority questions and suggested chips.
+* **Generation:** A progress bar with steps completed, elapsed time, and dynamic ETA.
+* **Targeted Revision:** A focused UI allowing the user to select specific requirements (e.g., *3.1 User Authentication*) and instruct the LLM to rewrite only that portion without regenerating the entire SRS.
+
+### 5.3 Color System
+
+CSS custom properties handle automatic Light/Dark theming.
+
+* *Primary:* Blue-600 (`#2563eb`) / Blue-400 (`#60a5fa`)
+* *Surfaces:* Slate-50 (`#f8fafc`) to Slate-800 (`#1e293b`) for depth.
+
+---
+
+## 6. Component Design
+
+### 6.1 Frontend Component Hierarchy
+
+* **`ChatWorkspace` (Main Controller):** Manages 35+ state variables, SSE parsing, and polling for active runs.
+* **`MarkdownContent`**: Custom markdown renderer supporting heading enumeration and requirement splitting.
+* **`ClarificationFormCard`**: Handles the HITL interrupt data collection.
+* **`SelectedDraftBubble`**: Isolates section context when `revision_mode` is triggered.
+
+### 6.2 Backend LangGraph Topology
+
+The state graph relies on strictly typed Pydantic models for structured output generation (`json_mode`).
+
+* **Routing Logic:** Node responses determine if the graph should proceed to drafting, loop back for another question, or suspend execution.
+* **Parallel Processing:** `asyncio.gather` is used during the drafting phase to run the 6 section drafters concurrently, significantly reducing TTFB (Time to First Byte) for the final document.
+* **Diagram Validation:** The diagram node features a two-tier validation system: it first attempts to validate Mermaid syntax via the `mmdc` CLI subprocess. If that fails, it falls back to a regex heuristic and triggers an LLM correction prompt.
+
+---
+
+## 7. Assumptions, Dependencies & Constraints
+
+### 7.1 Assumptions & Dependencies
+
+* **External LLM Access:** The system relies entirely on the OpenRouter API (OpenAI-compatible models) and assumes reliable internet access. There is no local LLM fallback.
+* **Docker / Postgres:** PostgreSQL 16 is mandatory for LangGraph checkpointing. (MemorySaver is implemented strictly as a fail-safe for development).
+* **User Proficiency:** The initial input must represent a reasonable product concept. The LLM cannot extrapolate a complex enterprise architecture from a 3-word prompt without heavy hallucination.
+* **Runtimes:** Pinned to Node.js 20+ and Python 3.11+.
+
+### 7.2 Architectural Constraints & Mitigations
+
+| Constraint | Mitigation Strategy |
+| --- | --- |
+| **State persistence overhead** | LangGraph interrupts require constant DB checkpointing. Mitigated by using an `AsyncPostgresSaver` connection pool. |
+| **Sequential Elicitation Bottleneck** | Asking one question at a time can frustrate users. Mitigated by limiting to 4 groups of 2-3 questions max, and providing "suggested answer" chips. |
+| **Context Window Limits** | Capped at `max_tokens=8192`. Mitigated by splitting the draft process into 6 parallel sub-tasks rather than requesting one monolithic document. |
+| **Diagram Syntax Failures** | LLMs struggle with perfect Mermaid syntax. Mitigated via the two-tier validation loop and static template fallbacks. |
