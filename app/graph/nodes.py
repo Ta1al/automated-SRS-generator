@@ -267,6 +267,24 @@ class DraftSectionModel(BaseModel):
     subsections: list[SubsectionContent] = Field(..., description="All subsections for this SRS section")
 
 
+class MermaidDiagramSet(BaseModel):
+    """Set of 4 Mermaid diagrams for the SRS document."""
+    usecase: str = Field(..., description="Mermaid use case diagram code")
+    class_diagram: str = Field(..., description="Mermaid class diagram code")
+    er: str = Field(..., description="Mermaid ER diagram code")
+    activity: str = Field(..., description="Mermaid activity/state diagram code")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_keys(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            normalized = dict(data)
+            if "class" in normalized and "class_diagram" not in normalized:
+                normalized["class_diagram"] = normalized.pop("class")
+            return normalized
+        return data
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Helper Functions
 # ─────────────────────────────────────────────────────────────────────────────
@@ -884,6 +902,169 @@ async def process_review_feedback(state: SRSState) -> dict:
     return {
         "chat_history": new_messages,
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 4.5: Mermaid Diagram Generation
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+async def generate_mermaid_diagrams(state: SRSState) -> dict:
+    """
+    Generate 4 Mermaid diagrams (usecase, class, ER, activity) using the LLM
+    based on ingestion summary, elicitation answers, and drafted sections.
+    """
+    ingestion = state.get("ingestion_summary", {})
+    elicitation = state.get("elicitation_answers", {})
+    sections = state.get("sections", {})
+
+    sections_preview = "\n\n".join(
+        f"### {key}\n{content[:500]}"
+        for key, content in sections.items()
+        if content
+    )[:3000]
+
+    system_prompt = prompts.MERMAID_GENERATION_SYSTEM.format(
+        ingestion_summary=json.dumps(ingestion, indent=2),
+        elicitation_answers=json.dumps(elicitation, indent=2),
+        sections=sections_preview,
+    )
+
+    logger.info("Generating Mermaid diagrams")
+
+    try:
+        response = await _llm_invoke_structured(
+            system_prompt=system_prompt,
+            output_model=MermaidDiagramSet,
+            temperature=0.4,
+            max_tokens=4096,
+        )
+
+        diagram_code = response.model_dump(mode="json")
+        mermaid_blocks: list[str] = []
+
+        diagram_labels = {
+            "usecase": "usecaseDiagram - Use Case Diagram",
+            "class_diagram": "classDiagram - Class Diagram",
+            "er": "erDiagram - Entity Relationship Diagram",
+            "activity": "stateDiagram-v2 - Activity Diagram",
+        }
+
+        for key, label in diagram_labels.items():
+            code = str(diagram_code.get(key, "")).strip()
+            if code:
+                if not code.startswith(tuple(d["key"] for d in [
+                    {"key": "usecaseDiagram"},
+                    {"key": "classDiagram"},
+                    {"key": "erDiagram"},
+                    {"key": "stateDiagram-v2"},
+                ] + [])):
+                    mermaid_blocks.append(code)
+                else:
+                    mermaid_blocks.append(code)
+
+        if not mermaid_blocks:
+            mermaid_blocks = _fallback_mermaid_diagrams_for_node(ingestion)
+
+        logger.info(f"Generated {len(mermaid_blocks)} Mermaid diagrams")
+        return {"mermaid_blocks": mermaid_blocks, "mermaid_errors": []}
+
+    except Exception as exc:
+        logger.warning(f"Mermaid diagram generation failed: {exc}. Using fallback.")
+        mermaid_blocks = _fallback_mermaid_diagrams_for_node(ingestion)
+        return {"mermaid_blocks": mermaid_blocks, "mermaid_errors": [str(exc)]}
+
+
+def _fallback_mermaid_diagrams_for_node(ingestion: dict) -> list[str]:
+    """Generate fallback Mermaid diagrams when LLM generation fails."""
+    project_title = str(ingestion.get("project_title", "System")).strip() or "System"
+    actors = [str(a).strip() for a in (ingestion.get("suggested_actors", []) or ingestion.get("target_users", []) or ["User"]) if str(a).strip()]
+    entities = [str(e).strip() for e in (ingestion.get("data_entities", []) or []) if str(e).strip()]
+    flows = [f for f in (ingestion.get("core_flows", []) or []) if isinstance(f, dict)]
+    components = [str(c).strip() for c in (ingestion.get("components", []) or []) if str(c).strip()]
+
+    primary_actor = actors[0] if actors else "User"
+    secondary_actor = actors[1] if len(actors) > 1 else "Admin"
+
+    usecase_lines = ["usecaseDiagram"]
+    usecase_lines.append(f"  actor {primary_actor.replace(' ', '_')} as \"{primary_actor}\"")
+    if secondary_actor:
+        usecase_lines.append(f"  actor {secondary_actor.replace(' ', '_')} as \"{secondary_actor}\"")
+    usecase_lines.append(f"  rectangle \"{project_title}\" {{")
+    for i, flow in enumerate(flows[:4], start=1):
+        flow_name = str(flow.get("name", f"UseCase{i}")).strip()
+        usecase_lines.append(f"    usecase UC{i} as \"{flow_name}\"")
+    usecase_lines.append("  }")
+    if actors:
+        usecase_lines.append(f"  {actors[0].replace(' ', '_')} --> UC1")
+    if len(actors) > 1 and len(flows) > 1:
+        usecase_lines.append(f"  {actors[1].replace(' ', '_')} --> UC2")
+
+    class_lines = ["classDiagram"]
+    if entities:
+        for entity in entities[:5]:
+            safe_name = entity.replace(" ", "").replace("-", "_")
+            class_lines.append(f"  class {safe_name} {{")
+            class_lines.append("    +String id")
+            class_lines.append("  }")
+        for i in range(min(len(entities), 5) - 1):
+            e1 = entities[i].replace(" ", "").replace("-", "_")
+            e2 = entities[i + 1].replace(" ", "").replace("-", "_")
+            class_lines.append(f"  {e1} --> {e2}")
+    else:
+        class_lines.append("  class System {")
+        class_lines.append("    +String id")
+        class_lines.append("    +process()")
+        class_lines.append("  }")
+        class_lines.append("  class Request {")
+        class_lines.append("    +String type")
+        class_lines.append("    +validate()")
+        class_lines.append("  }")
+        class_lines.append("  System --> Request")
+
+    er_lines = ["erDiagram"]
+    if entities:
+        for entity in entities[:5]:
+            safe_name = entity.upper().replace(" ", "_").replace("-", "_")
+            er_lines.append(f"  {safe_name} {{")
+            er_lines.append("    string id")
+            er_lines.append("    string name")
+            er_lines.append("  }")
+        for i in range(min(len(entities), 5) - 1):
+            e1 = entities[i].upper().replace(" ", "_").replace("-", "_")
+            e2 = entities[i + 1].upper().replace(" ", "_").replace("-", "_")
+            er_lines.append(f"  {e1} ||--o{{ {e2} : references")
+    else:
+        er_lines.append("  USER ||--o{ REQUEST : creates")
+        er_lines.append("  REQUEST ||--|| RESULT : produces")
+        er_lines.append("  USER {")
+        er_lines.append("    string id")
+        er_lines.append("    string email")
+        er_lines.append("  }")
+        er_lines.append("  REQUEST {")
+        er_lines.append("    string id")
+        er_lines.append("    string type")
+        er_lines.append("  }")
+
+    activity_lines = ["stateDiagram-v2"]
+    activity_lines.append("  [*] --> Idle")
+    if flows:
+        first_flow = str(flows[0].get("name", "Process")).strip()
+        activity_lines.append(f"  Idle --> Processing : {first_flow}")
+    else:
+        activity_lines.append("  Idle --> Processing : start")
+    activity_lines.append("  Processing --> Validating : data ready")
+    activity_lines.append("  Validating --> Completed : success")
+    activity_lines.append("  Validating --> Failed : error")
+    activity_lines.append("  Failed --> Idle : retry")
+    activity_lines.append("  Completed --> [*]")
+
+    return [
+        "\n".join(usecase_lines),
+        "\n".join(class_lines),
+        "\n".join(er_lines),
+        "\n".join(activity_lines),
+    ]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
