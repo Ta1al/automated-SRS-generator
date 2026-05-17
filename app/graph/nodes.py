@@ -245,7 +245,7 @@ class OutlineItemModel(BaseModel):
     title: str = Field(..., description="Section title")
     description: str = Field(..., description="What goes in this section")
     included: bool = Field(default=True, description="Should this section be included?")
-    rationale: str = Field(..., description="Why include or exclude")
+    rationale: str = Field(..., description="What the main points of this section are and why they're needed")
     subsection_suggestions: list[str] = Field(default_factory=list, description="Suggested subsections")
     user_notes: str = Field(default="", description="User feedback")
 
