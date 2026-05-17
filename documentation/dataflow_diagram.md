@@ -82,18 +82,15 @@ graph TD
         Plan["Phase 2: generate_elicitation_plan"]
         AskQ["Phase 2: generate_single_elicitation_question"]
         Store["Phase 2: classify_and_store_answers"]
-        Outline["Phase 3: generate_outline"]
-        Approve["Phase 3: wait_for_outline_approval"]
-        Draft["Phase 4: draft_from_approved_outline"]
+        Draft["Phase 3: draft_from_approved_outline"]
         S1["draft_section_1"]
         S2["draft_section_2"]
         S3FR["draft_s_3_functional"]
         S3IF["draft_s_3_external"]
         S3NFR["draft_s_3_nfr"]
         S4["draft_s_4"]
-        Present["Phase 5: present_draft_for_review"]
-        Review["Phase 5: process_review_feedback"]
-        Finalize["finalize_and_export"]
+        Diagrams["Phase 4: generate_mermaid_diagrams"]
+        Finalize["Phase 5: finalize_and_export"]
     end
 
     subgraph DocxProc["DOCX Processing"]
@@ -137,14 +134,9 @@ graph TD
     AskQ --> Store
     Store -->|more questions| AskQ
     Store -->|next group| Plan
-    Store -->|all done| Outline
+    Store -->|all done| Draft
 
     %% Phase 3
-    Outline --> Approve
-    Approve -->|not approved| Approve
-    Approve -->|approved| Draft
-
-    %% Phase 4
     Draft --> asyncio_gather["asyncio.gather"]
     asyncio_gather --> S1
     asyncio_gather --> S2
@@ -153,16 +145,16 @@ graph TD
     asyncio_gather --> S3NFR
     asyncio_gather --> S4
 
+    %% Phase 4
+    S1 --> Diagrams
+    S2 --> Diagrams
+    S3FR --> Diagrams
+    S3IF --> Diagrams
+    S3NFR --> Diagrams
+    S4 --> Diagrams
+
     %% Phase 5
-    S1 --> Present
-    S2 --> Present
-    S3FR --> Present
-    S3IF --> Present
-    S3NFR --> Present
-    S4 --> Present
-    Present --> Review
-    Review -->|more edits| Review
-    Review -->|finalize| Finalize
+    Diagrams --> Finalize
 
     %% Document assembly
     Finalize --> DocumentAssembler
@@ -172,14 +164,12 @@ graph TD
     Ingest --> OpenRouter
     Plan --> OpenRouter
     AskQ --> OpenRouter
-    Outline --> OpenRouter
     S1 --> OpenRouter
     S2 --> OpenRouter
     S3FR --> OpenRouter
     S3IF --> OpenRouter
     S3NFR --> OpenRouter
     S4 --> OpenRouter
-    Ingest --> Chroma
     Interact --> Checkpoint
 
     %% Return data
@@ -217,6 +207,6 @@ graph TD
 
 1. **Session Creation** → Backend generates UUID thread_id, returned to frontend
 2. **Message Interaction** → Frontend proxies message to backend SSE endpoint; backend classifies via guardrail, invokes/resumes graph, streams events back
-3. **Graph Execution** → 5-phase pipeline with interrupts; state persisted to PostgreSQL checkpointer
+3. **Graph Execution** → 5-phase pipeline (Ingestion → Elicitation → Drafting → Diagrams → Finalization) with interrupts; state persisted to PostgreSQL checkpointer
 4. **Document Assembly** → Sections combined, formatted, enriched with use-case tables and diagrams
 5. **Export** → Markdown returned as JSON or file; DOCX generated with formatted text and embedded diagram images

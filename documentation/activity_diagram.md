@@ -1,6 +1,6 @@
 # Activity Diagram
 
-This diagram shows the main activity flow of the automated SRS generator system, covering the three run modes (full flow, diagrams-only, section revision), the 6 parallel section writers, the 4-group elicitation with one-question-at-a-time interrupts, and the HITL outline/draft review interrupts.
+This diagram shows the main activity flow of the automated SRS generator system, covering the three run modes (full flow, diagrams-only, section revision), the 6 parallel section writers, and the 4-group elicitation with one-question-at-a-time interrupts.
 
 ## Full SRS Generation Flow
 
@@ -26,11 +26,7 @@ flowchart TD
     MoreInPlan -->|No| MoreGroups{"More Groups?<br/>(4 total)"}
 
     MoreGroups -->|Yes| Plan
-    MoreGroups -->|No| Outline[Phase 3: Generate IEEE 830 Outline]
-
-    Outline --> InterruptO{{INTERRUPT: Wait for Outline Approval}}
-    InterruptO -->|Not Approved| Outline
-    InterruptO -->|Approved| Draft[Phase 4: Draft from Approved Outline]
+    MoreGroups -->|No| Draft[Phase 3: Draft from Approved Outline]
 
     Draft --> FanOut[/"6 Parallel Section Writers"/]
     FanOut --> S1[Draft s1: Introduction - 1.1 to 1.5]
@@ -47,13 +43,9 @@ flowchart TD
     S3NFR --> FanIn
     S4 --> FanIn
 
-    FanIn --> Present[Phase 5: Present Draft for Review]
-    Present --> InterruptR{{INTERRUPT: Wait for User Feedback}}
+    FanIn --> Mermaid[Phase 4: Generate Mermaid Diagrams]
 
-    InterruptR -->|Request Changes| ProcessFeedback[Process Review Feedback]
-    ProcessFeedback --> Present
-
-    InterruptR -->|Finalize| Assemble[Assemble Final Document]
+    Mermaid --> Assemble[Phase 5: Assemble Final Document]
     Assemble --> AddTables[Append Use Case Tables]
     AddTables --> AddDiagrams[Append PlantUML + Mermaid Diagrams]
     AddDiagrams --> Format[Add Front Matter + TOC]
@@ -134,7 +126,7 @@ flowchart TD
     I3_1 --> A3_1[Store Answer]
     A3_1 --> More3{More in Plan?}
     More3 -->|Yes| Q3_1
-    More3 -->|No| Done([Proceed to Outline Generation])
+    More3 -->|No| Done([Proceed to Drafting])
 ```
 
 ## Process Description
@@ -143,19 +135,17 @@ flowchart TD
 
 2. **Elicitation (Phase 2)** - 4 groups of questions (2-3 questions each), asked one at a time. Each question pauses via `interrupt()` and resumes when the user provides an answer. Answers accumulate in state.
 
-3. **Outline Review (Phase 3)** - LLM generates an IEEE 830-compliant outline. User can approve, modify, or reject sections before drafting proceeds.
+3. **Drafting (Phase 3)** - 6 parallel section writers draft simultaneously using `asyncio.gather`. Each returns structured subsections with explicit numbering.
 
-4. **Drafting (Phase 4)** - 6 parallel section writers draft simultaneously using `asyncio.gather`. Each returns structured subsections with explicit numbering.
+4. **Diagram Generation (Phase 4)** - LLM generates 4 Mermaid diagrams (usecase, class, ER, activity) based on domain data. Falls back to template-based diagrams on failure.
 
-5. **Review & Refine (Phase 5)** - User reviews the assembled draft. Can request section regeneration, inline edits, or finalize the document.
-
-6. **Finalization** - Document is assembled with:
+5. **Finalization (Phase 5)** - Document is assembled with:
    - Use-case catalog and detail tables derived from ingestion data
    - PlantUML diagrams (usecase, component, sequence, activity) generated from domain data
    - Mermaid diagrams (flowchart, sequence, ER, class, state) as fallback
    - Front matter with project title, document info table, and table of contents
 
-7. **Export** - Available formats:
+6. **Export** - Available formats:
    - Markdown JSON (`GET /api/sessions/{id}/document`)
    - Markdown file download (`GET /api/sessions/{id}/document.md`)
    - DOCX with embedded diagrams (`GET /api/sessions/{id}/document.docx`)

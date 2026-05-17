@@ -19,9 +19,9 @@ flowchart LR
 
 - **Interactive Elicitation**: 4-phase Q&A (one question at a time) covering user roles, functional boundaries, NFRs, and edge cases
 - **IEEE 830 Compliance**: Auto-generates structured SRS with introduction, overall description, functional/NFR/external interface requirements, and appendices
-- **Human-in-the-Loop**: Interrupts at elicitation questions, outline approval, and draft review for user feedback
+- **Human-in-the-Loop**: Interrupts at each elicitation question for user feedback
 - **RAG Grounding**: Semantic search against seeded regulatory standards (HIPAA, GDPR, PCI-DSS, WCAG, IEEE 830)
-- **Dual Diagram Support**: PlantUML (usecase, component, sequence, activity) + Mermaid (flowchart, sequence, ER)
+- **Dual Diagram Support**: Mermaid diagrams (usecase, class, ER, activity) generated from domain data
 - **Multiple Export Formats**: Markdown (JSON or file download) and DOCX with embedded diagrams
 
 ## 2. Architecture Design
@@ -33,7 +33,7 @@ The solution follows a layered architecture with clear separation between presen
 - **Presentation Layer**: Next.js pages and chat workspace components.
 - **API Gateway Layer**: Next.js API routes and backend FastAPI routes.
 - **Orchestration Layer**: LangGraph nodes, state transitions, and interruption handling.
-- **Data and Integration Layer**: Prisma/PostgreSQL, ChromaDB, PlantUML/Mermaid rendering, and document export.
+- **Data and Integration Layer**: Prisma/PostgreSQL, ChromaDB, Mermaid rendering, and document export.
 
 ```mermaid
 flowchart TB
@@ -57,7 +57,7 @@ flowchart TB
         PG[(PostgreSQL + Prisma)]
         VS[(ChromaDB Vector Store)]
         DOCX[DOCX Exporter]
-        MMD[Mermaid/PlantUML Renderer]
+        MMD[Mermaid Renderer]
     end
 
     UI --> NAPI
@@ -120,10 +120,10 @@ sequenceDiagram
 - **Frontend Chat Workspace**: Sends user prompts and displays streaming progress/results with live section preview.
 - **API Route Proxy**: Validates user session and forwards requests to backend endpoints.
 - **Guardrail Classifier**: Filters irrelevant/unsafe input before expensive orchestration (LLM-based, 4 labels).
-- **Graph Runtime**: Executes 10-node LangGraph graph for full generation, diagram-only, or revision mode.
+- **Graph Runtime**: Executes 7-node LangGraph graph for full generation, diagram-only, or revision mode.
 - **Vector Store Retriever**: ChromaDB-based semantic search injecting standards-compliant context into prompts.
 - **Document Assembly Pipeline**: Combines section drafts, use-case tables, diagrams, and front matter into final SRS.
-- **Export Service**: Produces Markdown (JSON/file) and DOCX with embedded Mermaid/PlantUML diagrams.
+- **Export Service**: Produces Markdown (JSON/file) and DOCX with embedded Mermaid diagrams.
 
 ### LLM Structured Output Strategy
 
@@ -152,10 +152,9 @@ Retry strategy:
 | `IngestionSummaryModel` | project_title, domain, project_purpose, target_users, suggested_actors, platform_needs, success_criteria, architecture_summary, components, core_flows, data_entities, external_interfaces, constraints, assumptions | Extracts full project metadata from initial user input |
 | `ClarificationQuestionModel` | category, group (0-3), priority, question, suggested_options[], rationale | Single elicitation question |
 | `QuestionPlanModel` | topics[] | 2-3 question topics for a group |
-| `OutlineItemModel` | section_id, title, description, included, rationale, subsection_suggestions[], user_notes | IEEE 830 outline section |
-| `OutlineListModel` | outline_items[] | Full outline |
 | `SubsectionContent` | number, title, content | Numbered subsection |
 | `DraftSectionModel` | subsections[] | Drafted SRS section |
+| `MermaidDiagramSet` | usecase, class_diagram, er, activity | Set of 4 Mermaid diagrams |
 
 ## 4. 5-Phase Workflow Design
 
@@ -171,12 +170,7 @@ Retry strategy:
 - User answers are accumulated in `elicitation_answers[group_N]`
 - Groups: User Roles & Flows, Functional Boundaries, NFRs, Edge Cases & Risk Mitigation
 
-### Phase 3: Outline Review
-- Nodes: `generate_outline` → `wait_for_outline_approval`
-- Generates IEEE 830-compliant outline with section IDs, titles, descriptions, and include/exclude toggles
-- User can approve, request changes, or modify sections before drafting
-
-### Phase 4: Drafting (6 Parallel Section Writers)
+### Phase 3: Drafting (6 Parallel Section Writers)
 - Node: `draft_from_approved_outline`
 - Runs 6 parallel section drafters via `asyncio.gather`:
   - **s1**: Introduction (1.1-1.5)
@@ -187,28 +181,32 @@ Retry strategy:
   - **s4**: Appendices (A, B, C)
 - Each drafter returns structured `SubsectionContent` objects with explicit numbering
 
-### Phase 5: Review & Refine
-- Nodes: `present_draft_for_review` → `process_review_feedback`
-- User can request section regeneration, inline edits, or clarification
-- Finalization triggers document assembly with use-case tables, diagrams, and front matter
+### Phase 4: Diagram Generation
+- Node: `generate_mermaid_diagrams`
+- Generates 4 Mermaid diagrams (usecase, class, ER, activity) based on domain data
+- Falls back to template-based diagrams if LLM generation fails
+
+### Phase 5: Finalization
+- Node: `finalize_and_export`
+- Assembles final document with use-case tables, diagrams, and front matter
 
 ## 5. Diagram Generation
+
+### Mermaid Diagrams
+Generated by `generate_mermaid_diagrams` node in `nodes.py` with fallback in `_fallback_mermaid_diagrams_for_node()`:
+- **Use Case Diagram**: Actors, use cases, system boundary
+- **Class Diagram**: Core data entities and relationships
+- **ER Diagram**: Entity-relationship model with crow's foot notation
+- **Activity Diagram**: Main workflow with states and transitions
+
+Fallback diagrams in `routes.py` (`_fallback_mermaid_diagrams()`) produce a richer set: flowchart, sequence, ER, class, state, and component diagrams.
 
 ### PlantUML Diagrams
 Generated by `_fallback_plantuml_diagrams()` in `nodes.py`:
 - **Use Case Diagram**: Actors, use cases, relationships
 - **Component Diagram**: System components and external interfaces
-- **Sequence Diagram**: Primary flow interaction between actor, UI, app, data store, and external services
+- **Sequence Diagram**: Primary flow interaction
 - **Activity Diagram**: Primary workflow with validation branching
-
-### Mermaid Diagrams
-Generated by `_fallback_mermaid_diagrams()` in `routes.py`:
-- **Flowchart**: Primary and secondary flows
-- **Sequence Diagram**: Actor-to-system interaction
-- **ER Diagram**: Entity relationships
-- **Class Diagram**: Core classes
-- **State Diagram**: Request lifecycle
-- **Component Flowchart**: Component interaction
 
 ## 6. Document Assembly
 

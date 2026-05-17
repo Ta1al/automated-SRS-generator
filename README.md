@@ -73,12 +73,10 @@ The system is a full-stack application with two independently running processes:
 
 The LangGraph `StateGraph` follows a strict 5-phase progression:
 
-**Phase 1 (Ingestion)** → **Phase 2 (Elicitation: 4 Q&A groups, one question at a time)** → **Phase 3 (Outline review + approval)** → **Phase 4 (Drafting: 6 parallel section writers)** → **Phase 5 (Review + refine loop)** → **Finalization** → END
+**Phase 1 (Ingestion)** → **Phase 2 (Elicitation: 4 Q&A groups, one question at a time)** → **Phase 3 (Drafting: 6 parallel section writers)** → **Phase 4 (Diagram generation)** → **Phase 5 (Finalization)** → END
 
 User interrupts (`interrupt()`) occur at:
 - After each elicitation question (4 groups × 2-3 questions each)
-- After outline generation (wait for approval)
-- After draft completion (wait for feedback/finalization)
 
 ### Graph topology
 
@@ -92,17 +90,11 @@ flowchart TD
 
     store -->|more questions in plan| q
     store -->|next group| plan
-    store -->|all 4 groups done| outline["generate_outline"]
+    store -->|all 4 groups done| draft["draft_from_approved_outline"]
 
-    outline --> wait["wait_for_outline_approval"]
-    wait -->|interrupt: not approved| wait
-    wait -->|approved| draft["draft_from_approved_outline"]
+    draft -->|6 parallel sections: s1, s2, s3_functional, s3_external, s3_nfr, s4| mermaid["generate_mermaid_diagrams"]
 
-    draft -->|6 parallel sections: s1, s2, s3_functional, s3_external, s3_nfr, s4| present["present_draft_for_review"]
-    present --> review["process_review_feedback"]
-
-    review -->|interrupt: more edits| review
-    review -->|interrupt: finalize| finalize["finalize_and_export"]
+    mermaid --> finalize["finalize_and_export"]
 
     finalize --> END([END])
 ```
@@ -229,14 +221,12 @@ CORS is configured from `CORS_ORIGINS` (comma-separated). The app registers a `/
 
 | Field | Type | Reducer | Purpose |
 |---|---|---|---|
-| `current_phase` | `str` | replace | `ingestion` \| `elicitation` \| `outline_review` \| `drafting` \| `review_refine` \| `complete` |
+| `current_phase` | `str` | replace | `ingestion` \| `elicitation` \| `drafting` \| `complete` |
 | `ingestion_summary` | `dict` | `merge_dicts` | Extracted domain, actors, platform needs, core flows |
 | `pending_group_index` | `int` | replace | Current elicitation group (0–3, 4 = complete) |
 | `elicitation_answers` | `dict` | `merge_dicts` | Accumulated answers keyed by group (`group_0`–`group_3`) |
 | `elicitation_question_plan` | `list[str]` | `merge_lists` | Question topics for current group |
 | `elicitation_question_index` | `int` | replace | Current question within group |
-| `outline_items` | `list[OutlineItem]` | `merge_lists` | Proposed IEEE 830 outline sections |
-| `outline_approved` | `bool` | replace | Gate that blocks drafting until True |
 | `sections` | `dict[str, str]` | `merge_sections` | Keyed Markdown: `s1`, `s2`, `s3_functional`, `s3_external`, `s3_nfr`, `s4` |
 | `section_structures` | `dict[str, list[dict]]` | `merge_sections` | Structured subsections with number/title/content |
 | `plantumul_diagrams` | `dict[str, str]` | `merge_dicts` | PlantUML diagram code (usecase, component, sequence, activity) |
@@ -247,11 +237,11 @@ CORS is configured from `CORS_ORIGINS` (comma-separated). The app registers a `/
 | `requirements` | `list[Requirement]` | `merge_lists` | Parsed atomic requirements |
 | `rag_context` | `str` | replace | Retrieved regulatory text from ChromaDB |
 
-Supporting types: `CoreFlow`, `IngestionSummary`, `ClarificationQuestion`, `OutlineItem`, `Requirement`.
+Supporting types: `CoreFlow`, `IngestionSummary`, `ClarificationQuestion`, `Requirement`.
 
 ### Graph nodes
 
-**`app/graph/nodes.py`** implements 10 node functions. Each is async, receives `SRSState`, and returns a partial state update.
+**`app/graph/nodes.py`** implements 7 node functions. Each is async, receives `SRSState`, and returns a partial state update.
 
 | Node | Phase | LLM | Purpose |
 |---|---|---|---|
@@ -259,12 +249,9 @@ Supporting types: `CoreFlow`, `IngestionSummary`, `ClarificationQuestion`, `Outl
 | `generate_elicitation_plan` | 2 (Elicitation) | ✓ | Generates 2-3 question topics for current group via `QuestionPlanModel` |
 | `generate_single_elicitation_question` | 2 (Elicitation) | ✓ | Asks one question, interrupts for user answer via `ClarificationQuestionModel` |
 | `classify_and_store_answers` | 2 (Elicitation) | - | Stores user answer in `elicitation_answers[group_N]` |
-| `generate_outline` | 3 (Outline) | ✓ | Generates IEEE 830 outline with include/exclude toggles via `OutlineListModel` |
-| `wait_for_outline_approval` | 3 (Outline) | - | Interrupts for user approval; checks for approval commands/keywords |
-| `draft_from_approved_outline` | 4 (Drafting) | ✓ | Runs 6 parallel section drafters via `asyncio.gather` using `DraftSectionModel` |
-| `present_draft_for_review` | 5 (Review) | - | Assembles draft sections into a readable document for user review |
-| `process_review_feedback` | 5 (Review) | ✓ | Interrupts for feedback; routes to regeneration or finalization |
-| `finalize_and_export` | Finalization | - | Assembles final SRS with use-case tables, diagrams, front matter |
+| `draft_from_approved_outline` | 3 (Drafting) | ✓ | Runs 6 parallel section drafters via `asyncio.gather` using `DraftSectionModel` |
+| `generate_mermaid_diagrams` | 4 (Diagrams) | ✓ | Generates 4 Mermaid diagrams (usecase, class, ER, activity) via `MermaidDiagramSet` |
+| `finalize_and_export` | 5 (Finalization) | - | Assembles final SRS with use-case tables, diagrams, front matter |
 
 ### LLM structured output
 
@@ -277,10 +264,9 @@ Key Pydantic models:
 | `IngestionSummaryModel` | Project metadata extraction (title, domain, actors, flows, constraints, entities) |
 | `QuestionPlanModel` | 2-3 question topics for an elicitation group |
 | `ClarificationQuestionModel` | Single question with category, suggested options, rationale |
-| `OutlineItemModel` | IEEE 830 section with ID, title, description, include toggle |
-| `OutlineListModel` | Full list of outline items |
 | `SubsectionContent` | Numbered subsection with title and Markdown content |
 | `DraftSectionModel` | List of subsections for one SRS section |
+| `MermaidDiagramSet` | Set of 4 Mermaid diagrams (usecase, class, ER, activity) |
 
 ### RAG and vector store
 
@@ -299,7 +285,7 @@ Key Pydantic models:
 
 The `retrieve()` function performs semantic similarity search (top 5 results) and returns concatenated chunks with source attribution.
 
-**`app/rag/mermaid_syntax.py`** provides a lightweight in-memory corpus of Mermaid syntax rules for `flowchart`, `sequence`, and `er` diagram types.
+**`app/rag/mermaid_syntax.py`** provides a lightweight in-memory corpus of Mermaid syntax rules for `flowchart`, `sequence`, `er`, `class`, `activity`, and `usecase` diagram types.
 
 ### Guardrail classifier
 
@@ -523,7 +509,7 @@ Frontend runs at `http://localhost:3000`.
 | `token` | `{"content": "...", "node": "..."}` | Streamed LLM text chunk (or guardrail redirect) |
 | `status` | `{"node": "...", "status": "started"\|"finished", "step": 1, "total_steps": 16, "estimated_remaining_ms": 30000}` | Node progress with ETA |
 | `project_title` | `{"project_title": "..."}` | LLM-inferred project title |
-| `question` | `{"questions": [...], "prompt": "...", "outline": {...}}` | HITL interrupt (clarification or outline review) |
+| `question` | `{"questions": [...], "prompt": "..."}` | HITL interrupt (clarification question) |
 | `complete` | `{"document": "..."}` | Final SRS Markdown document |
 | `error` | `{"message": "...", "retryable": true}` | Runtime error |
 

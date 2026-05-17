@@ -88,16 +88,6 @@ classDiagram
         +rationale: string
     }
 
-    class OutlineItem {
-        +section_id: string
-        +title: string
-        +description: string
-        +included: bool
-        +rationale: string
-        +subsection_suggestions: list~string~
-        +user_notes: string
-    }
-
     class Requirement {
         +id: string
         +text: string
@@ -134,20 +124,6 @@ classDiagram
         +topics: list~string~
     }
 
-    class OutlineItemModel {
-        +section_id: string
-        +title: string
-        +description: string
-        +included: bool
-        +rationale: string
-        +subsection_suggestions: list~string~
-        +user_notes: string
-    }
-
-    class OutlineListModel {
-        +outline_items: list~OutlineItemModel~
-    }
-
     class SubsectionContent {
         +number: string
         +title: string
@@ -158,6 +134,13 @@ classDiagram
         +subsections: list~SubsectionContent~
     }
 
+    class MermaidDiagramSet {
+        +usecase: string
+        +class_diagram: string
+        +er: string
+        +activity: string
+    }
+
     class SRSState {
         +current_phase: string
         +ingestion_summary: dict
@@ -165,8 +148,6 @@ classDiagram
         +elicitation_answers: dict
         +elicitation_question_plan: list~string~
         +elicitation_question_index: int
-        +outline_items: list~OutlineItem~
-        +outline_approved: bool
         +sections: dict~string, string~
         +section_structures: dict
         +plantumul_diagrams: dict~string, string~
@@ -261,7 +242,6 @@ classDiagram
     SRSState --> "*" Requirement : contains
     SRSState --> "*" ClarificationQuestion : references
     SRSState --> "0..1" IngestionSummary : uses
-    SRSState --> "*" OutlineItem : contains
     SRSState --> IngestionSummaryModel : uses via node
     SRSState --> ClarificationQuestionModel : uses via node
 
@@ -290,11 +270,9 @@ classDiagram
 
 - **ClarificationQuestion** - TypedDict for structured follow-up questions with category, group index, priority, suggested options, and rationale.
 
-- **OutlineItem** - TypedDict representing a proposed IEEE 830 outline section with include/exclude toggle, rationale, subsection suggestions, and user notes.
-
 - **Requirement** - Atomic requirement with taxonomy-prefixed ID, descriptive text, classification labels, and boolean-testable acceptance criterion.
 
-- **SRSState** - Full typed state passed through every LangGraph node. Uses `merge_sections`, `merge_dicts`, `merge_lists`, and `add_messages` reducers. Tracks phase, elicitation progress, outline approval, section drafts, diagrams, and chat history.
+- **SRSState** - Full typed state passed through every LangGraph node. Uses `merge_sections`, `merge_dicts`, `merge_lists`, and `add_messages` reducers. Tracks phase, elicitation progress, section drafts, diagrams, and chat history.
 
 - **GraphRuntime** - Compiled LangGraph `StateGraph` workflow built by `build_graph()`. Supports `astream()` for SSE streaming, `aget_state()` for state inspection, and `adelete_thread()` for session cleanup.
 
@@ -324,6 +302,6 @@ These models enforce schema validation on LLM-generated content using LangChain'
 
 - **ClarificationQuestionModel** - Used by `generate_single_elicitation_question` to produce one question with category, group index, suggested options, and rationale.
 
-- **OutlineItemModel / OutlineListModel** - Used by `generate_outline` to produce the full IEEE 830 outline with section IDs, titles, descriptions, and include/exclude toggles.
-
 - **SubsectionContent / DraftSectionModel** - Used by all 6 parallel section drafters. Each subsection has an explicit number, title, and Markdown content string. The model validator ensures proper structure.
+
+- **MermaidDiagramSet** - Used by `generate_mermaid_diagrams` to produce 4 Mermaid diagram code strings (usecase, class, ER, activity).
