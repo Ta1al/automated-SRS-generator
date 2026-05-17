@@ -249,7 +249,7 @@ Return JSON (no markdown):
   "category": "User Roles & Flows",
   "group": 0,
   "question": "...",
-  "suggested_options": ["Option A", "Option B", ...],
+  "suggested_options": ["Option A", "Option B", "Option C"],
   "rationale": "Brief explanation of why we ask"
 }}
 """
@@ -658,9 +658,9 @@ Generate exactly 4 Mermaid diagrams in this order:
 4. **Activity Diagram** (`stateDiagram-v2`) - Show the main workflow or business process flow with states and transitions.
 
 Mermaid syntax rules:
-- For usecase: use `usecaseDiagram`, `actor`, `usecase Name as "Label"`, `rectangle Name { ... }`, `Actor --> UC1`
-- For class: use `classDiagram`, `class Name { +attribute type method() }`, `<|--` for inheritance, `-->` for association
-- For er: use `erDiagram`, `ENTITY ||--o{ OTHER : relationship`, entity attributes in braces
+- For usecase: use `usecaseDiagram`, `actor`, `usecase Name as "Label"`, `rectangle Name {{ ... }}`, `Actor --> UC1`
+- For class: use `classDiagram`, `class Name {{ +attribute type method() }}`, `<|--` for inheritance, `-->` for association
+- For er: use `erDiagram`, `ENTITY ||--o{{ OTHER : relationship`, entity attributes in braces
 - For activity/state: use `stateDiagram-v2`, `[*] --> State`, `State --> [*]`, `State --> Other : trigger`
 
 Rules:
