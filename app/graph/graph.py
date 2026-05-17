@@ -32,6 +32,7 @@ from app.graph.nodes import (
     draft_from_approved_outline,
     present_draft_for_review,
     process_review_feedback,
+    generate_mermaid_diagrams,
     finalize_and_export,
 )
 from app.graph.state import SRSState
@@ -97,13 +98,20 @@ def _route_after_outline_approval(
 
 def _route_after_draft_feedback(
     state: SRSState,
-) -> Literal["process_review_feedback", "finalize_and_export"]:
-    """After draft feedback, decide whether to finalize or process more changes."""
+) -> Literal["process_review_feedback", "generate_mermaid_diagrams"]:
+    """After draft feedback, decide whether to finalize or generate diagrams."""
     revision_targets = state.get("revision_targets", [])
     if revision_targets:
         return "process_review_feedback"
     else:
-        return "finalize_and_export"
+        return "generate_mermaid_diagrams"
+
+
+def _route_after_mermaid(
+    state: SRSState,
+) -> Literal["finalize_and_export"]:
+    """After mermaid generation, proceed to finalize."""
+    return "finalize_and_export"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -148,6 +156,7 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None) -> StateGraph:
     graph.add_node("draft_from_approved_outline", draft_from_approved_outline)
     graph.add_node("present_draft_for_review", present_draft_for_review)
     graph.add_node("process_review_feedback", process_review_feedback)
+    graph.add_node("generate_mermaid_diagrams", generate_mermaid_diagrams)
     graph.add_node("finalize_and_export", finalize_and_export)
 
     # ────────────────────────────────────────────────────────────────────────
@@ -208,14 +217,21 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None) -> StateGraph:
     # present_draft_for_review → process_review_feedback
     graph.add_edge("present_draft_for_review", "process_review_feedback")
 
-    # process_review_feedback → [conditional: finalize or loop]
+    # process_review_feedback → [conditional: loop or generate mermaid]
     graph.add_conditional_edges(
         "process_review_feedback",
         _route_after_draft_feedback,
         {
             "process_review_feedback": "process_review_feedback",
-            "finalize_and_export": "finalize_and_export",
+            "generate_mermaid_diagrams": "generate_mermaid_diagrams",
         },
+    )
+
+    # generate_mermaid_diagrams → finalize_and_export
+    graph.add_conditional_edges(
+        "generate_mermaid_diagrams",
+        _route_after_mermaid,
+        {"finalize_and_export": "finalize_and_export"},
     )
 
     # finalize_and_export → END
