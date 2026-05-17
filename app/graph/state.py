@@ -170,6 +170,20 @@ class SRSState(TypedDict):
     # Review & Refine
     # ────────────────────────────────────────────────────────────────────────
     revision_targets: Annotated[list[str], merge_lists]  # Sections user wants to regenerate
+    revision_mode: bool  # True when running a section revision
+    revision_target_section_key: str  # Which section to revise (s1, s2, s3_functional, etc.)
+    revision_target_title: str  # Display title of the section being revised
+    revision_target_content: str  # Original content of the section being revised
+    revision_request: str  # User's revision request/feedback
+    is_complete: bool  # Whether the workflow is complete
+    generate_diagrams: bool  # Whether diagrams should be generated
+    diagrams_only: bool  # Whether running in diagrams-only mode
+    final_document: str  # Final assembled SRS document
+    project_title: str  # Project title
+    qa_gaps: Annotated[list[Any], merge_lists]
+    major_decisions_asked: bool
+    document_buffer: str
+    missing_context: Annotated[list[Any], merge_lists]
 
     # ────────────────────────────────────────────────────────────────────────
     # Conversation history & context
