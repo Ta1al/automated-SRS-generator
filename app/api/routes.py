@@ -41,6 +41,7 @@ from sse_starlette import EventSourceResponse
 
 from app.config import get_settings
 from app.export.docx import markdown_to_docx_bytes
+from app.formatting import format_srs_body
 
 logger = logging.getLogger(__name__)
 
@@ -271,6 +272,9 @@ def _format_srs_document(document_text: str, state_values: dict[str, Any]) -> st
 
     if "## Table of Contents" in body:
         return body
+
+    # Apply backend formatting (splitting and heading numbering)
+    body = format_srs_body(body)
 
     ingestion = state_values.get("ingestion_summary", {}) or {}
     project_title = str(state_values.get("project_title") or ingestion.get("project_title") or "Software Requirements Specification").strip() or "Software Requirements Specification"

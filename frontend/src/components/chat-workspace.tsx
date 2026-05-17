@@ -389,6 +389,62 @@ function formatEtaLabel(seconds: number | null) {
 
 function MarkdownContent({ content }: { content: string }) {
   const normalizedContent = normalizeMarkdownForPreview(content);
+  // Add hierarchical numbering to headings and render FR items as boxed cards
+  function numberHeadings(markdown: string) {
+    const lines = markdown.split(/\r?\n/);
+    const counters = [0, 0, 0, 0, 0, 0];
+
+    const stripExistingNumber = (s: string) => s.replace(/^[0-9]+(?:\.[0-9]+)*[\).:\-\s]+/, "").trim();
+
+    return lines
+      .map((line) => {
+        const m = /^(#{1,6})\s*(.+)$/.exec(line);
+        if (!m) return line;
+        const level = Math.min(6, m[1].length);
+        const title = stripExistingNumber(m[2]);
+
+        // increment counter for this level and reset deeper levels
+        counters[level - 1] = (counters[level - 1] || 0) + 1;
+        for (let i = level; i < counters.length; i++) counters[i] = 0;
+
+        // build number skipping leading zeros
+        const numberParts = counters.slice(0, level).filter((n) => n > 0);
+        const number = numberParts.join(".");
+
+        return `${m[1]} ${number} ${title}`.trim();
+      })
+      .join("\n");
+  }
+
+  // Split paragraphs that contain multiple functional requirements into separate list items
+  function splitFunctionalRequirements(markdown: string) {
+    // Common patterns: " - [F-1]" inside a paragraph, or "][space]-[space][" between items
+    let out = markdown;
+
+    // Replace " - [F" with newline-prefixed list marker
+    out = out.replace(/\s-\s*\[(F[-_A-Za-z0-9]*)/g, "\n- [$1");
+
+    // Replace "] - [" sequences that join requirements
+    out = out.replace(/\]\s*-\s*\[/g, "]\n- [");
+
+    // If a paragraph starts with a label like "Functional Requirements" followed by inline items,
+    // move the following content into a list by inserting a newline before the first marker
+    out = out.replace(/(Functional Requirements[:\-–\s]*)(\[F[-_A-Za-z0-9]*\])/gi, (m, p1, p2) => {
+      return `${p1.trim()}\n- ${p2}`;
+    });
+
+    return out;
+  }
+
+  function childrenToText(children: any): string {
+    if (typeof children === "string") return children;
+    if (Array.isArray(children)) return children.map(childrenToText).join("");
+    if (!children || typeof children !== "object") return "";
+    return children.props?.children ? childrenToText(children.props.children) : "";
+  }
+
+  const numberedContent = numberHeadings(normalizedContent);
+  const processedContent = splitFunctionalRequirements(numberedContent);
 
   return (
     <ReactMarkdown
@@ -400,7 +456,21 @@ function MarkdownContent({ content }: { content: string }) {
         p: ({ children }) => <p className="mb-2 last:mb-0 leading-relaxed">{children}</p>,
         ul: ({ children }) => <ul className="mb-2 list-disc pl-5">{children}</ul>,
         ol: ({ children }) => <ol className="mb-2 list-decimal pl-5">{children}</ol>,
-        li: ({ children }) => <li className="mb-1">{children}</li>,
+        li: ({ children }) => {
+          const text = childrenToText(children);
+          const isFunctionalReq = /^\s*\[[Ff](?:[-_A-Za-z0-9]*)\]/.test(text) || /functional requirement/i.test(text);
+          if (isFunctionalReq) {
+            return (
+              <li className="mb-2">
+                <div className="p-3 rounded-md border border-black/10 bg-[color:var(--surface-lowest)]">
+                  <div className="prose-sm">{children}</div>
+                </div>
+              </li>
+            );
+          }
+
+          return <li className="mb-1">{children}</li>;
+        },
         strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
         em: ({ children }) => <em className="italic">{children}</em>,
         table: ({ children }) => (
@@ -440,7 +510,7 @@ function MarkdownContent({ content }: { content: string }) {
         },
       }}
     >
-      {normalizedContent}
+      {processedContent}
     </ReactMarkdown>
   );
 }
@@ -1987,9 +2057,19 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
     }
   }, [allDraftParts, selectedDraftPart]);
 
+  const draftedDocumentText = useMemo(
+    () => buildDraftDocument(draftedSections),
+    [draftedSections],
+  );
+
   const resolvedDocumentText = useMemo(
-    () => documentText || buildDraftDocument(draftedSections),
-    [documentText, draftedSections],
+    () => documentText || draftedDocumentText,
+    [documentText, draftedDocumentText],
+  );
+
+  const previewDocumentText = useMemo(
+    () => draftedDocumentText || resolvedDocumentText,
+    [draftedDocumentText, resolvedDocumentText],
   );
 
   const draftReadyForFinalize = Boolean(resolvedDocumentText.trim()) && currentPhase === "review_refine";
@@ -2437,7 +2517,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
             <div className="min-h-0 flex-1 overflow-auto px-4 py-3 text-sm text-[color:var(--foreground)]">
               <MarkdownContent
                 content={
-                  resolvedDocumentText ||
+                  previewDocumentText ||
                   "The draft SRS document will appear here once sections are available."
                 }
               />
