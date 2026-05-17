@@ -168,7 +168,7 @@ def _use_case_rows_from_ingestion(ingestion: dict[str, Any]) -> list[dict[str, s
 
 def _append_use_case_tables_to_document(document_text: str, state_values: dict[str, Any]) -> str:
     """Append a use-case appendix with catalog and detail tables."""
-    if "## 5. Use Case Tables" in document_text:
+    if "# 5 Use Case Tables" in document_text or "## 5. Use Case Tables" in document_text:
         return document_text.strip()
 
     ingestion = state_values.get("ingestion_summary", {}) or {}
@@ -176,7 +176,7 @@ def _append_use_case_tables_to_document(document_text: str, state_values: dict[s
     if not use_case_rows:
         return document_text.strip()
 
-    lines: list[str] = [document_text.strip(), "## 5. Use Case Tables"]
+    lines: list[str] = [document_text.strip(), "# 5 Use Case Tables"]
 
     catalog_rows = [
         [
@@ -218,7 +218,7 @@ def _append_use_case_tables_to_document(document_text: str, state_values: dict[s
 
 def _append_diagrams_to_document(document_text: str, state_values: dict[str, Any]) -> str:
     """Append PlantUML diagrams to the end of a document body."""
-    if "## 6. Diagrams" in document_text:
+    if "# 6 Diagrams" in document_text or "## 6. Diagrams" in document_text:
         return document_text.strip()
 
     diagrams = state_values.get("plantumul_diagrams", {}) or {}
@@ -231,7 +231,7 @@ def _append_diagrams_to_document(document_text: str, state_values: dict[str, Any
     if (not isinstance(diagrams, dict) or not diagrams) and not mermaid_blocks:
         return document_text.strip()
 
-    lines: list[str] = [document_text.strip(), "## 6. Diagrams"]
+    lines: list[str] = [document_text.strip(), "# 6 Diagrams"]
     for diagram_key, diagram_code in diagrams.items():
         cleaned_key = str(diagram_key).replace("_", " ").strip().title() or "Diagram"
         cleaned_code = str(diagram_code or "").strip()
@@ -897,6 +897,12 @@ async def _stream_graph(
                 msg_chunk, meta = data
                 if hasattr(msg_chunk, "content") and msg_chunk.content:
                     node_from_meta = meta.get("langgraph_node", "") if isinstance(meta, dict) else ""
+                    if node_from_meta in {
+                        "draft_from_approved_outline",
+                        "generate_mermaid_diagrams",
+                        "finalize_and_export",
+                    }:
+                        continue
                     safe_content = _coerce_message_chunk_for_stream(
                         msg_chunk.content,
                         node_from_meta,
@@ -1058,25 +1064,6 @@ async def _stream_graph(
                         prev_map[node_name] = max(200, updated)
                     except Exception:
                         logger.exception("Failed to update EMA durations in app_state.")
-
-                    # ── Handle special events from node updates ──
-                    if isinstance(node_updates, dict):
-                        # ── Stream sections as tokens for frontend consumption ──
-                        if "sections" in node_updates:
-                            sections = node_updates.get("sections", {})
-                            if isinstance(sections, dict):
-                                for section_key, section_content in sections.items():
-                                    if isinstance(section_content, str) and section_content.strip():
-                                        yield {
-                                            "event": "token",
-                                            "data": json.dumps(
-                                                {
-                                                    "content": section_content,
-                                                    "node": node_name,
-                                                    "section_key": section_key,
-                                                }
-                                            ),
-                                        }
 
                     # If the graph just finalised, emit the document
                     if node_name == "finalize_and_export":
