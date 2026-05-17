@@ -129,6 +129,7 @@ def _render_mermaid_png_via_mermaid_ink(code: str) -> bytes | None:
         headers={
             "Content-Type": "application/json",
             "Accept": "image/png",
+            "User-Agent": "SRS-Generator/1.0",
         },
         method="POST",
     )
@@ -182,7 +183,13 @@ def _plantuml_encode(code: str) -> str:
 def _render_plantuml_png_via_server(code: str) -> bytes | None:
     encoded = _plantuml_encode(code)
     url = f"https://www.plantuml.com/plantuml/png/{encoded}"
-    request = urllib.request.Request(url, headers={"Accept": "image/png"})
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "image/png",
+            "User-Agent": "SRS-Generator/1.0",
+        },
+    )
 
     try:
         with urllib.request.urlopen(request, timeout=20) as response:  # noqa: S310
