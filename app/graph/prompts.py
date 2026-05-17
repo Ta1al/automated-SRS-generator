@@ -167,6 +167,8 @@ Generate 2-3 specific question TOPICS (not full questions, just topic bullets) t
 - e.g., "Authentication and session management"
 - e.g., "Role-based access control requirements"
 
+These are examples, generate topics based on actual relevance to generating a comprehensive SRS for this project.
+
 Return a JSON object with a "topics" array:
 {{
   "topics": ["Topic 1", "Topic 2", "Topic 3"]
@@ -184,6 +186,8 @@ Generate 2-3 specific question TOPICS (not full questions, just topic bullets) t
 - e.g., "MVP features vs. Phase 2 features"
 - e.g., "Third-party payment integration"
 - e.g., "Compliance and regulatory integrations"
+
+These are examples, generate topics based on actual relevance to generating a comprehensive SRS for this project.
 
 Return a JSON object with a "topics" array:
 {{
@@ -203,6 +207,8 @@ Generate 2-3 specific question TOPICS (not full questions, just topic bullets) t
 - e.g., "Platform support (iOS, Android, web)"
 - e.g., "Data privacy and security requirements"
 
+These are examples, generate topics based on actual relevance to generating a comprehensive SRS for this project.
+
 Return a JSON object with a "topics" array:
 {{
   "topics": ["Topic 1", "Topic 2"]
@@ -220,6 +226,8 @@ Generate 2-3 specific question TOPICS (not full questions, just topic bullets) t
 - e.g., "Payment failure recovery"
 - e.g., "Data loss and backup strategy"
 - e.g., "Rate limiting and abuse prevention"
+
+These are examples, generate topics based on actual relevance to generating a comprehensive SRS for this project.
 
 Return a JSON object with a "topics" array:
 {{
