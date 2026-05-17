@@ -436,6 +436,7 @@ async def ingest_and_map_domain(state: SRSState) -> dict:
     return {
         "current_phase": "elicitation",
         "ingestion_summary": ingestion_data,
+        "project_title": str(ingestion_data.get("project_title", "")).strip(),
         "pending_group_index": 0,
         "chat_history": state["chat_history"]
         + [AIMessage(content=f"**✓ Ingestion Complete**\n\nDomain: **{ingestion_data.get('domain', 'Unknown')}**\n"

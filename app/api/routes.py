@@ -1312,7 +1312,11 @@ async def get_document_docx(thread_id: str, request: Request) -> Response:
         )
 
     settings = get_settings()
-    project_title = str(state.values.get("project_title", "")).strip()
+    ingestion = state.values.get("ingestion_summary", {}) or {}
+    project_title = str(
+        state.values.get("project_title", "")
+        or ingestion.get("project_title", "")
+    ).strip()
     resolved_title = project_title or settings.docx_title
     download_name = (
         f"{_slugify_for_filename(project_title)}.docx"
@@ -1374,7 +1378,11 @@ async def get_document_markdown(thread_id: str, request: Request) -> Response:
         raise HTTPException(status_code=202, detail=detail)
 
     settings = get_settings()
-    project_title = str(state.values.get("project_title", "")).strip()
+    ingestion = state.values.get("ingestion_summary", {}) or {}
+    project_title = str(
+        state.values.get("project_title", "")
+        or ingestion.get("project_title", "")
+    ).strip()
     resolved_title = project_title or settings.docx_title
     download_name = (
         f"{_slugify_for_filename(project_title)}.md"
