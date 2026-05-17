@@ -372,8 +372,19 @@ def _assemble_section_markdown(
     subsections: list[SubsectionContent],
 ) -> str:
     """Assemble structured subsections into a single Markdown string."""
+    
+    section_headings: dict[str, str] = {
+        "s1": "# 1 Introduction",
+        "s2": "# 2 Overall Description",
+        "s3_functional": "# 3 Specific Requirements\n## 3.1 Functional Requirements",
+        "s3_external": "## 3.2 External Interface Requirements",
+        "s3_nfr": "## 3.3 Non-functional Requirements",
+        "s4": "# 4 Appendices",
+    }
+    prefix = section_headings.get(section_key, "")
+
     heading_level = "###" if section_key in ("s3_functional", "s3_external", "s3_nfr") else "##"
-    parts = []
+    parts = [prefix] if prefix else []
     for sub in subsections:
         parts.append(f"{heading_level} {sub.number} {sub.title}")
         parts.append(sub.content.strip())
