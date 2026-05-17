@@ -24,6 +24,7 @@ from app.graph.nodes import (
     generate_single_elicitation_question,
     classify_and_store_answers,
     draft_from_approved_outline,
+    revise_selected_section,
     generate_mermaid_diagrams,
     finalize_and_export,
 )
@@ -41,6 +42,13 @@ def _route_after_single_question(
 ) -> Literal["classify_and_store_answers"]:
     """After user answers a question, store it."""
     return "classify_and_store_answers"
+
+
+def _route_from_start(state: SRSState) -> Literal["ingest_and_map_domain", "revise_selected_section"]:
+    """Route to ingestion (full run) or direct to section revision."""
+    if state.get("revision_mode", False):
+        return "revise_selected_section"
+    return "ingest_and_map_domain"
 
 
 def _route_after_storing_answer(
@@ -93,6 +101,7 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None) -> StateGraph:
     # ────────────────────────────────────────────────────────────────────────
 
     graph.add_node("ingest_and_map_domain", ingest_and_map_domain)
+    graph.add_node("revise_selected_section", revise_selected_section)
     graph.add_node("generate_elicitation_plan", generate_elicitation_plan)
     graph.add_node("generate_single_elicitation_question", generate_single_elicitation_question)
     graph.add_node("classify_and_store_answers", classify_and_store_answers)
@@ -104,8 +113,15 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None) -> StateGraph:
     # Add edges
     # ────────────────────────────────────────────────────────────────────────
 
-    # START → ingest_and_map_domain
-    graph.add_edge(START, "ingest_and_map_domain")
+    # START → [conditional: revision or ingestion]
+    graph.add_conditional_edges(
+        START,
+        _route_from_start,
+        {
+            "ingest_and_map_domain": "ingest_and_map_domain",
+            "revise_selected_section": "revise_selected_section",
+        },
+    )
 
     # ingest_and_map_domain → generate_elicitation_plan
     graph.add_edge("ingest_and_map_domain", "generate_elicitation_plan")
@@ -130,6 +146,9 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None) -> StateGraph:
             "draft_from_approved_outline": "draft_from_approved_outline",
         },
     )
+
+    # revise_selected_section → finalize_and_export
+    graph.add_edge("revise_selected_section", "finalize_and_export")
 
     # draft_from_approved_outline → generate_mermaid_diagrams
     graph.add_edge("draft_from_approved_outline", "generate_mermaid_diagrams")
