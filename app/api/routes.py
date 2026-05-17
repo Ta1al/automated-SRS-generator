@@ -649,7 +649,6 @@ async def _is_interrupted(app_state: Any, thread_id: str) -> bool:
 _NODE_DISPLAY_NAMES = {
     "retrieve_rag_context": "Retrieving regulatory context",
     "elicit_requirements": "Eliciting requirements from input",
-    "generate_outline": "Drafting outline for review",
     "classify_requirements": "Classifying requirements",
     "validate_and_enrich_requirements": "Validating & enriching requirements",
     "draft_section_1": "Drafting Introduction",
@@ -672,7 +671,6 @@ _NODE_DISPLAY_NAMES = {
 _TYPICAL_DURATION_MS = {
     "retrieve_rag_context": 2000,
     "elicit_requirements": 8000,
-    "generate_outline": 7000,
     "classify_requirements": 6000,
     "validate_and_enrich_requirements": 10000,
     "draft_section_1": 8000,
@@ -697,7 +695,6 @@ _PARALLEL_NODES = {"draft_section_1", "draft_section_2", "draft_section_3_iface"
 _NODE_SEQUENCE_FULL_WITH_DIAGRAMS = [
     "retrieve_rag_context",
     "elicit_requirements",
-    "generate_outline",
     "classify_requirements",
     "validate_and_enrich_requirements",
     "draft_section_1",  # These 5 run in parallel but count as 1 step
@@ -717,7 +714,6 @@ _NODE_SEQUENCE_FULL_WITH_DIAGRAMS = [
 _NODE_SEQUENCE_FULL_NO_DIAGRAMS = [
     "retrieve_rag_context",
     "elicit_requirements",
-    "generate_outline",
     "classify_requirements",
     "validate_and_enrich_requirements",
     "draft_section_1",  # These 5 run in parallel but count as 1 step
@@ -866,10 +862,6 @@ async def _stream_graph(
                 "document_buffer": "",
                 "missing_context": [],
                 "ingestion_summary": {},
-                "outline_buffer": "",
-                "outline_approved": False,
-                "outline_review_notes": "",
-                "outline_items": [],
                 "revision_targets": [],
                 "requirements": [],
                 "rag_context": "",
@@ -945,8 +937,6 @@ async def _stream_graph(
                                 "questions": payload.get("questions", []),
                                 "prompt": payload.get("prompt", ""),
                             }
-                            if payload.get("type") == "outline_review":
-                                event_data["outline"] = payload.get("outline", {})
 
                             yield {
                                 "event": "question",
@@ -1439,10 +1429,6 @@ async def get_state(thread_id: str, request: Request) -> JSONResponse:
             "plantumul_diagrams": state.values.get("plantumul_diagrams", {}),
             "mermaid_blocks": state.values.get("mermaid_blocks", []),
             "ingestion_summary": state.values.get("ingestion_summary", {}),
-            "outline_buffer": state.values.get("outline_buffer", ""),
-            "outline_items": state.values.get("outline_items", []),
-            "outline_approved": state.values.get("outline_approved", False),
-            "outline_review_notes": state.values.get("outline_review_notes", ""),
             "revision_targets": state.values.get("revision_targets", []),
             "project_title": state.values.get("project_title", ""),
             "final_document": state.values.get("final_document", ""),
