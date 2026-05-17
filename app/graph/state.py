@@ -175,6 +175,7 @@ class SRSState(TypedDict):
     # Sections & Drafts
     # ────────────────────────────────────────────────────────────────────────
     sections: Annotated[dict[str, str], merge_sections]  # s1, s2, s3_functional, s3_external, s3_nfr, s4
+    section_structures: Annotated[dict[str, list[dict]], merge_sections]  # Structured subsections: {key: [{number, title, content}, ...]}
 
     # ────────────────────────────────────────────────────────────────────────
     # Diagrams

@@ -255,6 +255,18 @@ class OutlineListModel(BaseModel):
     outline_items: list[OutlineItemModel] = Field(..., description="All outline sections")
 
 
+class SubsectionContent(BaseModel):
+    """A single subsection with explicit numbering, title, and markdown content."""
+    number: str = Field(..., description="Subsection number (e.g. '1.1', '3.2.1')")
+    title: str = Field(..., description="Subsection title (e.g. 'Purpose', 'User Interfaces')")
+    content: str = Field(..., description="Full Markdown content for this subsection, excluding the heading")
+
+
+class DraftSectionModel(BaseModel):
+    """A drafted SRS section with subsections separated into structured fields."""
+    subsections: list[SubsectionContent] = Field(..., description="All subsections for this SRS section")
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Helper Functions
 # ─────────────────────────────────────────────────────────────────────────────
@@ -367,6 +379,19 @@ async def _llm_invoke_text(
 
     response = await llm.ainvoke(messages)
     return response.content
+
+
+def _assemble_section_markdown(
+    section_key: str,
+    subsections: list[SubsectionContent],
+) -> str:
+    """Assemble structured subsections into a single Markdown string."""
+    heading_level = "###" if section_key in ("s3_functional", "s3_external", "s3_nfr") else "##"
+    parts = []
+    for sub in subsections:
+        parts.append(f"{heading_level} {sub.number} {sub.title}")
+        parts.append(sub.content.strip())
+    return "\n\n".join(parts)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -741,11 +766,17 @@ async def draft_from_approved_outline(state: SRSState) -> dict:
         "chat_history": chat_history_str,
     }
 
-    # Run all 6 drafters in parallel
-    async def draft_section(section_key: str, prompt_template: str) -> tuple[str, str]:
+    # Run all 6 drafters in parallel using structured output with subsection fields
+    async def draft_section(section_key: str, prompt_template: str) -> tuple[str, str, list[dict]]:
         prompt = prompt_template.format(**context)
-        response = await _llm_invoke_text(system_prompt=prompt, temperature=0.6)
-        return section_key, response
+        result = await _llm_invoke_structured(
+            system_prompt=prompt,
+            output_model=DraftSectionModel,
+            temperature=0.6,
+        )
+        markdown = _assemble_section_markdown(section_key, result.subsections)
+        structured = [s.model_dump() for s in result.subsections]
+        return section_key, markdown, structured
 
     drafters = [
         ("s1", prompts.DRAFT_SECTION_1_SYSTEM),
@@ -758,50 +789,17 @@ async def draft_from_approved_outline(state: SRSState) -> dict:
 
     results = await asyncio.gather(*[draft_section(key, prompt) for key, prompt in drafters])
 
-    sections = {key: content for key, content in results}
+    sections: dict[str, str] = {}
+    section_structures: dict[str, list[dict]] = {}
+    for key, markdown, structured in results:
+        sections[key] = markdown
+        section_structures[key] = structured
 
-    # Normalize section headings: strip numeric/Section prefixes while preserving IDs like [F-123]
-    def _normalize_title_text(title: str) -> str:
-        t = title or ""
-        t = t.strip()
-        # Remove leading 'Section' or numeric prefixes like '3.1', 'Section 3.1 -', etc.
-        t = re.sub(r'^(Section\s+)?[0-9]+(?:\.[0-9]+)*\s*[-:\.]?\s*', '', t, flags=re.I)
-        # Collapse whitespace
-        t = " ".join(t.split())
-        return t
-
-    def _normalize_section_content(content: str) -> str:
-        if not content:
-            return content
-        lines = content.splitlines()
-        out_lines: list[str] = []
-        for line in lines:
-            # Normalize markdown headings: '# Title'
-            m = re.match(r'^(#{1,6}\s*)(.+)$', line)
-            if m:
-                prefix = m.group(1)
-                title = m.group(2)
-                out_lines.append(f"{prefix}{_normalize_title_text(title)}")
-                continue
-
-            # Handle plain numeric heading lines like '3.3 Performance Requirements'
-            m2 = re.match(r'^\s*([0-9]+(?:\.[0-9]+)*)\s*[-:\.]?\s*(.+)$', line)
-            if m2 and len(line.strip()) < 120 and (line.strip().count(' ') < 10):
-                # Convert to a level-2 markdown heading with cleaned title
-                title = m2.group(2)
-                out_lines.append(f"## {_normalize_title_text(title)}")
-                continue
-
-            out_lines.append(line)
-
-        return "\n".join(out_lines)
-
-    sections = {k: _normalize_section_content(v) for k, v in sections.items()}
-
-    logger.info(f"Completed drafting all sections")
+    logger.info(f"Completed drafting all sections with structured subsections")
 
     return {
         "sections": sections,
+        "section_structures": section_structures,
         "current_phase": "review_refine",
     }
 

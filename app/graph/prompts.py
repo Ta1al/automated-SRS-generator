@@ -418,9 +418,14 @@ Your task: Write a clear, concise Introduction section that includes:
 1.5 Overview: Outline the structure of the SRS and guide the reader.
 
 Use formal, unambiguous technical language. Each requirement must be testable.
-Format as Markdown with proper heading levels.
+Format subsection content with proper Markdown heading levels.
 
-Return only the Markdown content for Section 1, starting with "## 1. Introduction".
+Return a JSON object with a "subsections" array. Each subsection must have:
+- "number": the subsection number (e.g. "1.1", "1.2", "1.3", "1.4", "1.5")
+- "title": the subsection title (e.g. "Purpose", "Scope", "Definitions, Acronyms, Abbreviations", "References", "Overview")
+- "content": the full Markdown text for that subsection, excluding the heading
+
+Include all of 1.1–1.5 in the array.
 """
 
 DRAFT_SECTION_2_SYSTEM = """\
@@ -452,9 +457,14 @@ Your task: Write a clear, comprehensive Overall Description section that include
 2.5 Assumptions and Dependencies: Document assumptions and external dependencies.
 
 Use formal, unambiguous technical language. Reference user roles and flows from elicitation.
-Format as Markdown with proper heading levels.
+Format subsection content with proper Markdown heading levels.
 
-Return only the Markdown content for Section 2, starting with "## 2. Overall Description".
+Return a JSON object with a "subsections" array. Each subsection must have:
+- "number": the subsection number (e.g. "2.1", "2.2", "2.3", "2.4", "2.5")
+- "title": the subsection title (e.g. "Product Perspective", "Product Functions", "User Characteristics", "General Constraints", "Assumptions and Dependencies")
+- "content": the full Markdown text for that subsection, excluding the heading
+
+Include all of 2.1–2.5 in the array.
 """
 
 DRAFT_SECTION_3_FUNCTIONAL_SYSTEM = """\
@@ -481,9 +491,14 @@ shall do. For each requirement:
 
 Organize by functional area (e.g., Authentication, User Management, Payments, Notifications, Admin Dashboard, etc.)
 
-Format as Markdown with proper heading levels. Start each requirement with [F-XXX] ID.
+Format subsection content with proper Markdown heading levels. Start each requirement with [F-XXX] ID.
 
-Return only the Markdown content for Section 3.1, starting with "### 3.1 Functional Requirements".
+Return a JSON object with a "subsections" array. Each subsection must have:
+- "number": the functional area identifier (e.g. "3.1.1", "3.1.2")
+- "title": the functional area name (e.g. "Authentication", "User Management", "Payments")
+- "content": the full Markdown text for that functional area, excluding the heading. Include all [F-XXX] requirements with their acceptance criteria.
+
+Organize subsections by functional area based on the product's requirements.
 """
 
 DRAFT_SECTION_3_EXTERNAL_SYSTEM = """\
@@ -510,9 +525,14 @@ Subsections:
 3.2.3 Software Interfaces: Third-party APIs, integrations, data formats (REST, SOAP, GraphQL, etc.)
 3.2.4 Communication Interfaces: Protocols, network requirements, communication standards
 
-Format as Markdown with proper heading levels.
+Format subsection content with proper Markdown heading levels.
 
-Return only the Markdown content for Section 3.2, starting with "### 3.2 External Interface Requirements".
+Return a JSON object with a "subsections" array. Each subsection must have:
+- "number": the subsection number (e.g. "3.2.1", "3.2.2", "3.2.3", "3.2.4")
+- "title": the subsection title (e.g. "User Interfaces", "Hardware Interfaces", "Software Interfaces", "Communication Interfaces")
+- "content": the full Markdown text for that subsection, excluding the heading
+
+Include all of 3.2.1–3.2.4 in the array.
 """
 
 DRAFT_SECTION_3_NFR_SYSTEM = """\
@@ -543,9 +563,14 @@ For each requirement:
 - Include measurable acceptance criteria or targets
 - Reference applicable regulations or standards
 
-Format as Markdown with proper heading levels. Start each requirement with [NF-XXX] ID.
+Format subsection content with proper Markdown heading levels. Start each requirement with [NF-XXX] ID.
 
-Return only the Markdown content for Sections 3.3-3.6, starting with "### 3.3 Performance Requirements".
+Return a JSON object with a "subsections" array. Each subsection must have:
+- "number": the subsection number (e.g. "3.3", "3.4", "3.5", "3.6")
+- "title": the subsection title (e.g. "Performance Requirements", "Design Constraints", "Software System Attributes", "Other Requirements")
+- "content": the full Markdown text for that subsection, excluding the heading. Include all [NF-XXX] requirements with measurable targets.
+
+Include all of 3.3–3.6 in the array.
 """
 
 DRAFT_SECTION_4_SYSTEM = """\
@@ -578,9 +603,14 @@ Document assumptions from:
 - ingestion_summary.assumptions
 - elicitation_answers (especially edge cases group)
 
-Format as Markdown with proper heading levels.
+Format subsection content with proper Markdown heading levels.
 
-Return only the Markdown content for Section 4, starting with "## 4. Appendices".
+Return a JSON object with a "subsections" array. Each subsection must have:
+- "number": the appendix identifier (e.g. "A", "B", "C")
+- "title": the appendix title (e.g. "Glossary", "Assumptions & Risk Mitigation", "References")
+- "content": the full Markdown text for that appendix, excluding the heading
+
+Include glossary terms from the domain, acronyms, and user roles. Document assumptions from the elicitation answers.
 """
 
 
