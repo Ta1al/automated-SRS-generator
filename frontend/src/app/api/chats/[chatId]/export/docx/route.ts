@@ -100,6 +100,7 @@ export async function POST(request: NextRequest, context: Context) {
         userId: session.userId,
       },
       select: {
+        backendThreadId: true,
         title: true,
       },
     });
@@ -111,47 +112,56 @@ export async function POST(request: NextRequest, context: Context) {
     const body = await request.json().catch(() => null);
     const documentText = body?.document;
 
+    if (chat.backendThreadId) {
+      const backendResponse = await fetch(
+        `${appConfig.backendApiUrl}/api/sessions/${chat.backendThreadId}/document.docx`,
+        {
+          method: "GET",
+          cache: "no-store",
+          headers: {
+            Accept: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          },
+        },
+      );
+
+      const contentType = backendResponse.headers.get("content-type") || "";
+
+      if (
+        backendResponse.ok &&
+        backendResponse.status === 200
+      ) {
+        const fileName = buildFileName(chat.title);
+        const bytes = await backendResponse.arrayBuffer();
+
+        return new Response(bytes, {
+          status: 200,
+          headers: {
+            "Content-Type":
+              "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "Content-Disposition": `attachment; filename="${fileName}"`,
+            "Cache-Control": "no-store",
+          },
+        });
+      }
+    }
+
     if (!documentText || typeof documentText !== "string") {
       return NextResponse.json({ error: "Missing document content" }, { status: 400 });
     }
 
-    // Minimal HTML wrapper as a pragmatic fallback when backend DOCX export
-    // is unavailable. Word will open HTML files even when given a .docx
-    // extension for UX/testing purposes.
-    const safeTitle = (chat.title || "srs-document")
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 80) || "srs-document";
-
-    const fileName = `${safeTitle}.docx`;
-
-    const html = `<!doctype html><html><head><meta charset="utf-8"><title>${safeTitle}</title></head><body><pre style="font-family:Consolas,monospace;white-space:pre-wrap;">${escapeHtml(
-      documentText,
-    )}</pre></body></html>`;
-
+    const fileName = buildFileName(chat.title);
     const encoder = new TextEncoder();
-    const bytes = encoder.encode(html);
+    const bytes = encoder.encode(documentText);
 
     return new Response(bytes, {
       status: 200,
       headers: {
-        "Content-Type":
-          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "Content-Disposition": `attachment; filename="${fileName}"`,
+        "Content-Type": "text/markdown; charset=utf-8",
+        "Content-Disposition": `attachment; filename="${fileName.replace('.docx', '.md')}"`,
         "Cache-Control": "no-store",
       },
     });
   } catch (error) {
     return routeErrorResponse(error, "Failed to export DOCX.");
   }
-}
-
-function escapeHtml(str: string) {
-  return str
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/\"/g, "&quot;")
-    .replace(/'/g, "&#39;");
 }
