@@ -230,6 +230,6 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None) -> StateGraph:
     else:
         compiled_graph = graph.compile()
 
-    logger.info("5-phase SRS generator graph compiled successfully")
+    logger.info("SRS generator graph compiled successfully")
 
     return compiled_graph
