@@ -939,12 +939,7 @@ async def finalize_and_export(state: SRSState) -> dict:
 
     export_message = (
         "**✓ SRS Document Complete!**\n\n"
-        "Your Software Requirements Specification is ready.\n\n"
-        "Export options:\n"
-        "- **Markdown** — Copy the document above\n"
-        "- **JSON** — Structured data format\n"
-        "- **DOCX** — Formatted document (coming soon)\n"
-        "- **Jira/Confluence** — Ticket format (coming soon)"
+        "Your Software Requirements Specification is ready."
     )
 
     new_messages = state.get("chat_history", []) + [AIMessage(content=export_message)]
