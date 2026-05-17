@@ -1070,6 +1070,8 @@ function SelectedDraftBubble({
 // ---------------------------------------------------------------------------
 
 export function ChatWorkspace({ userEmail }: { userEmail: string }) {
+  const [mobileTab, setMobileTab] = useState<"chat" | "draft">("chat");
+  const [isMobileHistoryOpen, setIsMobileHistoryOpen] = useState(false);
   const [chats, setChats] = useState<ChatListItem[]>([]);
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -2023,25 +2025,60 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
 
   return (
     <div className="flex h-dvh min-h-[640px] flex-col bg-[color:var(--surface)]">
-      <header className="flex items-center justify-between border-b border-[color:var(--outline-variant)]/35 bg-[color:var(--surface-lowest)]/92 px-4 py-3 backdrop-blur">
-        <div>
-          <h1 className="font-headline text-lg font-semibold text-[color:var(--primary)]">SRS Chat Workspace</h1>
-          <p className="text-xs text-[color:var(--on-surface-variant)]">{userEmail}</p>
+      <header className="relative z-50 flex items-center justify-between border-b border-[color:var(--outline-variant)]/35 bg-[color:var(--surface-lowest)]/92 px-4 py-3 backdrop-blur">
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            className="rounded p-1 hover:bg-[color:var(--surface-low)] lg:hidden"
+            onClick={() => setIsMobileHistoryOpen(!isMobileHistoryOpen)}
+            aria-label="Toggle chat history"
+          >
+            {isMobileHistoryOpen ? (
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            ) : (
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+            )}
+          </button>
+          <div>
+            <h1 className="font-headline text-base font-semibold text-[color:var(--primary)] sm:text-lg">SRS Chat Workspace</h1>
+            <p className="hidden text-xs text-[color:var(--on-surface-variant)] sm:block">{userEmail}</p>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <ThemeToggle size="sm" />
           <button
             onClick={onLogout}
-            className="rounded-full px-3 py-1.5 text-sm ring-1 ring-[color:var(--outline-variant)]/50 transition-colors hover:bg-[color:var(--surface-low)]"
+            title="Logout"
+            className="flex items-center justify-center rounded-full p-2 text-sm ring-1 ring-[color:var(--outline-variant)]/50 transition-colors hover:bg-[color:var(--surface-low)] sm:px-3 sm:py-1.5"
           >
-            Logout
+            <span className="hidden sm:inline">Logout</span>
+            <svg className="sm:hidden" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
           </button>
         </div>
       </header>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[260px_1fr_420px]">
+      <div className="flex border-b border-[color:var(--outline-variant)]/35 bg-[color:var(--surface-lowest)] lg:hidden">
+        <button
+          className={`flex-1 border-b-2 py-2.5 text-sm font-medium ${mobileTab === "chat" ? "border-[color:var(--primary)] text-[color:var(--primary)]" : "border-transparent text-[color:var(--on-surface-variant)]"}`}
+          onClick={() => setMobileTab("chat")}
+        >
+          Chat
+        </button>
+        <button
+          className={`flex-1 border-b-2 py-2.5 text-sm font-medium ${mobileTab === "draft" ? "border-[color:var(--primary)] text-[color:var(--primary)]" : "border-transparent text-[color:var(--on-surface-variant)]"}`}
+          onClick={() => setMobileTab("draft")}
+        >
+          SRS Draft
+        </button>
+      </div>
+
+      <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden lg:grid lg:grid-cols-[260px_1fr_420px]">
+        {isMobileHistoryOpen && (
+          <div className="fixed inset-0 z-30 bg-black/20 backdrop-blur-sm lg:hidden" onClick={() => setIsMobileHistoryOpen(false)} />
+        )}
+        
         {/* ── Sidebar: chat list ── */}
-        <aside className="order-2 flex min-h-0 max-h-[32dvh] flex-col border-r border-[color:var(--outline-variant)]/35 bg-[color:var(--surface-low)] lg:order-1 lg:max-h-none">
+        <aside className={`absolute inset-y-0 left-0 z-40 w-64 flex-col border-r border-[color:var(--outline-variant)]/35 bg-[color:var(--surface-low)] transition-transform duration-300 ease-in-out lg:static lg:flex lg:w-full lg:translate-x-0 ${isMobileHistoryOpen ? "translate-x-0 flex" : "-translate-x-full max-lg:hidden"}`}>
           <div className="flex items-center justify-between p-3">
             <h2 className="text-sm font-semibold text-[color:var(--primary)]">Previous chats</h2>
             <button
@@ -2108,7 +2145,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
         </aside>
 
         {/* ── Main chat area ── */}
-        <main className="order-1 flex min-h-[44dvh] flex-col border-r border-[color:var(--outline-variant)]/35 bg-[color:var(--surface-lowest)] lg:order-2 lg:min-h-0">
+        <main className={`flex min-h-0 flex-1 flex-col border-r border-[color:var(--outline-variant)]/35 bg-[color:var(--surface-lowest)] lg:flex ${mobileTab === "chat" ? "flex" : "max-lg:hidden"}`}>
           <div className="border-b border-[color:var(--outline-variant)]/35 px-4 py-3">
             <h2 className="text-sm font-semibold text-[color:var(--primary)]">Interactive Generation</h2>
             <p className="text-xs text-[color:var(--on-surface-variant)]">
@@ -2262,7 +2299,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
         </main>
 
         {/* ── Right sidebar: document / state ── */}
-        <aside className="order-3 min-h-0 max-h-[35dvh] overflow-y-auto border-t border-[color:var(--outline-variant)]/30 bg-[color:var(--surface-container)] p-4 lg:max-h-none lg:border-t-0">
+        <aside className={`flex min-h-0 flex-1 flex-col overflow-y-auto bg-[color:var(--surface-container)] p-4 lg:flex lg:border-t-0 border-t border-[color:var(--outline-variant)]/30 ${mobileTab === "draft" ? "flex" : "max-lg:hidden"}`}>
           <h2 className="text-sm font-semibold text-[color:var(--primary)]">SRS draft</h2>
           <p className="mt-1 text-xs text-[color:var(--on-surface-variant)]">
             Select a section to request focused revisions through chat.

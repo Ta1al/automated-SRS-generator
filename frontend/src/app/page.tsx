@@ -8,10 +8,13 @@ export default function Home() {
       <header className="sticky top-0 z-40 border-b border-[color:var(--outline-variant)]/35 bg-[color:var(--surface-lowest)]/88 px-6 py-4 backdrop-blur-lg">
         <div className="mx-auto flex w-full max-w-6xl items-center justify-between">
           <h1 className="font-headline text-xl font-bold tracking-tight text-[color:var(--primary)]">ASG</h1>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2">
             <ThemeToggle size="sm" />
-            <Link className="rounded-full border border-[color:var(--outline-variant)]/65 px-4 py-2 text-sm font-medium transition-colors hover:bg-[color:var(--surface-low)]" href="/login">Login</Link>
-            <Link className="rounded-full bg-[color:var(--primary)] px-4 py-2 text-sm font-semibold text-[color:var(--on-primary)] transition-transform hover:-translate-y-0.5" href="/signup">Get Started</Link>
+            <Link className="rounded-full border border-[color:var(--outline-variant)]/65 px-3 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium transition-colors hover:bg-[color:var(--surface-low)]" href="/login">Login</Link>
+            <Link className="rounded-full bg-[color:var(--primary)] px-3 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-semibold text-[color:var(--on-primary)] transition-transform hover:-translate-y-0.5" href="/signup">
+              <span className="hidden sm:inline">Get Started</span>
+              <span className="sm:hidden">Start</span>
+            </Link>
           </div>
         </div>
       </header>
