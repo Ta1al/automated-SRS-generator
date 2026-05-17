@@ -21,6 +21,12 @@ flowchart LR
     Export --> User
 ```
 
+## Use-Case Diagram
+
+An overview use-case diagram for the system is available in the project documentation. It illustrates primary actors (stakeholders, reviewers, admins) and the high-level flows (ingestion, elicitation, outline approval, drafting, review, and export).
+
+See: [Use-Case Diagram](use_case_diagram.md)
+
 ## 2. Architecture Design
 
 The solution follows a layered architecture with clear separation between presentation, API, orchestration, and infrastructure concerns.
