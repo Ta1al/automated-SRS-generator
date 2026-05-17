@@ -15,7 +15,7 @@
     "@prisma/client": "^6.16.2",
     "bcryptjs": "^3.0.3",
     "jose": "^6.2.1",
-    "mermaid": "^11.12.0",
+    "mermaid": "^11.15.0",
     "next": "16.2.3",
     "pako": "^2.1.0",
     "prisma": "^6.16.2",
