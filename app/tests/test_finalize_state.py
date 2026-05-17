@@ -8,7 +8,7 @@ from app.api.routes import (
     _append_diagrams_to_document,
     _append_use_case_tables_to_document,
 )
-from app.formatting import assemble_document_from_sections
+from app.formatting import assemble_document_from_sections, number_headings
 
 
 @pytest.mark.asyncio
@@ -31,10 +31,10 @@ async def test_finalize_and_export_sets_completion_fields() -> None:
     assert result["final_document"].startswith("# FitnessStudio Manager")
     assert "## Document Information" in result["final_document"]
     assert "## Table of Contents" in result["final_document"]
-    assert "## 1. Introduction" in result["final_document"]
-    assert "## 2. Overall Description" in result["final_document"]
-    assert "## 5. Use Case Tables" in result["final_document"]
-    assert "## 6. Diagrams" in result["final_document"]
+    assert "# 1 Introduction" in result["final_document"]
+    assert "# 2 Overall Description" in result["final_document"]
+    assert "Use Case Tables" in result["final_document"]
+    assert "Diagrams" in result["final_document"]
     assert result["final_document"].strip()
 
 
@@ -62,7 +62,7 @@ def test_append_diagrams_to_document_adds_plantuml_appendix() -> None:
 
     enriched = _append_diagrams_to_document(document, state_values)
 
-    assert "## 6. Diagrams" in enriched
+    assert "# 6 Diagrams" in enriched
     assert "```plantuml" in enriched
     assert "@startuml" in enriched
     assert enriched.endswith("@enduml\n```") or "@enduml" in enriched
@@ -96,7 +96,7 @@ def test_append_use_case_tables_to_document_adds_catalog_and_details() -> None:
 
     enriched = _append_use_case_tables_to_document(document, state_values)
 
-    assert "## 5. Use Case Tables" in enriched
+    assert "# 5 Use Case Tables" in enriched
     assert "### Use Case Catalog" in enriched
     assert "| ID | Primary Actor | Use Case | Goal | Key Steps | Success Criteria |" in enriched
     assert "### UC-01 Book Class" in enriched
@@ -120,6 +120,41 @@ def test_append_diagrams_to_document_falls_back_to_mermaid_blocks() -> None:
     assert "### Mermaid" in enriched
     assert "```mermaid" in enriched
     assert "flowchart TD" in enriched
+
+
+def test_number_headings_deduplicates_existing_subsection_numbers() -> None:
+    text = "\n".join(
+        [
+            "# 3 Specific Requirements",
+            "## 3.2 External Interface Requirements",
+            "### 3.2.1 3.2.1 User Interfaces",
+        ]
+    )
+
+    numbered = number_headings(text)
+
+    assert "### 1.1.1 User Interfaces" in numbered
+    assert "3.2.1 3.2.1" not in numbered
+
+
+def test_number_headings_preserves_lettered_appendices_without_numeric_prefix() -> None:
+    text = "\n".join(
+        [
+            "# 4 Appendices",
+            "## A Glossary",
+            "## B Assumptions and Dependencies",
+            "## C References",
+            "# 5 Use Case Tables",
+        ]
+    )
+
+    numbered = number_headings(text)
+
+    assert "## A. Glossary" in numbered
+    assert "## B. Assumptions and Dependencies" in numbered
+    assert "## C. References" in numbered
+    assert "## 4.1" not in numbered
+    assert "# 2 Use Case Tables" in numbered
 
 
 def test_fallback_plantuml_diagrams_produces_multiple_views() -> None:

@@ -8,6 +8,19 @@ and document assembly.
 import re
 
 
+_NUMERIC_PREFIX_PATTERN = re.compile(r"^[0-9]+(?:\.[0-9]+)*[\)\.:\-\s]+")
+_APPENDIX_PREFIX_PATTERN = re.compile(r"^([A-Z])[\)\.:\-\s]+(.+)$")
+
+
+def _strip_numeric_prefixes(title: str) -> str:
+    cleaned = title.strip()
+    while True:
+        next_cleaned = _NUMERIC_PREFIX_PATTERN.sub("", cleaned, count=1).strip()
+        if next_cleaned == cleaned:
+            return cleaned
+        cleaned = next_cleaned
+
+
 def number_headings(text: str) -> str:
     """
     Number markdown headings hierarchically across levels 1-6.
@@ -25,6 +38,7 @@ def number_headings(text: str) -> str:
     """
     counters = [0, 0, 0, 0, 0, 0]
     out_lines: list[str] = []
+    in_appendices = False
     
     for line in text.splitlines():
         m = re.match(r"^(#{1,6})\s*(.+)$", line)
@@ -33,8 +47,19 @@ def number_headings(text: str) -> str:
             continue
 
         level = min(6, len(m.group(1)))
-        # Strip existing numbering patterns from the title
-        title = re.sub(r"^[0-9]+(?:\.[0-9]+)*[\)\.:\-\s]+", "", m.group(2)).strip()
+        title = _strip_numeric_prefixes(m.group(2))
+
+        if level == 1:
+            in_appendices = "appendices" in title.lower()
+
+        # Keep appendix subsection lettering (A/B/C...) unnumbered under section 4.
+        if level >= 2 and in_appendices:
+            appendix_match = _APPENDIX_PREFIX_PATTERN.match(title)
+            if appendix_match:
+                letter = appendix_match.group(1)
+                appendix_title = appendix_match.group(2).strip()
+                out_lines.append(f"{m.group(1)} {letter}. {appendix_title}".rstrip())
+                continue
 
         # Increment counter at this level and reset deeper levels
         counters[level - 1] += 1
