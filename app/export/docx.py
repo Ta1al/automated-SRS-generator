@@ -75,10 +75,13 @@ def _add_code_block(document: Document, lines: list[str]) -> None:
     if not code:
         return
 
-    paragraph = document.add_paragraph()
-    run = paragraph.add_run(code)
-    run.font.name = "Consolas"
-    run.font.size = Pt(10)
+    try:
+        paragraph = document.add_paragraph()
+        run = paragraph.add_run(code)
+        run.font.name = "Consolas"
+        run.font.size = Pt(10)
+    except Exception:
+        pass
 
 
 def _render_mermaid_png_via_mmdc(code: str) -> bytes | None:
@@ -206,27 +209,33 @@ def _render_plantuml_png(code: str) -> bytes | None:
 
 
 def _add_mermaid_image(document: Document, code: str) -> bool:
-    image_payload = _render_mermaid_png(code)
-    if not image_payload:
-        return False
+    try:
+        image_payload = _render_mermaid_png(code)
+        if not image_payload:
+            return False
 
-    paragraph = document.add_paragraph()
-    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = paragraph.add_run()
-    run.add_picture(io.BytesIO(image_payload), width=Inches(6.4))
-    return True
+        paragraph = document.add_paragraph()
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run = paragraph.add_run()
+        run.add_picture(io.BytesIO(image_payload), width=Inches(6.4))
+        return True
+    except Exception:
+        return False
 
 
 def _add_plantuml_image(document: Document, code: str) -> bool:
-    image_payload = _render_plantuml_png(code)
-    if not image_payload:
-        return False
+    try:
+        image_payload = _render_plantuml_png(code)
+        if not image_payload:
+            return False
 
-    paragraph = document.add_paragraph()
-    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = paragraph.add_run()
-    run.add_picture(io.BytesIO(image_payload), width=Inches(6.4))
-    return True
+        paragraph = document.add_paragraph()
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run = paragraph.add_run()
+        run.add_picture(io.BytesIO(image_payload), width=Inches(6.4))
+        return True
+    except Exception:
+        return False
 
 
 def _add_table(document: Document, rows: list[list[str]]) -> None:
@@ -412,6 +421,11 @@ def markdown_to_docx_bytes(
         else:
             _add_code_block(document, code_buffer)
 
-    output = io.BytesIO()
-    document.save(output)
-    return output.getvalue()
+    try:
+        output = io.BytesIO()
+        document.save(output)
+        return output.getvalue()
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).error("DOCX save failed: %s", exc)
+        return b""
