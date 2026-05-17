@@ -41,7 +41,7 @@ from sse_starlette import EventSourceResponse
 
 from app.config import get_settings
 from app.export.docx import markdown_to_docx_bytes
-from app.formatting import format_srs_body
+from app.formatting import assemble_document_from_sections, format_srs_body
 
 logger = logging.getLogger(__name__)
 
@@ -85,14 +85,6 @@ Do not include markdown or extra keys.
 def _slugify_for_filename(value: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
     return slug[:80]
-
-
-def _assemble_document_from_sections(state_values: dict[str, Any]) -> str:
-    """Assemble an SRS Markdown document from stored section drafts."""
-    sections = state_values.get("sections", {}) or {}
-    ordered_keys = ["s1", "s2", "s3_functional", "s3_external", "s3_nfr", "s4"]
-    parts = [str(sections.get(key, "")).strip() for key in ordered_keys if str(sections.get(key, "")).strip()]
-    return "\n\n".join(parts).strip()
 
 
 def _markdown_table(headers: list[str], rows: list[list[str]]) -> str:
@@ -972,7 +964,6 @@ async def _stream_graph(
 
 
                     # ── Emit node progress status with enriched timing info ──
-                    import time
                     current_time = time.time()
                     total_elapsed_ms = int((current_time - stream_start_time) * 1000)
                     
@@ -1107,8 +1098,8 @@ async def _stream_graph(
                             }
                             return
 
-    except openai.APIError as exc:
-        logger.exception("OpenAI API error during graph streaming for thread %s", thread_id)
+    except (openai.APIError, httpx.TransportError, httpx.TimeoutException) as exc:
+        logger.exception("Network-related error during graph streaming for thread %s", thread_id)
         yield {
             "event": "error",
             "data": json.dumps({
@@ -1117,12 +1108,12 @@ async def _stream_graph(
             }),
         }
     except Exception:
-        logger.exception("Error during graph streaming for thread %s", thread_id)
+        logger.exception("Non-retryable error during graph streaming for thread %s", thread_id)
         yield {
             "event": "error",
             "data": json.dumps(
                 {
-                    "message": "Unexpected backend error while generating the SRS. Please retry.",
+                    "message": "Unexpected backend error while generating the SRS. Please try again with a new session.",
                     "retryable": False,
                 }
             ),
@@ -1270,7 +1261,7 @@ async def get_document(thread_id: str, request: Request) -> JSONResponse:
 
     final_doc = state.values.get("final_document", "")
     if not final_doc and state.values.get("current_phase") == "complete":
-        final_doc = _assemble_document_from_sections(state.values)
+        final_doc = assemble_document_from_sections(state.values.get("sections", {}))
     final_doc = _append_use_case_tables_to_document(final_doc, state.values)
     final_doc = _append_diagrams_to_document(final_doc, state.values)
     final_doc = _format_srs_document(final_doc, state.values)
@@ -1303,7 +1294,7 @@ async def get_document_docx(thread_id: str, request: Request) -> Response:
 
     final_doc = state.values.get("final_document", "")
     if not final_doc:
-        final_doc = _assemble_document_from_sections(state.values)
+        final_doc = assemble_document_from_sections(state.values.get("sections", {}))
     final_doc = _append_use_case_tables_to_document(final_doc, state.values)
     final_doc = _append_diagrams_to_document(final_doc, state.values)
     final_doc = _format_srs_document(final_doc, state.values)
@@ -1369,7 +1360,7 @@ async def get_document_markdown(thread_id: str, request: Request) -> Response:
 
     final_doc = state.values.get("final_document", "")
     if not final_doc and state.values.get("current_phase") == "complete":
-        final_doc = _assemble_document_from_sections(state.values)
+        final_doc = assemble_document_from_sections(state.values.get("sections", {}))
     final_doc = _append_use_case_tables_to_document(final_doc, state.values)
     final_doc = _append_diagrams_to_document(final_doc, state.values)
     final_doc = _format_srs_document(final_doc, state.values)

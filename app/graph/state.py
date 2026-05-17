@@ -18,7 +18,11 @@ from typing import Annotated, Any
 
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
-from typing_extensions import TypedDict
+
+try:
+    from typing import TypedDict  # Python >=3.8
+except ImportError:
+    from typing_extensions import TypedDict  # Python 3.7
 
 
 def merge_sections(

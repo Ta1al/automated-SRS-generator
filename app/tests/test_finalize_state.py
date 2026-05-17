@@ -7,8 +7,8 @@ from app.graph.nodes import finalize_and_export
 from app.api.routes import (
     _append_diagrams_to_document,
     _append_use_case_tables_to_document,
-    _assemble_document_from_sections,
 )
+from app.formatting import assemble_document_from_sections
 
 
 @pytest.mark.asyncio
@@ -39,15 +39,13 @@ async def test_finalize_and_export_sets_completion_fields() -> None:
 
 
 def test_assemble_document_from_sections_uses_ordered_keys() -> None:
-    state_values = {
-        "sections": {
-            "s3_nfr": "## 3.3 NFR",
-            "s1": "## 1. Introduction",
-            "s4": "## 4. Appendices",
-        }
+    sections = {
+        "s3_nfr": "## 3.3 NFR",
+        "s1": "## 1. Introduction",
+        "s4": "## 4. Appendices",
     }
 
-    doc = _assemble_document_from_sections(state_values)
+    doc = assemble_document_from_sections(sections)
 
     assert doc.startswith("## 1. Introduction")
     assert "## 3.3 NFR" in doc

@@ -1,7 +1,8 @@
 """
 Backend formatting utilities for SRS documents.
 
-Shared helpers for text transformation, heading numbering, and requirement parsing.
+Shared helpers for text transformation, heading numbering, requirement parsing,
+and document assembly.
 """
 
 import re
@@ -92,3 +93,10 @@ def format_srs_body(text: str) -> str:
     body = split_functional_requirements(text)
     body = number_headings(body)
     return body
+
+
+def assemble_document_from_sections(sections: dict[str, str] | None) -> str:
+    """Assemble ordered SRS Markdown from stored section drafts."""
+    ordered_keys = ["s1", "s2", "s3_functional", "s3_external", "s3_nfr", "s4"]
+    parts = [str((sections or {}).get(key, "")).strip() for key in ordered_keys if str((sections or {}).get(key, "")).strip()]
+    return "\n\n".join(parts).strip()

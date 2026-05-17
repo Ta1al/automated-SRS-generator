@@ -26,6 +26,7 @@ from langgraph.types import interrupt
 from pydantic import BaseModel, Field, model_validator
 
 from app.config import get_settings
+from app.formatting import assemble_document_from_sections
 from app.graph import prompts
 from app.graph.state import SRSState, IngestionSummary, OutlineItem, ClarificationQuestion
 from app.rag.vectorstore import retrieve
@@ -52,12 +53,6 @@ def _normalize_message_text(value: str) -> str:
 
 def _is_control_command(message_text: str, command: str) -> bool:
     return _normalize_message_text(message_text) == command
-
-
-def _assemble_document_from_sections(sections: dict[str, str] | None) -> str:
-    ordered_keys = ["s1", "s2", "s3_functional", "s3_external", "s3_nfr", "s4"]
-    parts = [str((sections or {}).get(key, "")).strip() for key in ordered_keys if str((sections or {}).get(key, "")).strip()]
-    return "\n\n".join(parts).strip()
 
 
 def _fallback_plantuml_diagrams(ingestion: dict[str, Any]) -> dict[str, str]:
@@ -535,7 +530,7 @@ async def generate_single_elicitation_question(state: SRSState) -> dict:
 
     sections = state.get("sections", {})
     if isinstance(sections, dict) and len([key for key in ["s1", "s2", "s3_functional", "s3_external", "s3_nfr", "s4"] if sections.get(key)]) >= 6:
-        final_document = _assemble_document_from_sections(sections)
+        final_document = assemble_document_from_sections(sections)
         return {
             "current_phase": "complete",
             "is_complete": True,
@@ -591,13 +586,6 @@ async def generate_single_elicitation_question(state: SRSState) -> dict:
         question_text += f"\n\n{options_text}"
 
     logger.info(f"Question for group {group_index}: {question.question[:100]}...")
-
-    group_titles = [
-        "User Roles & Flows",
-        "Functional Boundaries",
-        "Non-Functional Requirements",
-        "Edge Cases & Risk Mitigation"
-    ]
 
     # Pause to wait for user answer - use frontend-compatible format
     human_answer = interrupt({
@@ -848,9 +836,6 @@ async def present_draft_for_review(state: SRSState) -> dict:
 
     logger.info("Draft presented for review; awaiting feedback")
 
-    # Present the draft; the feedback node will handle the interrupt/resume.
-    pass
-
     return {
         "chat_history": new_messages,
     }
@@ -1080,7 +1065,7 @@ async def finalize_and_export(state: SRSState) -> dict:
     ingestion = state.get("ingestion_summary", {})
 
     # Assemble final document
-    final_document = _assemble_document_from_sections(sections)
+    final_document = assemble_document_from_sections(sections)
 
     try:
         from app.api.routes import _append_use_case_tables_to_document, _append_diagrams_to_document, _format_srs_document

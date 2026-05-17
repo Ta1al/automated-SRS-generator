@@ -44,16 +44,6 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def _route_after_ingestion(state: SRSState) -> Literal["generate_elicitation_plan"]:
-    """After ingestion, always proceed to elicitation plan."""
-    return "generate_elicitation_plan"
-
-
-def _route_after_plan(state: SRSState) -> Literal["generate_single_elicitation_question"]:
-    """After plan generation, start asking questions."""
-    return "generate_single_elicitation_question"
-
-
 def _route_after_single_question(
     state: SRSState,
 ) -> Literal["classify_and_store_answers", "generate_single_elicitation_question"]:
@@ -105,13 +95,6 @@ def _route_after_draft_feedback(
         return "process_review_feedback"
     else:
         return "generate_mermaid_diagrams"
-
-
-def _route_after_mermaid(
-    state: SRSState,
-) -> Literal["finalize_and_export"]:
-    """After mermaid generation, proceed to finalize."""
-    return "finalize_and_export"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -167,18 +150,10 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None) -> StateGraph:
     graph.add_edge(START, "ingest_and_map_domain")
 
     # ingest_and_map_domain → generate_elicitation_plan
-    graph.add_conditional_edges(
-        "ingest_and_map_domain",
-        _route_after_ingestion,
-        {"generate_elicitation_plan": "generate_elicitation_plan"},
-    )
+    graph.add_edge("ingest_and_map_domain", "generate_elicitation_plan")
 
     # generate_elicitation_plan → generate_single_elicitation_question
-    graph.add_conditional_edges(
-        "generate_elicitation_plan",
-        _route_after_plan,
-        {"generate_single_elicitation_question": "generate_single_elicitation_question"},
-    )
+    graph.add_edge("generate_elicitation_plan", "generate_single_elicitation_question")
 
     # generate_single_elicitation_question → classify_and_store_answers
     graph.add_conditional_edges(
@@ -228,11 +203,7 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None) -> StateGraph:
     )
 
     # generate_mermaid_diagrams → finalize_and_export
-    graph.add_conditional_edges(
-        "generate_mermaid_diagrams",
-        _route_after_mermaid,
-        {"finalize_and_export": "finalize_and_export"},
-    )
+    graph.add_edge("generate_mermaid_diagrams", "finalize_and_export")
 
     # finalize_and_export → END
     graph.add_edge("finalize_and_export", END)

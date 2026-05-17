@@ -143,7 +143,8 @@ flowchart TD
 │   ├── db/
 │   │   └── checkpointer.py       # AsyncPostgresSaver + SQLite fallback
 │   └── tests/
-│       └── test_main.py          # pytest test suite
+│       ├── test_main.py          # pytest test suite
+│       └── test_finalize_state.py  # Finalization + export tests
 ├── frontend/                     # Next.js frontend
 │   ├── src/
 │   │   ├── app/
@@ -317,13 +318,13 @@ The classifier uses a separate, cheaper model with retry logic (2 attempts, expo
 
 **`app/api/routes.py`** contains document assembly logic:
 
-- `_assemble_document_from_sections()` - Concatenates 6 section drafts in order
 - `_append_use_case_tables_to_document()` - Generates use-case catalog and detail tables from ingestion data
 - `_append_diagrams_to_document()` - Appends PlantUML and Mermaid diagram blocks
 - `_format_srs_document()` - Wraps with title, document info table, and table of contents
 - `_fallback_mermaid_diagrams()` - Generates fallback Mermaid diagrams (flowchart, sequence, ER, class, state, component)
 
 **`app/formatting.py`** provides:
+- `assemble_document_from_sections()` - Concatenates 6 section drafts in order (shared by nodes and routes)
 - `number_headings()` - Hierarchically numbers Markdown headings
 - `split_functional_requirements()` - Restructures inline requirement markers into list items
 - `format_srs_body()` - Applies both splitting and numbering
