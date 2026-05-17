@@ -30,6 +30,7 @@ from app.formatting import assemble_document_from_sections
 from app.graph import prompts
 from app.graph.state import SRSState, IngestionSummary, ClarificationQuestion
 from app.rag.vectorstore import retrieve
+from app.validation.mermaid import validate_mermaid_syntax
 
 logger = logging.getLogger(__name__)
 
@@ -713,6 +714,74 @@ async def draft_from_approved_outline(state: SRSState) -> dict:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Phase 3b: Section Revision (targeted edit of a single section)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+async def revise_selected_section(state: SRSState) -> dict:
+    """
+    Revise a single SRS section based on user feedback.
+
+    Reads revision params from state and uses the LLM to regenerate
+    only the targeted section, leaving all other sections intact.
+    """
+    section_key = state.get("revision_target_section_key", "")
+    original_content = state.get("revision_target_content", "")
+    feedback = state.get("revision_request", "")
+    target_title = state.get("revision_target_title", "")
+    ingestion = state.get("ingestion_summary", {})
+    elicitation = state.get("elicitation_answers", {})
+
+    chat_history_str = "\n".join([
+        f"{msg.__class__.__name__}: {msg.content[:200]}"
+        for msg in state.get("chat_history", [])
+    ])
+
+    if not section_key or not original_content:
+        logger.warning("revision_target_section_key or revision_target_content missing; skipping revision")
+        return {}
+
+    logger.info(f"Revising section {section_key}: {target_title}")
+
+    system_prompt = prompts.REGENERATION_SYSTEM.format(
+        original_section=original_content,
+        feedback=feedback,
+        ingestion_summary=json.dumps(ingestion, indent=2),
+        elicitation_answers=json.dumps(elicitation, indent=2),
+        chat_history=chat_history_str,
+    )
+
+    revised_content = await _llm_invoke_text(
+        system_prompt=system_prompt,
+        temperature=0.5,
+    )
+
+    revised_content = revised_content.strip()
+    if not revised_content:
+        logger.warning("Revision returned empty content; keeping original")
+        return {}
+
+    sections = dict(state.get("sections", {}))
+    sections[section_key] = revised_content
+
+    confirmation = (
+        f"**✓ Section Revised: {target_title}**\n\n"
+        f"I've updated the section based on your feedback. "
+        f"Review it in the right panel and let me know if you need further changes."
+    )
+
+    new_messages = list(state.get("chat_history", [])) + [AIMessage(content=confirmation)]
+
+    logger.info(f"Section {section_key} revised successfully")
+
+    return {
+        "sections": sections,
+        "current_phase": "drafting",
+        "chat_history": new_messages,
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Phase 4: Mermaid Diagram Generation
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -749,27 +818,39 @@ async def generate_mermaid_diagrams(state: SRSState) -> dict:
         )
 
         diagram_code = response.model_dump(mode="json")
+        fallback_blocks = _fallback_mermaid_diagrams_for_node(ingestion)
         mermaid_blocks: list[str] = []
+        mermaid_errors: list[str] = []
 
         diagram_type_prefixes = {
-            "usecase": "usecaseDiagram",
+            "usecase": "flowchart TD",
             "class_diagram": "classDiagram",
             "er": "erDiagram",
             "activity": "stateDiagram-v2",
         }
 
-        for key, expected_prefix in diagram_type_prefixes.items():
+        for index, (key, expected_prefix) in enumerate(diagram_type_prefixes.items()):
             code = str(diagram_code.get(key, "")).strip()
-            if code:
-                if not code.startswith(expected_prefix):
-                    code = f"{expected_prefix}\n{code}"
-                mermaid_blocks.append(code)
+            if code.startswith("usecaseDiagram"):
+                # Mermaid has no native usecaseDiagram type; fallback to flowchart.
+                code = ""
+            if not code:
+                code = fallback_blocks[index]
+            elif not code.startswith(expected_prefix):
+                code = f"{expected_prefix}\n{code}"
+
+            is_valid, validation_error = await validate_mermaid_syntax(code)
+            if not is_valid:
+                mermaid_errors.append(f"{key}: {validation_error}")
+                code = fallback_blocks[index]
+
+            mermaid_blocks.append(code)
 
         if not mermaid_blocks:
-            mermaid_blocks = _fallback_mermaid_diagrams_for_node(ingestion)
+            mermaid_blocks = fallback_blocks
 
         logger.info(f"Generated {len(mermaid_blocks)} Mermaid diagrams")
-        return {"mermaid_blocks": mermaid_blocks, "mermaid_errors": []}
+        return {"mermaid_blocks": mermaid_blocks, "mermaid_errors": mermaid_errors}
 
     except Exception as exc:
         logger.warning(f"Mermaid diagram generation failed: {exc}. Using fallback.")
@@ -788,15 +869,15 @@ def _fallback_mermaid_diagrams_for_node(ingestion: dict) -> list[str]:
     primary_actor = actors[0] if actors else "User"
     secondary_actor = actors[1] if len(actors) > 1 else "Admin"
 
-    usecase_lines = ["usecaseDiagram"]
-    usecase_lines.append(f"  actor {primary_actor.replace(' ', '_')} as \"{primary_actor}\"")
+    usecase_lines = ["flowchart TD"]
+    usecase_lines.append(f"  {primary_actor.replace(' ', '_')}[\"{primary_actor}\"]")
     if secondary_actor:
-        usecase_lines.append(f"  actor {secondary_actor.replace(' ', '_')} as \"{secondary_actor}\"")
-    usecase_lines.append(f"  rectangle \"{project_title}\" {{")
+        usecase_lines.append(f"  {secondary_actor.replace(' ', '_')}[\"{secondary_actor}\"]")
+    usecase_lines.append(f"  subgraph System[\"{project_title}\"]")
     for i, flow in enumerate(flows[:4], start=1):
         flow_name = str(flow.get("name", f"UseCase{i}")).strip()
-        usecase_lines.append(f"    usecase UC{i} as \"{flow_name}\"")
-    usecase_lines.append("  }")
+        usecase_lines.append(f"    UC{i}[\"{flow_name}\"]")
+    usecase_lines.append("  end")
     if actors:
         usecase_lines.append(f"  {actors[0].replace(' ', '_')} --> UC1")
     if len(actors) > 1 and len(flows) > 1:
