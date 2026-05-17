@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import base64
 import io
+import json
+import logging
 import re
 import shutil
 import subprocess
@@ -14,7 +15,7 @@ from typing import Sequence
 
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.shared import Inches, Pt
+from docx.shared import Inches, Pt, RGBColor
 
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
 _BULLET_RE = re.compile(r"^\s*[-*+]\s+(.+?)\s*$")
@@ -117,23 +118,39 @@ def _render_mermaid_png_via_mmdc(code: str) -> bytes | None:
 
 
 def _render_mermaid_png_via_mermaid_ink(code: str) -> bytes | None:
-    encoded = base64.urlsafe_b64encode(code.encode("utf-8")).decode("ascii")
-    url = f"https://mermaid.ink/img/{encoded}"
-    request = urllib.request.Request(url, headers={"Accept": "image/png"})
+    payload = json.dumps({
+        "code": code,
+        "mermaid": {"theme": "default"},
+    }).encode("utf-8")
+    url = "https://mermaid.ink/img"
+    request = urllib.request.Request(
+        url,
+        data=payload,
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "image/png",
+        },
+        method="POST",
+    )
 
     try:
-        with urllib.request.urlopen(request, timeout=20) as response:  # noqa: S310
+        with urllib.request.urlopen(request, timeout=30) as response:  # noqa: S310
             content_type = response.headers.get("Content-Type", "")
             if "image" not in content_type.lower():
                 return None
-            payload = response.read()
-            return payload if payload else None
+            image_data = response.read()
+            return image_data if image_data else None
     except (urllib.error.URLError, TimeoutError, ValueError):
         return None
 
 
 def _render_mermaid_png(code: str) -> bytes | None:
-    return _render_mermaid_png_via_mmdc(code) or _render_mermaid_png_via_mermaid_ink(code)
+    result = _render_mermaid_png_via_mmdc(code)
+    if result:
+        return result
+    logger = logging.getLogger(__name__)
+    logger.info("mmdc not available, falling back to mermaid.ink API")
+    return _render_mermaid_png_via_mermaid_ink(code)
 
 
 _PLANTUML_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_"
@@ -209,9 +226,11 @@ def _render_plantuml_png(code: str) -> bytes | None:
 
 
 def _add_mermaid_image(document: Document, code: str) -> bool:
+    logger = logging.getLogger(__name__)
     try:
         image_payload = _render_mermaid_png(code)
         if not image_payload:
+            logger.warning("Failed to render Mermaid diagram – no payload returned")
             return False
 
         paragraph = document.add_paragraph()
@@ -219,14 +238,17 @@ def _add_mermaid_image(document: Document, code: str) -> bool:
         run = paragraph.add_run()
         run.add_picture(io.BytesIO(image_payload), width=Inches(6.4))
         return True
-    except Exception:
+    except Exception as exc:
+        logger.warning("Failed to embed Mermaid diagram image: %s", exc)
         return False
 
 
 def _add_plantuml_image(document: Document, code: str) -> bool:
+    logger = logging.getLogger(__name__)
     try:
         image_payload = _render_plantuml_png(code)
         if not image_payload:
+            logger.warning("Failed to render PlantUML diagram – no payload returned")
             return False
 
         paragraph = document.add_paragraph()
@@ -234,8 +256,28 @@ def _add_plantuml_image(document: Document, code: str) -> bool:
         run = paragraph.add_run()
         run.add_picture(io.BytesIO(image_payload), width=Inches(6.4))
         return True
-    except Exception:
+    except Exception as exc:
+        logger.warning("Failed to embed PlantUML diagram image: %s", exc)
         return False
+
+
+def _add_fallback_code_block(document: Document, code: str, language: str) -> None:
+    """Add diagram source code as a styled fallback when rendering fails."""
+    try:
+        note = document.add_paragraph(f"[{language} diagram source – rendering unavailable]")
+        note.runs[0].italic = True
+        note.runs[0].font.size = Pt(9)
+        note.runs[0].font.color.rgb = RGBColor(0x66, 0x66, 0x66)
+
+        code_lines = code.strip().split("\n")
+        code_text = "\n".join(code_lines)
+        paragraph = document.add_paragraph()
+        run = paragraph.add_run(code_text)
+        run.font.name = "Consolas"
+        run.font.size = Pt(8)
+        run.font.color.rgb = RGBColor(0x33, 0x33, 0x33)
+    except Exception:
+        pass
 
 
 def _add_table(document: Document, rows: list[list[str]]) -> None:
@@ -328,16 +370,15 @@ def markdown_to_docx_bytes(
 
         if stripped.startswith("```"):
             if in_code_block:
+                code_text = "\n".join(code_buffer).strip()
                 if code_block_language == "mermaid":
-                    rendered = _add_mermaid_image(document, "\n".join(code_buffer).strip())
+                    rendered = _add_mermaid_image(document, code_text)
                     if not rendered:
-                        note = document.add_paragraph("[Diagram image unavailable]")
-                        note.runs[0].italic = True
+                        _add_fallback_code_block(document, code_text, "Mermaid")
                 elif code_block_language == "plantuml":
-                    rendered = _add_plantuml_image(document, "\n".join(code_buffer).strip())
+                    rendered = _add_plantuml_image(document, code_text)
                     if not rendered:
-                        note = document.add_paragraph("[Diagram image unavailable]")
-                        note.runs[0].italic = True
+                        _add_fallback_code_block(document, code_text, "PlantUML")
                 else:
                     _add_code_block(document, code_buffer)
                 code_buffer = []
@@ -408,16 +449,15 @@ def markdown_to_docx_bytes(
         index += 1
 
     if code_buffer:
+        code_text = "\n".join(code_buffer).strip()
         if code_block_language == "mermaid":
-            rendered = _add_mermaid_image(document, "\n".join(code_buffer).strip())
+            rendered = _add_mermaid_image(document, code_text)
             if not rendered:
-                note = document.add_paragraph("[Diagram image unavailable]")
-                note.runs[0].italic = True
+                _add_fallback_code_block(document, code_text, "Mermaid")
         elif code_block_language == "plantuml":
-            rendered = _add_plantuml_image(document, "\n".join(code_buffer).strip())
+            rendered = _add_plantuml_image(document, code_text)
             if not rendered:
-                note = document.add_paragraph("[Diagram image unavailable]")
-                note.runs[0].italic = True
+                _add_fallback_code_block(document, code_text, "PlantUML")
         else:
             _add_code_block(document, code_buffer)
 
