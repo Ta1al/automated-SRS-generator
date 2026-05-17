@@ -95,13 +95,18 @@ const FINALIZE_COMMAND = "[[finalize_srs]]";
 const SECTION_TITLES: Record<string, string> = {
   s1: "Section 1 · Introduction",
   s2: "Section 2 · Product Overview",
-  s3_iface: "Section 3.1 · External Interfaces",
-  s3_fr: "Section 3.2 · Functional Requirements",
+  s3_functional: "Section 3.1 · Functional Requirements",
+  s3_external: "Section 3.2 · External Interface Requirements",
   s3_nfr: "Section 3.3 · Quality of Service",
   s4: "Section 4 · Verification",
 };
 
-const SECTION_ORDER = ["s1", "s2", "s3_iface", "s3_fr", "s3_nfr", "s4"];
+const SECTION_ORDER = ["s1", "s2", "s3_functional", "s3_external", "s3_nfr", "s4"];
+const SECTION_ORDER_INDEX = new Map(SECTION_ORDER.map((key, index) => [key, index]));
+
+function getSectionOrderIndex(key: string) {
+  return SECTION_ORDER_INDEX.get(key) ?? SECTION_ORDER.length;
+}
 // All five section writers run in parallel after elicit_requirements
 const PARALLEL_DRAFT_NODES = new Set([
   "draft_section_1",
@@ -159,6 +164,7 @@ function normalizeMarkdownForPreview(content: string) {
 
 function buildDraftPreviewText(content: string) {
   return normalizeMarkdownForPreview(content)
+    .replace(/^\s*[0-9]+(?:\.[0-9]+)*\s*[-:\.]?\s*.*\n?/, "")
     .replace(/^\s{0,3}#{1,6}\s+/gm, "")
     .replace(/```[\s\S]*?```/g, " ")
     .replace(/`([^`]+)`/g, "$1")
@@ -226,13 +232,54 @@ function extractDraftParts(sectionKey: string, content: string): DraftPart[] {
       return;
     }
 
+    // Normalize title: remove duplicated section prefix like "3.1" or the full section title
+    const normalizeTitle = (rawTitle: string) => {
+      let t = rawTitle.trim();
+      // remove leading numeric prefixes (e.g., "3.3" or "3.3.1")
+      t = t.replace(/^[0-9]+(?:\.[0-9]+)*(?:[\)\.:\-\s]+)?/, "").trim();
+      // remove leading "Section X" words
+      t = t.replace(/^Section\s+\d+(?:\.\d+)?\s*[-:\.]?\s*/i, "").trim();
+      // if title equals the canonical section title, prefer a shorter generic label
+      const canonical = formatSectionTitle(sectionKey);
+      if (t === canonical || t.startsWith(canonical)) {
+        // try to extract a requirement id like [F-123] or [NF-001]
+        const idMatch = partContent.match(/\[(F|NF|NF-[0-9A-Za-z_-]+)[^\]]*\]/i) || partContent.match(/\[(F-[0-9]+|NF-[0-9]+)\]/i);
+        if (idMatch) {
+          return idMatch[0];
+        }
+        return canonical;
+      }
+
+      return t || canonical;
+    };
+
+    const normalizedTitle = normalizeTitle(currentTitle);
+
+    // Remove a leading numeric heading line from the part content if present
+    const contentLines = partContent.split(/\r?\n/);
+    if (contentLines.length && /^[0-9]+(?:\.[0-9]+)*\s+[-:\.]?\s*\S+/.test(contentLines[0])) {
+      // drop the first line when it looks like a numeric section heading
+      contentLines.shift();
+    }
+    let finalContent = contentLines.join("\n").trim();
+
     parts.push({
-      id: `${sectionKey}-${slugifyText(currentTitle)}-${parts.length + 1}`,
-      title: currentTitle,
-      content: partContent,
+      id: `${sectionKey}-${slugifyText(normalizedTitle)}-${parts.length + 1}`,
+      title: normalizedTitle,
+      content: finalContent,
       sectionKey,
-      preview: buildDraftPreviewText(partContent),
+      preview: buildDraftPreviewText(finalContent),
     });
+  };
+
+  const isHeadingOnlyPart = (partContent: string) => {
+    const normalized = partContent
+      .replace(/\r\n?/g, "\n")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    return normalized.length === 1 && /^(#{3,4})\s+.+$/.test(normalized[0]);
   };
 
   for (const line of lines) {
@@ -252,6 +299,11 @@ function extractDraftParts(sectionKey: string, content: string): DraftPart[] {
   }
 
   flushPart();
+
+  const partsWithBody = parts.filter((part) => !isHeadingOnlyPart(part.content));
+  if (partsWithBody.length > 0) {
+    return partsWithBody;
+  }
 
   return parts.length > 0
     ? parts
@@ -1871,7 +1923,7 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
     return Array.from(sectionMap.entries())
       .map(([key, content]) => ({ key, content }))
       .filter((entry) => entry.content.length > 0)
-      .sort((first, second) => SECTION_ORDER.indexOf(first.key) - SECTION_ORDER.indexOf(second.key));
+      .sort((first, second) => getSectionOrderIndex(first.key) - getSectionOrderIndex(second.key));
   }, [stateJson, liveSectionDrafts]);
 
   const draftSections = useMemo(
