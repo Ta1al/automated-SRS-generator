@@ -128,6 +128,44 @@ function buildBackendMessage(message: string) {
   return message;
 }
 
+function isLikelyCompleteSrsDocument(text: string) {
+  const normalized = text.trim();
+  if (!normalized) {
+    return false;
+  }
+
+  const hasIntro = /^#\s+\d+\s+Introduction\b/im.test(normalized);
+  const hasOverall = /^#\s+\d+\s+Overall Description\b/im.test(normalized);
+  const hasSpecific = /^#\s+\d+\s+Specific Requirements\b/im.test(normalized);
+  return hasIntro && hasOverall && hasSpecific;
+}
+
+async function fetchBackendDocumentWithRetries(threadId: string) {
+  const maxAttempts = 4;
+  let lastDocument = "";
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const documentResponse = await backendFetch(`/api/sessions/${threadId}/document`);
+    if (documentResponse.ok) {
+      const documentPayload = await documentResponse.json();
+      const nextDocument =
+        typeof documentPayload.document === "string" ? documentPayload.document : "";
+
+      if (nextDocument.trim()) {
+        lastDocument = nextDocument;
+      }
+
+      if (isLikelyCompleteSrsDocument(nextDocument)) {
+        return nextDocument;
+      }
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 900));
+  }
+
+  return lastDocument;
+}
+
 async function loadTimingMap() {
   const stats = await prisma.stageTimingStat.findMany();
   const map: TimingMap = new Map();
@@ -684,11 +722,10 @@ export async function startBackgroundChatRun(params: {
         chat.currentDocument;
     }
 
-    if (!sawGuardrailRedirect && !currentDocument) {
-      const documentResponse = await backendFetch(`/api/sessions/${chat.backendThreadId}/document`);
-      if (documentResponse.ok) {
-        const documentPayload = await documentResponse.json();
-        currentDocument = documentPayload.document ?? null;
+    if (!sawGuardrailRedirect) {
+      const fetchedDocument = await fetchBackendDocumentWithRetries(chat.backendThreadId);
+      if (fetchedDocument.trim()) {
+        currentDocument = fetchedDocument;
       }
     }
 
