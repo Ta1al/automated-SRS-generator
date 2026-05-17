@@ -77,58 +77,65 @@ The system is a full-stack application with two independently running processes:
 
 ### Graph topology
 
-The LangGraph `StateGraph` compiles into the following workflow. Five section
-writers run **in parallel** via LangGraph's `Send` API, and three Mermaid
-diagrams are generated concurrently via `asyncio.gather`:
+The LangGraph `StateGraph` is a **5-phase workflow** with user interrupts at key decision points:
+
+**Phase 1: Ingestion** → **Phase 2: Elicitation (Q&A)** → **Phase 3: Outline approval** → **Phase 4: Drafting** → **Phase 5: Review & feedback** → **Finalization** → END
 
 ```mermaid
 flowchart TD
-    START([START]) -->|route_from_start| retrieve_rag_context
-
-    retrieve_rag_context --> elicit_requirements
-    elicit_requirements --> classify_requirements
-
-    classify_requirements -->|fan-out Send| draft_section_1
-    classify_requirements -->|fan-out Send| draft_section_2
-    classify_requirements -->|fan-out Send| draft_section_3_fr
-    classify_requirements -->|fan-out Send| draft_section_3_nfr
-    classify_requirements -->|fan-out Send| draft_section_3_iface
-
-    draft_section_1 --> draft_section_4
-    draft_section_2 --> draft_section_4
-    draft_section_3_fr --> draft_section_4
-    draft_section_3_nfr --> draft_section_4
-    draft_section_3_iface --> draft_section_4
-
-    draft_section_4 --> evaluate_completeness
-
-    evaluate_completeness -->|missing major decisions| ask_clarifying_questions
-    ask_clarifying_questions -->|resume with answers| classify_requirements
-
-    evaluate_completeness -->|major decisions resolved| qa_review
-    qa_review -->|qa gaps found| ask_clarifying_questions
-    qa_review -->|passed + diagrams requested| generate_mermaid
-    qa_review -->|passed + no diagrams| finalize_document
-
-    generate_mermaid --> validate_mermaid
-    validate_mermaid -->|errors and retries left| correct_mermaid
-    correct_mermaid --> validate_mermaid
-    validate_mermaid -->|valid or retries exhausted| finalize_document
-
-    finalize_document --> END([END])
+    START([START]) --> ingest["ingest_and_map_domain"]
+    ingest --> plan["generate_elicitation_plan"]
+    plan --> q["generate_single_elicitation_question"]
+    q --> store["classify_and_store_answers"]
+    
+    store -->|more questions in plan| q
+    store -->|next group| plan
+    store -->|all done| outline["generate_outline"]
+    
+    outline --> wait["wait_for_outline_approval"]
+    wait -->|not approved| wait
+    wait -->|approved| draft["draft_from_approved_outline"]
+    
+    draft --> present["present_draft_for_review"]
+    present --> review["process_review_feedback"]
+    
+    review -->|more revisions| review
+    review -->|finalize| finalize["finalize_and_export"]
+    
+    finalize --> END([END])
 ```
 
-The graph also supports two alternative entry paths (see [Run modes](#run-modes)).
+User interrupts via `interrupt()` occur at:
+- After `wait_for_outline_approval` (pause for outline approval decision)
+- After `present_draft_for_review` (pause for feedback collection)
+
+## Diagrams
+
+Architecture and design diagrams live in the `documentation/` folder and use **Mermaid** syntax. Key diagram files:
+
+- `documentation/activity_diagram.md` — overall activity/run modes
+- `documentation/class_diagram.md` — system class/data diagrams
+- `documentation/dataflow_diagram.md` — dataflow overview
+- `documentation/er_diagram.md` — entity-relationship diagram
+- `documentation/use_case_diagram.md` — high-level use-case overview
+
+Render Mermaid diagrams locally with the Mermaid CLI (`mmdc`) or preview in https://mermaid.live. Example:
+
+```bash
+# npm install -g @mermaid-js/mermaid-cli
+mmdc -i documentation/activity_diagram.md -o documentation/diagrams/activity_diagram.png
+```
 
 ### Run modes
 
-The `_route_from_start` conditional edge selects one of three execution paths:
+The 5-phase workflow supports the following modes:
 
-| Mode | Trigger | Path |
+| Mode | Execution Path | Description |
 |---|---|---|
-| **Full flow** | Default (`revision_mode=False`, `diagrams_only=False`) | `retrieve_rag_context` → full pipeline → `finalize_document` |
-| **Diagrams only** | `diagrams_only=True` | `generate_mermaid` → `validate_mermaid` → `finalize_document` |
-| **Section revision** | `revision_mode=True` | `revise_selected_section` → `finalize_document` |
+| **Full flow** (default) | `ingest_and_map_domain` → all 5 phases → `finalize_and_export` | Complete SRS generation from initial idea through review |
+| **Resume after interrupt** | Re-enters at paused node (e.g., `wait_for_outline_approval`) | Continues workflow after user provides approval/feedback |
+
+Note: Alternative modes (diagrams-only, targeted section revision) were removed in the 5-phase redesign. All workflows now follow the standard progression with structured user interrupts.
 
 ---
 
@@ -315,37 +322,31 @@ Each model uses Pydantic `Field` descriptions to guide LLM output schema generat
 **`app/graph/nodes.py`** implements all node functions. Each is an async
 function that receives `SRSState` and returns a partial state update.
 
-| Node | LLM call | Purpose |
-|---|---|---|
-| `retrieve_rag_context` | - | Queries ChromaDB with the latest user message, returns concatenated chunks with source attribution |
-| `elicit_requirements` | ✓ | Extracts project title and structured outline (entities, workflows, constraints) from user input |
-| `classify_requirements` | ✓ | Assigns 12-label taxonomy to stub requirements (F, A, FT, L, LF, MN, O, PE, PO, SC, SE, US) |
-| `draft_section_1` | ✓ | Writes IEEE 830 Section 1: Introduction (Purpose, Scope, Definitions, References, Overview) |
-| `draft_section_2` | ✓ | Writes Section 2: Product Overview (Perspective, Functions, User Characteristics, Assumptions, Constraints) |
-| `draft_section_3_fr` | ✓ | Writes Section 3.2: Functional Requirements in `F-NNN` format with requirement + acceptance criteria blocks |
-| `draft_section_3_nfr` | ✓ | Writes Section 3.3: Quality of Service - 11 subsections for PE, SE, A, SC, FT, MN, PO, O, US, LF, L |
-| `draft_section_3_iface` | ✓ | Writes Section 3.1: External Interfaces with `IF-NNN` requirement blocks |
-| `draft_section_4` | ✓ | Generates verification matrix mapping requirement IDs to verification methods (Test / Analysis / Inspection / Demonstration) |
-| `evaluate_completeness` | ✓ | Identifies 2–5 high-impact unresolved architectural decisions; sets `missing_context` or clears it |
-| `qa_review` | ✓ | Performs structural QA gate (coverage, traceability, ambiguity, and ID/table integrity) before finalization |
-| `ask_clarifying_questions` | - | Uses LangGraph `interrupt()` to pause execution and surface questions to the user (HITL) |
-| `generate_mermaid` | ✓ | Generates 3 diagrams (architecture flowchart, sequence, ER) concurrently via `asyncio.gather` |
-| `validate_mermaid` | - | Validates each diagram via `mmdc` subprocess or regex-based heuristic fallback |
-| `correct_mermaid` | ✓ | LLM fixes syntax errors using original code + error message (up to `MAX_MERMAID_RETRIES` attempts) |
-| `revise_selected_section` | ✓ | Rewrites a single section using context from other sections and the user's revision request |
-| `finalize_document` | - | Assembles all section drafts + Mermaid diagrams into the final Markdown document |
+| Node | Phase | LLM | Purpose |
+|---|---|---|---|
+| `ingest_and_map_domain` | 1 (Ingestion) | ✓ | Extracts project metadata (title, scope, stakeholders, features, constraints) from initial user input |
+| `generate_elicitation_plan` | 2 (Elicitation) | ✓ | Creates a list of topics/questions for the next elicitation group |
+| `generate_single_elicitation_question` | 2 (Elicitation) | ✓ | Generates one focused elicitation question (one-at-a-time for user interaction) |
+| `classify_and_store_answers` | 2 (Elicitation) | ✓ | Parses and stores user's answer to the elicitation question |
+| `generate_outline` | 3 (Outline) | ✓ | Drafts a high-level SRS outline based on collected answers |
+| `wait_for_outline_approval` | 3 (Outline) | - | Pauses via `interrupt()` to collect user outline approval/rejection (HITL) |
+| `draft_from_approved_outline` | 4 (Drafting) | ✓ | Writes the full SRS document (all sections) from the approved outline |
+| `present_draft_for_review` | 5 (Review) | - | Surfaces draft to user and collects feedback via `interrupt()` (HITL) |
+| `process_review_feedback` | 5 (Review) | ✓ | Processes user feedback and applies targeted revisions to the document |
+| `finalize_and_export` | Finalization | - | Assembles final SRS and exports to Markdown + DOCX |
 
-Key helper functions in `nodes.py`:
 
-- `_get_llm()` - Returns a `ChatOpenAI` instance pointed at OpenRouter with custom HTTP headers and timeout configuration.
-- `_llm_invoke_with_retry()` - Retries transient LLM errors with exponential backoff (3 attempts, 2^n seconds); primary fallback for structured output failures.
-- `_build_writing_context()` - Constructs rich context for section writers from chat history, document buffer, requirements, and RAG context.
-- `_retrieve_draft_context()` - Lexical overlap retrieval from already-drafted sections.
-- `_normalize_section_output()` - Shared post-processor that unwraps fenced markdown, normalizes spacing, and enforces required section headings across s1/s2/s3/s4 outputs.
-- `_ensure_section_1_completeness()` - Section 1-specific completeness backfill used within the shared normalizer.
-- `_parse_json()` - Loose JSON parsing for fallback text-based LLM responses.
-- `_extract_project_title()` - Extracts project title from parsed responses or structured models.
-- `_detect_project_scope()` - Infers project scope from content (e.g., web, mobile, backend, data pipeline).
+Key helper functions and patterns in `nodes.py`:
+
+- `_llm_invoke_structured()` - Calls LLM with structured output (`with_structured_output()`) using a Pydantic model for schema validation, with fallback to text parsing.
+- `_llm_invoke_text()` - Calls LLM in text mode and manually parses JSON from response.
+- `_normalize_message_text()` - Normalizes and lowercases user input for command matching (e.g., `OUTLINE_APPROVE_COMMAND`).
+- `_latest_human_message()` - Retrieves the most recent user message from chat history.
+
+Interrupt patterns:
+
+- `wait_for_outline_approval()` uses `interrupt(value=...)` to pause and await user approval/rejection via `OUTLINE_APPROVE_COMMAND`.
+- `present_draft_for_review()` uses `interrupt()` to collect user feedback and revision targets.
 
 ### RAG and vector store
 
