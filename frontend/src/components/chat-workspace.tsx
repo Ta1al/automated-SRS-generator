@@ -533,6 +533,29 @@ function MarkdownContent({ content }: { content: string }) {
   );
 }
 
+let mermaidInitialized = false;
+
+async function getMermaid() {
+  const mermaid = (await import("mermaid")).default;
+  if (!mermaidInitialized) {
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: "loose",
+      theme: "default",
+      themeVariables: {
+        fontFamily: "inherit",
+      },
+    });
+    mermaidInitialized = true;
+  }
+  return mermaid;
+}
+
+function svgContainsError(svg: string): boolean {
+  const textContent = svg.replace(/<[^>]*>/g, "");
+  return /syntax\s*error/i.test(textContent) || /mermaid\s+version/i.test(textContent) || /\bparse\s+error\b/i.test(textContent);
+}
+
 function MermaidBlock({ chart }: { chart: string }) {
   const elementRef = useRef<HTMLDivElement>(null);
 
@@ -540,28 +563,20 @@ function MermaidBlock({ chart }: { chart: string }) {
     let mounted = true;
 
     async function render() {
-      if (!elementRef.current) {
-        return;
-      }
+      if (!elementRef.current) return;
 
       try {
-        const mermaid = (await import("mermaid")).default;
-        mermaid.initialize({ startOnLoad: false, securityLevel: "loose" });
+        const mermaid = await getMermaid();
         await mermaid.parse(chart);
         const renderId = `mermaid-${Math.random().toString(36).slice(2)}`;
         const { svg } = await mermaid.render(renderId, chart);
-        if (mounted && elementRef.current) {
-          const lowerSvg = svg.toLowerCase();
-          const hasMermaidErrorText =
-            lowerSvg.includes("syntax error in text") ||
-            lowerSvg.includes("mermaid version") ||
-            lowerSvg.includes("parse error");
 
-          if (hasMermaidErrorText) {
-            elementRef.current.textContent = "Diagram unavailable.";
-          } else {
-            elementRef.current.innerHTML = svg;
-          }
+        if (!mounted || !elementRef.current) return;
+
+        if (svgContainsError(svg)) {
+          elementRef.current.textContent = "Diagram unavailable.";
+        } else {
+          elementRef.current.innerHTML = svg;
         }
       } catch {
         if (mounted && elementRef.current) {
@@ -1355,6 +1370,13 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
 
             if (detailsResponse.ok && selectedChatIdRef.current === chatId) {
               const detailsPayload = (await detailsResponse.json()) as ChatDetails;
+              setChats((prev) =>
+                prev.map((chat) =>
+                  chat.id === chatId
+                    ? { ...chat, title: detailsPayload.chat.title }
+                    : chat,
+                ),
+              );
               setMessages(detailsPayload.chat.messages);
               setDocumentText(detailsPayload.chat.currentDocument || "");
               setStateJson(detailsPayload.chat.stateJson || null);
