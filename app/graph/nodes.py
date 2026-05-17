@@ -28,16 +28,14 @@ from pydantic import BaseModel, Field, model_validator
 from app.config import get_settings
 from app.formatting import assemble_document_from_sections
 from app.graph import prompts
-from app.graph.state import SRSState, IngestionSummary, OutlineItem, ClarificationQuestion
+from app.graph.state import SRSState, IngestionSummary, ClarificationQuestion
 from app.rag.vectorstore import retrieve
 
 logger = logging.getLogger(__name__)
 
 settings = get_settings()
 
-OUTLINE_APPROVE_COMMAND = "[[approve_outline]]"
-FINALIZE_COMMAND = "[[finalize_srs]]"
-REQUEST_REVIEW_EDIT_COMMAND = "[[request_review_edit]]"
+
 
 
 def _latest_human_message(state: SRSState) -> HumanMessage | None:
@@ -223,22 +221,6 @@ class QuestionPlanModel(BaseModel):
 class ElicitationQuestionListModel(BaseModel):
     """List of elicitation questions for a group."""
     questions: list[ClarificationQuestionModel] = Field(..., description="Questions for this group")
-
-
-class OutlineItemModel(BaseModel):
-    """A proposed SRS outline section."""
-    section_id: str = Field(..., description="Section identifier (e.g., 1, 2.1, 3.2)")
-    title: str = Field(..., description="Section title")
-    description: str = Field(..., description="What goes in this section")
-    included: bool = Field(default=True, description="Should this section be included?")
-    rationale: str = Field(..., description="What the main points of this section are and why they're needed")
-    subsection_suggestions: list[str] = Field(default_factory=list, description="Suggested subsections")
-    user_notes: str = Field(default="", description="User feedback")
-
-
-class OutlineListModel(BaseModel):
-    """List of outline items."""
-    outline_items: list[OutlineItemModel] = Field(..., description="All outline sections")
 
 
 class SubsectionContent(BaseModel):
@@ -631,7 +613,7 @@ async def classify_and_store_answers(state: SRSState) -> dict:
     if group_index < 3:
         confirmation += " Let me continue with the next question..."
     else:
-        confirmation += " Now let me generate an outline for your SRS."
+        confirmation += " Now drafting your SRS sections..."
 
     new_messages = state.get("chat_history", []) + [AIMessage(content=confirmation)]
 
@@ -646,99 +628,8 @@ async def classify_and_store_answers(state: SRSState) -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-async def generate_outline(state: SRSState) -> dict:
-    """
-    Generate IEEE 830 outline from ingestion and elicitation data.
-    Uses structured output to ensure OutlineListModel is returned.
-    """
-    ingestion = state.get("ingestion_summary", {})
-    elicitation = state.get("elicitation_answers", {})
-
-    logger.info("Generating SRS outline")
-
-    system_prompt = prompts.OUTLINE_GENERATOR_SYSTEM.format(
-        user_context="Generating outline for project",
-        ingestion_summary=json.dumps(ingestion, indent=2),
-        elicitation_answers=json.dumps(elicitation, indent=2),
-    )
-
-    response = await _llm_invoke_structured(
-        system_prompt=system_prompt,
-        output_model=OutlineListModel,  # Outline can include full IEEE 830 structure
-    )
-
-    outline_data = response.outline_items
-
-    confirmation = (
-        "**✓ Proposed SRS Outline Generated**\n\n"
-        "Please review the outline in the right panel. You can:\n"
-        "- Ask me to include/exclude any section\n"
-        "- Request changes to rationales\n"
-        "- Suggest subsection adjustments\n\n"
-        "When ready, use the Approve outline button to start drafting."
-    )
-
-    new_messages = state.get("chat_history", []) + [AIMessage(content=confirmation)]
-
-    # Convert models to dicts for state storage
-    outline_items_dicts = [item.model_dump(mode="json") for item in outline_data]
-
-    return {
-        "outline_items": outline_items_dicts,
-        "chat_history": new_messages,
-    }
-
-
-async def wait_for_outline_approval(state: SRSState) -> dict:
-    """
-    Interrupt node: Wait for user to approve or modify outline.
-    """
-    outline_items = state.get("outline_items", [])
-    human_answer = interrupt(
-        {
-            "type": "outline_review",
-            "prompt": "Review the outline and use the Approve outline button when ready.",
-            "outline": outline_items,
-        }
-    )
-
-    if isinstance(human_answer, dict):
-        user_feedback = _normalize_message_text(str(human_answer.get("message", "")))
-    else:
-        user_feedback = _normalize_message_text(str(human_answer or ""))
-
-    # Check if user approved
-    if _is_control_command(user_feedback, OUTLINE_APPROVE_COMMAND) or any(
-        keyword in user_feedback
-        for keyword in ["looks good", "approved", "proceed", "ready", "draft", "okay"]
-    ):
-        logger.info("Outline approved by user")
-        confirmation = "✓ Outline approved. I am now drafting your SRS sections."
-        new_messages = state.get("chat_history", []) + [
-            HumanMessage(content=str(human_answer.get("message", "")) if isinstance(human_answer, dict) else str(human_answer or "")),
-            AIMessage(content=confirmation),
-        ]
-        return {
-            "outline_approved": True,
-            "chat_history": new_messages,
-        }
-    else:
-        # User wants modifications; acknowledge and re-interrupt
-        logger.info("Outline changes requested; re-interrupting")
-        acknowledgment = (
-            "I've noted your feedback. Update the outline details in chat, then click Approve outline "
-            "when you are ready to move to drafting."
-        )
-        new_messages = state.get("chat_history", []) + [
-            HumanMessage(content=str(human_answer.get("message", "")) if isinstance(human_answer, dict) else str(human_answer or "")),
-            AIMessage(content=acknowledgment),
-        ]
-
-        return {"outline_approved": False, "chat_history": new_messages}
-
-
 # ─────────────────────────────────────────────────────────────────────────────
-# Phase 4: Drafting
+# Phase 3: Drafting
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -795,94 +686,23 @@ async def draft_from_approved_outline(state: SRSState) -> dict:
 
     logger.info(f"Completed drafting all sections with structured subsections")
 
+    draft_message = (
+        "**✓ SRS Draft Complete**\n\n"
+        "The draft has been generated. Check the **SRS Draft** section on the right to review it."
+    )
+
+    new_messages = state.get("chat_history", []) + [AIMessage(content=draft_message)]
+
     return {
         "sections": sections,
         "section_structures": section_structures,
-        "current_phase": "review_refine",
-    }
-
-
-async def present_draft_for_review(state: SRSState) -> dict:
-    """
-    Format completed sections into a readable SRS document and present for review.
-    """
-    sections = state.get("sections", {})
-
-    # Assemble document
-    document = ""
-    for key in ["s1", "s2", "s3_functional", "s3_external", "s3_nfr", "s4"]:
-        if key in sections:
-            document += sections[key] + "\n\n"
-
-    # Emit as message
-    review_message = (
-        "**✓ SRS Draft Complete!**\n\n" + document + "\n\n"
-        "Please review the draft. You can:\n"
-        "- Request section regeneration (e.g., 'Regenerate section 3.1')\n"
-        "- Request inline edits (e.g., 'In section 1.2, change X to Y')\n"
-        "- Ask clarifying questions\n\n"
-        "When satisfied, use the Finalize button to complete the document."
-    )
-
-    new_messages = state.get("chat_history", []) + [AIMessage(content=review_message)]
-
-    logger.info("Draft presented for review; awaiting feedback")
-
-    return {
-        "chat_history": new_messages,
-    }
-
-
-async def process_review_feedback(state: SRSState) -> dict:
-    """
-    Parse user feedback and route to regeneration or finalization.
-    """
-    sections = state.get("sections", {})
-    human_answer = interrupt(
-        {
-            "type": "draft_review",
-            "prompt": "Review the draft and use the Finalize document button when ready.",
-            "sections": sections,
-        }
-    )
-
-    if isinstance(human_answer, dict):
-        user_feedback = _normalize_message_text(str(human_answer.get("message", "")))
-    else:
-        user_feedback = _normalize_message_text(str(human_answer or ""))
-
-    # Check if user wants to finalize
-    if _is_control_command(user_feedback, FINALIZE_COMMAND) or any(
-        keyword in user_feedback for keyword in ["finalize", "done", "looks good", "ready", "complete"]
-    ):
-        logger.info("User approved final draft; proceeding to finalization")
-        return {
-            "revision_targets": [],
-        }
-
-    # Check if regeneration requested
-    if _is_control_command(user_feedback, REQUEST_REVIEW_EDIT_COMMAND) or any(
-        word in user_feedback for word in ["regenerate", "rewrite", "redo"]
-    ):
-        logger.info("Regeneration requested")
-        return {
-            "revision_targets": ["s1"],  # Placeholder; would parse section numbers
-        }
-
-    # Otherwise, acknowledge and re-interrupt
-    acknowledgment = "I'll make those changes. One moment..."
-    new_messages = state.get("chat_history", []) + [
-        HumanMessage(content=str(human_answer.get("message", "")) if isinstance(human_answer, dict) else str(human_answer or "")),
-        AIMessage(content=acknowledgment),
-    ]
-
-    return {
+        "current_phase": "drafting",
         "chat_history": new_messages,
     }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Phase 4.5: Mermaid Diagram Generation
+# Phase 4: Mermaid Diagram Generation
 # ─────────────────────────────────────────────────────────────────────────────
 
 

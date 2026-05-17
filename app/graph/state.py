@@ -1,12 +1,11 @@
 """
-LangGraph state schema for the 5-phase SRS generator workflow.
+LangGraph state schema for the SRS generator workflow.
 
 Phases:
 1. Ingestion: Parse informal input, extract domain/actors/platform needs
 2. Elicitation: Interactive Q&A with 4 grouped batches (roles, boundaries, NFRs, edge cases)
-3. Outline Review: Generate IEEE 830 outline, user approval/modification
-4. Drafting: Synthesize into formal SRS sections via parallel drafters
-5. Review & Refine: User edits (inline or regeneration), finalize, export
+3. Drafting: Synthesize into formal SRS sections via parallel drafters
+4. Diagram generation & finalization
 
 All nodes receive the full ``SRSState`` dict and return a partial update.
 LangGraph merges the partial update back using the annotated reducers.
@@ -98,17 +97,6 @@ class ClarificationQuestion(TypedDict, total=False):
     rationale: str
 
 
-class OutlineItem(TypedDict, total=False):
-    """An outline item representing a proposed SRS section."""
-    section_id: str  # e.g., "1", "2.1", "3.2"
-    title: str
-    description: str
-    included: bool  # Toggle: should this section be included in final SRS?
-    rationale: str  # Why include/exclude this section
-    subsection_suggestions: list[str]
-    user_notes: str  # User feedback/modifications
-
-
 class Requirement(TypedDict, total=False):
     """A single atomic requirement extracted from user input."""
     id: str  # e.g., "F-001", "SE-003"
@@ -134,10 +122,6 @@ class SRSState(TypedDict):
         pending_group_index: Current elicitation group index (0-3, or 4 = all complete)
         elicitation_answers: Accumulated answers from user across all 4 Q&A groups
         
-    Outline:
-        outline_items: Proposed IEEE 830 outline sections with include/exclude toggles
-        outline_approved: Boolean gate; False blocks drafting, True allows it
-        
     Drafting & Sections:
         sections: Keyed Markdown strings for each SRS section
                  Keys: "s1", "s2", "s3_functional", "s3_external", "s3_nfr", "s4"
@@ -158,7 +142,7 @@ class SRSState(TypedDict):
     # ────────────────────────────────────────────────────────────────────────
     # Phase tracking
     # ────────────────────────────────────────────────────────────────────────
-    current_phase: str  # "ingestion" | "elicitation" | "outline_review" | "drafting" | "review_refine" | "complete"
+    current_phase: str  # "ingestion" | "elicitation" | "drafting" | "complete"
 
     # ────────────────────────────────────────────────────────────────────────
     # Ingestion & Elicitation
@@ -168,12 +152,6 @@ class SRSState(TypedDict):
     elicitation_answers: Annotated[dict[str, Any], merge_dicts]  # group_0, group_1, group_2, group_3 answers
     elicitation_question_plan: Annotated[list[str], merge_lists]  # Question topics for current group
     elicitation_question_index: int  # Current question number within group
-
-    # ────────────────────────────────────────────────────────────────────────
-    # Outline
-    # ────────────────────────────────────────────────────────────────────────
-    outline_items: Annotated[list[OutlineItem], merge_lists]
-    outline_approved: bool  # Gate: prevents drafting until True
 
     # ────────────────────────────────────────────────────────────────────────
     # Sections & Drafts

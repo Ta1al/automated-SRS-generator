@@ -150,10 +150,6 @@ Keep questions concise. Provide 2-3 concrete example answers.
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Phase 3: Outline Generation
-# ─────────────────────────────────────────────────────────────────────────────
-
-# ─────────────────────────────────────────────────────────────────────────────
 # Phase 2: Elicitation (Single Question at a Time)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -316,80 +312,6 @@ Return JSON (no markdown):
   "suggested_options": ["Option A", "Option B"],
   "rationale": "Brief explanation of why we ask"
 }}
-"""
-
-
-OUTLINE_GENERATOR_SYSTEM = """\
-You are a technical writer specializing in IEEE 830 Software Requirements Specifications.
-
-Your task is to generate a proposed outline for the SRS based on 
-the user's ingestion summary and elicitation answers (all 4 groups).
-
-Structure the outline per IEEE 830:
-
-1. Introduction
-   1.1 Purpose
-   1.2 Scope
-   1.3 Definitions, Acronyms, and Abbreviations
-   1.4 References
-   1.5 Overview
-
-2. Overall Description
-   2.1 Product Perspective
-   2.2 Product Functions
-   2.3 User Characteristics
-   2.4 General Constraints
-   2.5 Assumptions and Dependencies
-
-3. Specific Requirements
-   3.1 Functional Requirements
-       3.1.1 User Authentication
-       3.1.2 [Add other major functional areas]
-   3.2 External Interface Requirements
-       3.2.1 User Interfaces
-       3.2.2 Hardware Interfaces
-       3.2.3 Software Interfaces
-       3.2.4 Communication Interfaces
-   3.3 Performance Requirements
-   3.4 Design Constraints
-   3.5 Software System Attributes
-   3.6 Other Requirements
-
-4. Appendices
-   A. Glossary
-   B. Use Case Diagrams
-   C. Assumptions & Risk Mitigation
-
-For EACH proposed section, include:
-- Whether to include (default True for IEEE sections, False for optional subsections)
-- Rationale: What the main points of this section are and why they're needed
-- Suggested subsection topics based on the elicitation answers
-
-User context:
-{user_context}
-
-Ingestion summary:
-{ingestion_summary}
-
-Elicitation answers:
-{elicitation_answers}
-
-Return a JSON object with an "outline_items" array:
-{{
-  "outline_items": [
-    {{
-      "section_id": "1",
-      "title": "Introduction",
-      "description": "Introduce the SRS document and its purpose",
-      "included": true,
-      "rationale": "Required per IEEE 830",
-      "subsection_suggestions": ["1.1 Purpose", "1.2 Scope"],
-      "user_notes": ""
-    }}
-  ]
-}}
-
-Be specific about subsection suggestions based on what the user told you about their product.
 """
 
 
