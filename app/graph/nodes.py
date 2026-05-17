@@ -17,12 +17,13 @@ import asyncio
 import json
 import logging
 from pathlib import Path
+import re
 from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from langgraph.types import interrupt
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.config import get_settings
 from app.graph import prompts
@@ -51,6 +52,127 @@ def _normalize_message_text(value: str) -> str:
 
 def _is_control_command(message_text: str, command: str) -> bool:
     return _normalize_message_text(message_text) == command
+
+
+def _assemble_document_from_sections(sections: dict[str, str] | None) -> str:
+    ordered_keys = ["s1", "s2", "s3_functional", "s3_external", "s3_nfr", "s4"]
+    parts = [str((sections or {}).get(key, "")).strip() for key in ordered_keys if str((sections or {}).get(key, "")).strip()]
+    return "\n\n".join(parts).strip()
+
+
+def _fallback_plantuml_diagrams(ingestion: dict[str, Any]) -> dict[str, str]:
+    def _sanitize_identifier(value: Any, fallback: str) -> str:
+        text = re.sub(r"[^A-Za-z0-9_]", "_", str(value or "")).strip("_")
+        return text or fallback
+
+    def _first_text(values: list[Any], fallback: str) -> str:
+        for value in values:
+            text = str(value or "").strip()
+            if text:
+                return text
+        return fallback
+
+    project_title = str(ingestion.get("project_title", "System")).strip() or "System"
+    actors = [str(actor).strip() for actor in (ingestion.get("suggested_actors", []) or ingestion.get("target_users", []) or ["User"]) if str(actor).strip()]
+    flows = [flow for flow in (ingestion.get("core_flows", []) or []) if isinstance(flow, dict)]
+    components = [str(component).strip() for component in (ingestion.get("components", []) or []) if str(component).strip()]
+    entities = [str(entity).strip() for entity in (ingestion.get("data_entities", []) or []) if str(entity).strip()]
+    interfaces = [str(interface).strip() for interface in (ingestion.get("external_interfaces", []) or []) if str(interface).strip()]
+    primary_flow_name = _first_text([flow.get("name") for flow in flows], "Primary Workflow")
+    primary_flow_goal = _first_text([flow.get("goal") for flow in flows], "Process the user's request")
+    primary_actor = actors[0] if actors else "User"
+    support_actor = actors[1] if len(actors) > 1 else "Admin"
+    ui_component = components[0] if components else "User Interface"
+    service_component = components[1] if len(components) > 1 else "Application Service"
+    data_component = components[2] if len(components) > 2 else "Data Store"
+
+    actor_lines = "\n".join(
+        f'actor "{actor}" as {_sanitize_identifier(actor, f"Actor{i + 1}")}'
+        for i, actor in enumerate(actors[:4])
+    )
+    usecase_lines = "\n".join(
+        f'  usecase "{str(flow.get("name", f"Use Case {i + 1}")).strip()}" as UC{i + 1}'
+        for i, flow in enumerate(flows[:6])
+    )
+    relation_lines = [
+        f'  {_sanitize_identifier(primary_actor, "Actor1")} --> UC1',
+    ]
+    if len(flows) > 1 and len(actors) > 1:
+        relation_lines.append(f'  {_sanitize_identifier(support_actor, "Actor2")} --> UC2')
+    if len(flows) > 2:
+        relation_lines.append(f'  UC1 ..> UC3 : includes')
+    if len(flows) > 3:
+        relation_lines.append(f'  UC2 ..> UC4 : extends')
+    usecase_diagram = (
+        "@startuml\n"
+        "left to right direction\n"
+        f'title {project_title} Use Case Overview\n'
+        f'{actor_lines}\n'
+        f'\nrectangle "{project_title}" {{\n'
+        f'{usecase_lines}\n'
+        "}\n"
+        f'{"\n".join(relation_lines)}\n'
+        "@enduml"
+    )
+
+    component_interfaces = "\n".join(
+        f'component "{name}" as {_sanitize_identifier(name, f"Component{i + 1}")}'
+        for i, name in enumerate((components[:3] or [ui_component, service_component, data_component]))
+    )
+    external_nodes = "\n".join(
+        f'cloud "{name}" as {_sanitize_identifier(name, f"External{i + 1}")}'
+        for i, name in enumerate(interfaces[:3])
+    )
+    component_diagram = (
+        "@startuml\n"
+        f'title {project_title} Context and Components\n'
+        f'{component_interfaces}\n'
+        f'{external_nodes}\n'
+        f'{_sanitize_identifier(ui_component, "Component1")} --> {_sanitize_identifier(service_component, "Component2")}\n'
+        f'{_sanitize_identifier(service_component, "Component2")} --> {_sanitize_identifier(data_component, "Component3")}\n'
+        + (f'{_sanitize_identifier(service_component, "Component2")} --> {_sanitize_identifier(interfaces[0], "External1")}\n' if interfaces else "")
+        + "@enduml"
+    )
+
+    sequence_diagram = (
+        "@startuml\n"
+        f'title {project_title} - {primary_flow_name}\n'
+        f'actor "{primary_actor}" as {_sanitize_identifier(primary_actor, "Actor1")}\n'
+        f'participant "{ui_component}" as UI\n'
+        f'participant "{service_component}" as APP\n'
+        f'participant "{data_component}" as DB\n'
+        + (f'participant "{interfaces[0]}" as EXT\n' if interfaces else "")
+        + f'{_sanitize_identifier(primary_actor, "Actor1")} -> UI: Start {primary_flow_name.lower()}\n'
+        f'UI -> APP: Submit request\n'
+        f'APP -> DB: Persist / validate data\n'
+        + (f'APP -> EXT: Call external service\n' if interfaces else "")
+        + f'APP --> UI: Confirmation\n'
+        f'UI --> {_sanitize_identifier(primary_actor, "Actor1")} : Show result\n'
+        "@enduml"
+    )
+
+    activity_diagram = (
+        "@startuml\n"
+        f'title {project_title} Workflow\n'
+        "start\n"
+        f':{primary_flow_name};\n'
+        f':{primary_flow_goal};\n'
+        "if (Valid input?) then (yes)\n"
+        "  :Process request;\n"
+        "  :Store outcome;\n"
+        "else (no)\n"
+        "  :Return validation feedback;\n"
+        "endif\n"
+        "stop\n"
+        "@enduml"
+    )
+
+    return {
+        "usecase": usecase_diagram,
+        "component": component_diagram,
+        "sequence": sequence_diagram,
+        "activity": activity_diagram,
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -96,6 +218,20 @@ class ClarificationQuestionModel(BaseModel):
 class QuestionPlanModel(BaseModel):
     """Plan: list of question topics for a group."""
     topics: list[str] = Field(..., description="2-3 question topics")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_singular_topic(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "topics" not in data and "topic" in data:
+                coerced = dict(data)
+                topic_value = coerced.get("topic")
+                if isinstance(topic_value, list):
+                    coerced["topics"] = topic_value
+                elif isinstance(topic_value, str) and topic_value.strip():
+                    coerced["topics"] = [topic_value.strip()]
+                return coerced
+        return data
 
 
 class ElicitationQuestionListModel(BaseModel):
@@ -377,6 +513,17 @@ async def generate_single_elicitation_question(state: SRSState) -> dict:
     question_plan = state.get("elicitation_question_plan", [])
     ingestion = state.get("ingestion_summary", {})
 
+    sections = state.get("sections", {})
+    if isinstance(sections, dict) and len([key for key in ["s1", "s2", "s3_functional", "s3_external", "s3_nfr", "s4"] if sections.get(key)]) >= 6:
+        final_document = _assemble_document_from_sections(sections)
+        return {
+            "current_phase": "complete",
+            "is_complete": True,
+            "final_document": final_document,
+            "project_title": str(ingestion.get("project_title", "")).strip(),
+            "plantumul_diagrams": _fallback_plantuml_diagrams(ingestion),
+        }
+
     if question_index >= len(question_plan):
         # All questions in this group asked, move to next group or outline
         next_group_index = group_index + 1
@@ -636,6 +783,44 @@ async def draft_from_approved_outline(state: SRSState) -> dict:
 
     sections = {key: content for key, content in results}
 
+    # Normalize section headings: strip numeric/Section prefixes while preserving IDs like [F-123]
+    def _normalize_title_text(title: str) -> str:
+        t = title or ""
+        t = t.strip()
+        # Remove leading 'Section' or numeric prefixes like '3.1', 'Section 3.1 -', etc.
+        t = re.sub(r'^(Section\s+)?[0-9]+(?:\.[0-9]+)*\s*[-:\.]?\s*', '', t, flags=re.I)
+        # Collapse whitespace
+        t = " ".join(t.split())
+        return t
+
+    def _normalize_section_content(content: str) -> str:
+        if not content:
+            return content
+        lines = content.splitlines()
+        out_lines: list[str] = []
+        for line in lines:
+            # Normalize markdown headings: '# Title'
+            m = re.match(r'^(#{1,6}\s*)(.+)$', line)
+            if m:
+                prefix = m.group(1)
+                title = m.group(2)
+                out_lines.append(f"{prefix}{_normalize_title_text(title)}")
+                continue
+
+            # Handle plain numeric heading lines like '3.3 Performance Requirements'
+            m2 = re.match(r'^\s*([0-9]+(?:\.[0-9]+)*)\s*[-:\.]?\s*(.+)$', line)
+            if m2 and len(line.strip()) < 120 and (line.strip().count(' ') < 10):
+                # Convert to a level-2 markdown heading with cleaned title
+                title = m2.group(2)
+                out_lines.append(f"## {_normalize_title_text(title)}")
+                continue
+
+            out_lines.append(line)
+
+        return "\n".join(out_lines)
+
+    sections = {k: _normalize_section_content(v) for k, v in sections.items()}
+
     logger.info(f"Completed drafting all sections")
 
     return {
@@ -736,12 +921,19 @@ async def finalize_and_export(state: SRSState) -> dict:
     Assemble final SRS document and prepare for export.
     """
     sections = state.get("sections", {})
+    ingestion = state.get("ingestion_summary", {})
 
     # Assemble final document
-    final_document = ""
-    for key in ["s1", "s2", "s3_functional", "s3_external", "s3_nfr", "s4"]:
-        if key in sections:
-            final_document += sections[key] + "\n\n"
+    final_document = _assemble_document_from_sections(sections)
+
+    try:
+        from app.api.routes import _append_use_case_tables_to_document, _append_diagrams_to_document, _format_srs_document
+
+        final_document = _append_use_case_tables_to_document(final_document, state)
+        final_document = _append_diagrams_to_document(final_document, state)
+        final_document = _format_srs_document(final_document, state)
+    except Exception:
+        final_document = final_document.strip()
 
     logger.info("SRS finalized; ready for export")
 
@@ -757,7 +949,15 @@ async def finalize_and_export(state: SRSState) -> dict:
 
     new_messages = state.get("chat_history", []) + [AIMessage(content=export_message)]
 
+    project_title = str(state.get("project_title", "")).strip()
+    if not project_title:
+        project_title = str(state.get("ingestion_summary", {}).get("project_title", "")).strip()
+
     return {
         "current_phase": "complete",
+        "is_complete": True,
+        "final_document": final_document.strip(),
+        "project_title": project_title,
+        "plantumul_diagrams": state.get("plantumul_diagrams", {}) or _fallback_plantuml_diagrams(ingestion),
         "chat_history": new_messages,
     }

@@ -640,7 +640,7 @@ Return only the revised Markdown content for the section.
 # ─────────────────────────────────────────────────────────────────────────────
 
 USECASE_DIAGRAM_SYSTEM = """\
-You are a UML expert generating a PlantUML use case diagram.
+You are a UML expert generating a small PlantUML diagram set.
 
 From the user's product description, extract actors and use cases:
 
@@ -650,12 +650,13 @@ Ingestion summary:
 Elicitation answers (especially Roles & Flows):
 {elicitation_answers}
 
-Your task: Generate a PlantUML use case diagram that shows:
-- Primary actors (users/systems interacting with the software)
-- Major use cases (primary user goals)
-- Relationships (associations, includes, extends where relevant)
+Your task: Generate up to 4 PlantUML diagrams that show:
+- A use case view with primary actors and major user goals
+- A component/context view with the main modules and external systems
+- A sequence view for the primary workflow
+- An activity view for the main request lifecycle
 
-PlantUML format:
+PlantUML format examples:
 @startuml
 actor "Actor Name" as actor1
 usecase UC1 as "Use Case Name"
@@ -667,10 +668,10 @@ actor1 --> UC2
 UC1 <|-- UC3 : extends
 @enduml
 
-Generate a diagram that is:
-- Clear and readable (not too crowded, max 8-12 use cases, 3-5 actors)
-- Based on the actual roles and workflows from the user's input
+Generate diagrams that are:
+- Clear and readable, each focused on one concern
+- Based on the actual roles, workflows, components, and integrations from the user's input
 - Properly formatted PlantUML syntax
 
-Return ONLY the PlantUML code (from @startuml to @enduml), no explanations.
+Return ONLY PlantUML code blocks separated by blank lines, no explanations.
 """
