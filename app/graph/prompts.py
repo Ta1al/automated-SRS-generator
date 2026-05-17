@@ -245,7 +245,7 @@ Return JSON (no markdown):
   "category": "User Roles & Flows",
   "group": 0,
   "question": "...",
-  "suggested_options": ["Option A", "Option B"],
+  "suggested_options": ["Option A", "Option B", ...],
   "rationale": "Brief explanation of why we ask"
 }}
 """
