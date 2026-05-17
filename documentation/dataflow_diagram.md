@@ -26,7 +26,7 @@ graph TD
 
     P2a -->|relevant| P3["3.0 Backend session interaction SSE"]
     P3 --> P3a{Resume or fresh?}
-    P3a -->|Fresh invoke| Graph["4.0 LangGraph pipeline"]
+    P3a -->|Fresh invoke| Graph["4.0 LangGraph 5-phase pipeline"]
     P3a -->|Resume after interrupt| Graph
 
     Graph --> VectorDB[(Chroma Vector Store)]
@@ -39,10 +39,12 @@ graph TD
 
     P6 --> P7["7.0 Prepare document export"]
     P7 --> P8{Export Format?}
-    P8 -->|Markdown| ReturnMarkdown["Return Markdown JSON"]
+    P8 -->|Markdown JSON| ReturnJSON["Return Markdown JSON"]
+    P8 -->|Markdown File| ReturnMD["Return Markdown file"]
     P8 -->|DOCX| DocxConvert["Convert to DOCX + render diagrams"]
     DocxConvert --> ReturnDocx["Return DOCX binary"]
-    ReturnMarkdown --> P9["8.0 Present to user"]
+    ReturnJSON --> P9["8.0 Present to user"]
+    ReturnMD --> P9
     ReturnDocx --> P9
     P9 --> User
 ```
@@ -68,35 +70,37 @@ graph TD
         Guardrail["Guardrail Classifier LLM"]
         Sessions["/api/sessions - create/delete"]
         Interact["/api/sessions/{id}/interact - SSE stream"]
-        DocState["/api/sessions/{id}/document - Markdown"]
+        DocState["/api/sessions/{id}/document - Markdown JSON"]
         DocxExport["/api/sessions/{id}/document.docx - DOCX"]
+        MdExport["/api/sessions/{id}/document.md - Markdown file"]
         StateDebug["/api/sessions/{id}/state - debug"]
+        DocumentAssembler["Document Assembly"]
     end
 
-    subgraph GraphExec["LangGraph Execution"]
-        RAG["retrieve_rag_context"]
-        Elicit["elicit_requirements"]
-        Classify["classify_requirements"]
-        DraftS1["draft_section_1"]
-        DraftS2["draft_section_2"]
-        DraftS3FR["draft_section_3_fr"]
-        DraftS3NFR["draft_section_3_nfr"]
-        DraftS3IF["draft_section_3_iface"]
-        DraftS4["draft_section_4"]
-        Evaluate["evaluate_completeness"]
-        QAReview["qa_review"]
-        AskClarify["ask_clarifying_questions - interrupt"]
-        GenMermaid["generate_mermaid - asyncio.gather"]
-        ValidateMermaid["validate_mermaid"]
-        CorrectMermaid["correct_mermaid"]
-        Revise["revise_selected_section"]
-        Finalize["finalize_document"]
+    subgraph GraphExec["LangGraph 5-Phase Pipeline"]
+        Ingest["Phase 1: ingest_and_map_domain"]
+        Plan["Phase 2: generate_elicitation_plan"]
+        AskQ["Phase 2: generate_single_elicitation_question"]
+        Store["Phase 2: classify_and_store_answers"]
+        Outline["Phase 3: generate_outline"]
+        Approve["Phase 3: wait_for_outline_approval"]
+        Draft["Phase 4: draft_from_approved_outline"]
+        S1["draft_section_1"]
+        S2["draft_section_2"]
+        S3FR["draft_s_3_functional"]
+        S3IF["draft_s_3_external"]
+        S3NFR["draft_s_3_nfr"]
+        S4["draft_s_4"]
+        Present["Phase 5: present_draft_for_review"]
+        Review["Phase 5: process_review_feedback"]
+        Finalize["finalize_and_export"]
     end
 
     subgraph DocxProc["DOCX Processing"]
         MarkdownParse["Parse headings, lists, tables, code blocks"]
         BoldItalic["Apply bold/italic/code inline styles"]
-        DiagramRender["Render Mermaid to PNG via mmdc/mermaid.ink"]
+        MermaidRender["Render Mermaid to PNG via mmdc/mermaid.ink"]
+        PlantUMLRender["Render PlantUML to PNG via plantuml CLI/server"]
         EmbedImages["Embed PNG images at 6.4in width"]
         SetMetadata["Set title/author/comments from env"]
     end
@@ -107,6 +111,7 @@ graph TD
         Checkpoint[(PostgreSQL Checkpointer)]
     end
 
+    %% Frontend flows
     UI --> FEApi
     FEApi --> PrismaDB
     FEApi --> Sessions
@@ -115,63 +120,103 @@ graph TD
     FEApi --> RunTracker
     RunTracker --> RunTable
     RunTable --> TimingTable
-    
-    ExportProxy --> DocxExport
 
+    ExportProxy --> DocxExport
+    ExportProxy --> MdExport
+
+    %% Backend routing
     Interact --> Guardrail
     Guardrail --> OpenRouter
-    Interact --> RAG
-    RAG --> Elicit --> Classify
-    Classify --> DraftS1
-    Classify --> DraftS2
-    Classify --> DraftS3FR
-    Classify --> DraftS3NFR
-    Classify --> DraftS3IF
-    DraftS1 --> DraftS4
-    DraftS2 --> DraftS4
-    DraftS3FR --> DraftS4
-    DraftS3NFR --> DraftS4
-    DraftS3IF --> DraftS4
-    DraftS4 --> Evaluate
-    Evaluate --> AskClarify
-    AskClarify --> Classify
-    Evaluate --> QAReview
-    QAReview --> AskClarify
-    QAReview --> GenMermaid
-    QAReview --> Finalize
-    GenMermaid --> ValidateMermaid
-    ValidateMermaid --> CorrectMermaid
-    CorrectMermaid --> ValidateMermaid
-    ValidateMermaid --> Finalize
 
-    RAG --> Chroma
-    Elicit --> OpenRouter
-    Classify --> OpenRouter
-    DraftS1 --> OpenRouter
-    DraftS2 --> OpenRouter
-    DraftS3FR --> OpenRouter
-    DraftS3NFR --> OpenRouter
-    DraftS3IF --> OpenRouter
-    DraftS4 --> OpenRouter
-    Evaluate --> OpenRouter
-    QAReview --> OpenRouter
-    GenMermaid --> OpenRouter
-    CorrectMermaid --> OpenRouter
-    Revise --> OpenRouter
+    %% Phase 1
+    Interact --> Ingest
+
+    %% Phase 2
+    Ingest --> Plan
+    Plan --> AskQ
+    AskQ --> Store
+    Store -->|more questions| AskQ
+    Store -->|next group| Plan
+    Store -->|all done| Outline
+
+    %% Phase 3
+    Outline --> Approve
+    Approve -->|not approved| Approve
+    Approve -->|approved| Draft
+
+    %% Phase 4
+    Draft --> asyncio_gather["asyncio.gather"]
+    asyncio_gather --> S1
+    asyncio_gather --> S2
+    asyncio_gather --> S3FR
+    asyncio_gather --> S3IF
+    asyncio_gather --> S3NFR
+    asyncio_gather --> S4
+
+    %% Phase 5
+    S1 --> Present
+    S2 --> Present
+    S3FR --> Present
+    S3IF --> Present
+    S3NFR --> Present
+    S4 --> Present
+    Present --> Review
+    Review -->|more edits| Review
+    Review -->|finalize| Finalize
+
+    %% Document assembly
+    Finalize --> DocumentAssembler
+    DocumentAssembler --> Interact
+
+    %% AI/retrieval
+    Ingest --> OpenRouter
+    Plan --> OpenRouter
+    AskQ --> OpenRouter
+    Outline --> OpenRouter
+    S1 --> OpenRouter
+    S2 --> OpenRouter
+    S3FR --> OpenRouter
+    S3IF --> OpenRouter
+    S3NFR --> OpenRouter
+    S4 --> OpenRouter
+    Ingest --> Chroma
     Interact --> Checkpoint
 
-    Finalize --> Interact
+    %% Return data
     Interact --> FEApi
     FEApi --> DocState
+    DocState --> DocumentAssembler
     DocState --> PrismaDB
-    
+
+    %% Export path
     DocxExport --> MarkdownParse
     MarkdownParse --> BoldItalic
-    BoldItalic --> DiagramRender
-    DiagramRender --> EmbedImages
+    BoldItalic --> MermaidRender
+    BoldItalic --> PlantUMLRender
+    MermaidRender --> EmbedImages
+    PlantUMLRender --> EmbedImages
     EmbedImages --> SetMetadata
     SetMetadata --> ExportProxy
-    
+
+    MdExport --> DocumentAssembler
+    MdExport --> ExportProxy
+
     FEApi --> PrismaDB
     FEApi --> UI
 ```
+
+## Data Store Descriptions
+
+| Store | Type | Managed By | Contents |
+|---|---|---|---|
+| PostgreSQL App DB | Relational (Prisma) | Next.js | Users, Chats, Messages, Runs, Timing stats |
+| PostgreSQL Checkpointer | Relational (psycopg3) | LangGraph | Graph checkpoint/state for resumability |
+| ChromaDB | Vector Store | ChromaDB | Seeded regulatory documents (IEEE 830, HIPAA, GDPR, etc.) |
+
+## Key Data Flows
+
+1. **Session Creation** → Backend generates UUID thread_id, returned to frontend
+2. **Message Interaction** → Frontend proxies message to backend SSE endpoint; backend classifies via guardrail, invokes/resumes graph, streams events back
+3. **Graph Execution** → 5-phase pipeline with interrupts; state persisted to PostgreSQL checkpointer
+4. **Document Assembly** → Sections combined, formatted, enriched with use-case tables and diagrams
+5. **Export** → Markdown returned as JSON or file; DOCX generated with formatted text and embedded diagram images

@@ -1,7 +1,6 @@
 # Class Diagram
 
-This diagram shows the main implemented models, state types, and core runtime
-components of the SRS generator system.
+This diagram shows the main implemented models, state types, and core runtime components of the SRS generator system.
 
 ```mermaid
 classDiagram
@@ -56,6 +55,49 @@ classDiagram
         +avgDurationMs: float
     }
 
+    class CoreFlow {
+        +name: string
+        +goal: string
+        +steps: list~string~
+        +success_metric: string
+    }
+
+    class IngestionSummary {
+        +project_title: string
+        +domain: string
+        +project_purpose: string
+        +target_users: list~string~
+        +suggested_actors: list~string~
+        +platform_needs: list~string~
+        +success_criteria: list~string~
+        +architecture_summary: string
+        +components: list~string~
+        +core_flows: list~CoreFlow~
+        +data_entities: list~string~
+        +external_interfaces: list~string~
+        +constraints: list~string~
+        +assumptions: list~string~
+    }
+
+    class ClarificationQuestion {
+        +category: string
+        +group: int
+        +priority: string
+        +question: string
+        +suggested_options: list~string~
+        +rationale: string
+    }
+
+    class OutlineItem {
+        +section_id: string
+        +title: string
+        +description: string
+        +included: bool
+        +rationale: string
+        +subsection_suggestions: list~string~
+        +user_notes: string
+    }
+
     class Requirement {
         +id: string
         +text: string
@@ -63,120 +105,84 @@ classDiagram
         +criteria: string
     }
 
-    class ClarificationQuestion {
+    class IngestionSummaryModel {
+        +project_title: string
+        +domain: string
+        +project_purpose: string
+        +target_users: list~string~
+        +suggested_actors: list~string~
+        +platform_needs: list~string~
+        +success_criteria: list~string~
+        +architecture_summary: string
+        +components: list~string~
+        +core_flows: list~string~
+        +data_entities: list~string~
+        +external_interfaces: list~string~
+        +constraints: list~string~
+        +assumptions: list~string~
+    }
+
+    class ClarificationQuestionModel {
         +category: string
+        +group: int
         +question: string
         +suggested_options: list~string~
         +rationale: string
     }
 
-    class InitialElicitation {
-        +project_title: string
-        +project_purpose: string
-        +key_stakeholders: list~string~
-        +main_features: list~string~
-        +constraints: list~string~
-        +preliminary_glossary: list~GlossaryEntry~
+    class QuestionPlanModel {
+        +topics: list~string~
     }
 
-    class GlossaryEntry {
-        +term: string
-        +definition: string
-    }
-
-    class UseCase {
-        +name: string
-        +actor: string
-        +description: string
-        +trigger: string
-        +precondition: string
-        +basic_steps: list~string~
-    }
-
-    class SystemEnvironment {
-        +description: string
-        +actors: list~string~
-        +external_systems: list~string~
-    }
-
-    class Section1Introduction {
-        +purpose: string
-        +scope: string
-        +glossary: list~GlossaryEntry~
-        +overview: string
-    }
-
-    class Section2OverallDescription {
-        +system_environment: SystemEnvironment
-        +primary_use_cases: list~UseCase~
-        +user_characteristics: string
-        +non_functional_overview: string
-    }
-
-    class FunctionalRequirement {
-        +requirement_id: string
-        +name: string
-        +trigger: string
-        +precondition: string
-        +basic_flow: string
-        +alternative_flows: list~string~
-        +postcondition: string
-        +exception_paths: list~string~
-    }
-
-    class NonFunctionalRequirement {
-        +category: string
-        +requirement: string
-        +rationale: string
-    }
-
-    class Section3Requirements {
-        +external_interfaces: list~string~
-        +functional_requirements: list~FunctionalRequirement~
-        +non_functional_requirements: list~NonFunctionalRequirement~
-    }
-
-    class VerificationEntry {
-        +requirement_id: string
-        +test_case: string
-        +acceptance_criteria: string
-    }
-
-    class Section4Verification {
+    class OutlineItemModel {
+        +section_id: string
         +title: string
         +description: string
-        +verification_entries: list~VerificationEntry~
+        +included: bool
+        +rationale: string
+        +subsection_suggestions: list~string~
+        +user_notes: string
+    }
+
+    class OutlineListModel {
+        +outline_items: list~OutlineItemModel~
+    }
+
+    class SubsectionContent {
+        +number: string
+        +title: string
+        +content: string
+    }
+
+    class DraftSectionModel {
+        +subsections: list~SubsectionContent~
     }
 
     class SRSState {
-        +chat_history: list~BaseMessage~
-        +document_buffer: string
-        +missing_context: list~ClarificationQuestion~
-        +requirements: list~Requirement~
-        +rag_context: string
+        +current_phase: string
+        +ingestion_summary: dict
+        +pending_group_index: int
+        +elicitation_answers: dict
+        +elicitation_question_plan: list~string~
+        +elicitation_question_index: int
+        +outline_items: list~OutlineItem~
+        +outline_approved: bool
         +sections: dict~string, string~
+        +section_structures: dict
+        +plantumul_diagrams: dict~string, string~
         +mermaid_blocks: list~string~
         +mermaid_errors: list~string~
-        +mermaid_correction_attempts: int
-        +generate_diagrams: bool
-        +diagrams_only: bool
-        +revision_mode: bool
-        +revision_target_section_key: string
-        +revision_target_title: string
-        +revision_target_content: string
-        +revision_request: string
-        +is_complete: bool
-        +qa_gaps: list~ClarificationQuestion~
-        +major_decisions_asked: bool
-        +final_document: string
-        +project_title: string
+        +revision_targets: list~string~
+        +chat_history: list~BaseMessage~
+        +requirements: list~Requirement~
+        +rag_context: string
     }
 
     class GraphRuntime {
         +build_graph(checkpointer)
         +astream(...)
         +aget_state(...)
-        +ainvoke(...)
+        +adelete_thread(...)
     }
 
     class FastAPIRoutes {
@@ -185,6 +191,7 @@ classDiagram
         +DELETE /api/sessions/id
         +GET /api/sessions/id/document
         +GET /api/sessions/id/document.docx
+        +GET /api/sessions/id/document.md
         +GET /api/sessions/id/state
         +GET /health
     }
@@ -222,12 +229,15 @@ classDiagram
         -_add_code_block(document, code)
         -_add_table(document, lines)
         -_render_mermaid_png(code): bytes
+        -_render_plantuml_png(code): bytes
         -_add_mermaid_image(document, code)
     }
 
     class DiagramRenderer {
         +render_via_mmdc(mermaid_code): bytes
         +render_via_mermaid_ink(mermaid_code): bytes
+        +render_via_plantuml_local(code): bytes
+        +render_via_plantuml_server(code): bytes
     }
 
     class Settings {
@@ -242,25 +252,20 @@ classDiagram
         +docx_comment: string
     }
 
-    %% Pydantic model relationships for structured LLM output
-    InitialElicitation --> "*" GlossaryEntry : contains
-    Section1Introduction --> "*" GlossaryEntry : contains
-    Section2OverallDescription --> SystemEnvironment : contains
-    Section2OverallDescription --> "*" UseCase : contains
-    Section3Requirements --> "*" FunctionalRequirement : contains
-    Section3Requirements --> "*" NonFunctionalRequirement : contains
-    Section4Verification --> "*" VerificationEntry : contains
-
+    %% Prisma model relationships
     User "1" --> "*" Chat : owns
     Chat "1" --> "*" ChatMessage : contains
     Chat "1" --> "*" ChatRun : tracks
+
+    %% State type composition
     SRSState --> "*" Requirement : contains
     SRSState --> "*" ClarificationQuestion : references
-    SRSState --> InitialElicitation : uses
-    SRSState --> Section1Introduction : uses
-    SRSState --> Section2OverallDescription : uses
-    SRSState --> Section3Requirements : uses
-    SRSState --> Section4Verification : uses
+    SRSState --> "0..1" IngestionSummary : uses
+    SRSState --> "*" OutlineItem : contains
+    SRSState --> IngestionSummaryModel : uses via node
+    SRSState --> ClarificationQuestionModel : uses via node
+
+    %% API composition
     PrismaChatAPI --> User : authenticates
     PrismaChatAPI --> Chat : persists
     PrismaChatAPI --> ChatMessage : writes
@@ -279,52 +284,46 @@ classDiagram
 
 ## Class Descriptions
 
-- **User / Chat / ChatMessage / ChatRun / StageTimingStat** - Persisted Prisma
-  models used by the Next.js frontend. ChatRun tracks graph execution state for
-  the active run. StageTimingStat records average node durations for ETA calculation.
-- **Requirement** - Atomic requirement with a taxonomy-prefixed ID (e.g. `F-001`),
-  descriptive text, classification labels, and a boolean-testable acceptance criterion.
-- **ClarificationQuestion** - Structured follow-up question with category, question
-  text, suggested options, and rationale for asking.
-- **SRSState** - Full typed state passed through every LangGraph node. Uses
-  `add_messages` reducer for `chat_history` and `merge_sections` dict reducer for
-  `sections`. All other fields use simple replacement.
-- **GraphRuntime** - Compiled LangGraph `StateGraph` workflow built by `build_graph()`.
-  Supports `astream()` for SSE streaming and `aget_state()` for state inspection.
-- **FastAPIRoutes** - Backend API router providing session lifecycle, SSE graph
-  interaction, document retrieval, DOCX export, and debug state inspection.
-- **GuardrailClassifier** - Lightweight LLM classifier that screens user messages
-  before graph invocation. Uses a separate, cheaper model with retry logic and timeout.
-- **PrismaChatAPI** - Next.js API routes that authenticate users via JWT, manage
-  chats and messages via Prisma, and proxy graph interactions to the backend.
-- **VectorStore** - ChromaDB-based retrieval over pre-seeded standards/compliance
-  corpus (IEEE 830, HIPAA, GDPR, PCI-DSS, WCAG). Uses all-MiniLM-L6-v2 embeddings.
-- **MermaidValidation** - Two-tier validation: `mmdc` subprocess (primary) with
-  regex-based heuristic fallback. Returns `(valid, error_message)` tuple.
-- **DocxExporter** - Converts Markdown to DOCX with formatted text (bold, italic,
-  code, tables), embedded Mermaid diagram PNGs, and configurable document metadata.
-- **DiagramRenderer** - Renders Mermaid code to PNG via `mmdc` CLI or `mermaid.ink`
-  HTTP API fallback.
-- **Settings** - Pydantic `BaseSettings` class reading `.env` configuration with
-  LRU-cached singleton retrieval via `get_settings()`.
+- **User / Chat / ChatMessage / ChatRun / StageTimingStat** - Persisted Prisma models used by the Next.js frontend. ChatRun tracks graph execution state for the active run. StageTimingStat records EMA of node durations for ETA calculation.
+
+- **IngestionSummary** - TypedDict storing extracted domain mapping from the user's initial product description. Contains project title, domain, actors, core flows, data entities, and constraints.
+
+- **ClarificationQuestion** - TypedDict for structured follow-up questions with category, group index, priority, suggested options, and rationale.
+
+- **OutlineItem** - TypedDict representing a proposed IEEE 830 outline section with include/exclude toggle, rationale, subsection suggestions, and user notes.
+
+- **Requirement** - Atomic requirement with taxonomy-prefixed ID, descriptive text, classification labels, and boolean-testable acceptance criterion.
+
+- **SRSState** - Full typed state passed through every LangGraph node. Uses `merge_sections`, `merge_dicts`, `merge_lists`, and `add_messages` reducers. Tracks phase, elicitation progress, outline approval, section drafts, diagrams, and chat history.
+
+- **GraphRuntime** - Compiled LangGraph `StateGraph` workflow built by `build_graph()`. Supports `astream()` for SSE streaming, `aget_state()` for state inspection, and `adelete_thread()` for session cleanup.
+
+- **FastAPIRoutes** - Backend API router providing session lifecycle, SSE graph interaction, document retrieval (JSON/Markdown/DOCX), and debug state inspection.
+
+- **GuardrailClassifier** - Lightweight LLM classifier that screens user messages before graph invocation. Uses a separate, cheaper model with retry logic and configurable timeout.
+
+- **PrismaChatAPI** - Next.js API routes that authenticate users via JWT, manage chats and messages via Prisma, and proxy graph interactions to the backend.
+
+- **VectorStore** - ChromaDB-based retrieval over pre-seeded standards/compliance corpus (IEEE 830, HIPAA, GDPR, PCI-DSS, WCAG). Uses all-MiniLM-L6-v2 embeddings.
+
+- **MermaidValidation** - Two-tier validation: `mmdc` subprocess (primary) with regex-based heuristic fallback. Returns `(valid, error_message)` tuple.
+
+- **DocxExporter** - Converts Markdown to DOCX with formatted text (bold, italic, code, tables), embedded Mermaid/PlantUML diagram PNGs, and configurable document metadata.
+
+- **DiagramRenderer** - Renders Mermaid code to PNG via `mmdc` CLI or `mermaid.ink` HTTP API; renders PlantUML code via local `plantuml` CLI or `plantuml.com` server.
+
+- **Settings** - Pydantic `BaseSettings` class reading `.env` configuration with LRU-cached singleton retrieval via `get_settings()`.
 
 ## Pydantic Structured Output Models
 
-These models enforce schema validation on LLM-generated content using LangChain's
-`with_structured_output()` method. Each model is used by a corresponding graph node:
+These models enforce schema validation on LLM-generated content using LangChain's `with_structured_output(method="json_mode")`:
 
-- **InitialElicitation** - Used by `elicit_requirements` to extract project metadata
-  (title, purpose, stakeholders, features, constraints, preliminary glossary).
-  Enables structured project bootstrapping from user input.
-- **Section1Introduction** - Used by `draft_section_1` to generate IEEE 830 Section 1
-  with purpose, scope, glossary entries, and overview.
-- **Section2OverallDescription** - Used by `draft_section_2` to produce system context
-  (environment, use cases, user characteristics, non-functional overview).
-- **Section3Requirements** - Used by `draft_section_3_fr`, `draft_section_3_nfr`, and
-  `draft_section_3_iface` to generate functional requirements, non-functional requirements,
-  and external interfaces with structured acceptance criteria and flows.
-- **Section4Verification** - Used by `draft_section_4` to produce a verification matrix
-  mapping requirement IDs to test cases and acceptance criteria.
-- **Nested models** - `GlossaryEntry`, `UseCase`, `SystemEnvironment`, `FunctionalRequirement`,
-  `NonFunctionalRequirement`, and `VerificationEntry` are nested within the above models
-  to provide fine-grained field descriptions for LLM schema generation.
+- **IngestionSummaryModel** - Used by `ingest_and_map_domain` to extract project title, domain, purpose, actors, flows, entities, interfaces, constraints, and assumptions.
+
+- **QuestionPlanModel** - Used by `generate_elicitation_plan` to produce 2-3 question topics for each of the 4 elicitation groups.
+
+- **ClarificationQuestionModel** - Used by `generate_single_elicitation_question` to produce one question with category, group index, suggested options, and rationale.
+
+- **OutlineItemModel / OutlineListModel** - Used by `generate_outline` to produce the full IEEE 830 outline with section IDs, titles, descriptions, and include/exclude toggles.
+
+- **SubsectionContent / DraftSectionModel** - Used by all 6 parallel section drafters. Each subsection has an explicit number, title, and Markdown content string. The model validator ensures proper structure.

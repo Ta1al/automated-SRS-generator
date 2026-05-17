@@ -1,8 +1,6 @@
 # Entity-Relationship Diagram
 
-This diagram reflects the implemented Prisma schema used by the frontend app
-(`frontend/prisma/schema.prisma`). All five models are shown with their
-relationships, primary keys, unique constraints, and foreign keys.
+This diagram reflects the implemented Prisma schema used by the frontend app (`frontend/prisma/schema.prisma`). All five models are shown with their relationships, primary keys, unique constraints, and foreign keys.
 
 ```mermaid
 erDiagram
@@ -75,8 +73,7 @@ erDiagram
 ### CHAT
 - Represents a user conversation tied to a backend LangGraph session.
 - `backendThreadId` (unique) links to the backend's session UUID used for graph checkpointing.
-- Stores the latest generated document (`currentDocument`) and a JSONB snapshot
-  of the LangGraph state (`stateJson`) for the right-panel section preview.
+- Stores the latest generated document (`currentDocument`) and a JSONB snapshot of the LangGraph state (`stateJson`) for the right-panel section preview.
 - One-to-many relationships with CHAT_MESSAGE and CHAT_RUN.
 - Indexed on `(userId, updatedAt)` for efficient chat list queries.
 
@@ -88,13 +85,28 @@ erDiagram
 ### CHAT_RUN
 - Tracks the execution state of a single graph invocation within a chat.
 - Status lifecycle: `RUNNING` → `COMPLETED` | `FAILED` | `NEEDS_INPUT`.
-- Records the currently executing graph node, SSE status events (JSONB),
-  clarification questions, ETA estimate, and any error message.
+- Records the currently executing graph node, SSE status events (JSONB), clarification questions, ETA estimate, and any error message.
 - `revisionTarget` (JSONB) stores metadata when the run is a section revision.
-- Indexed on `(chatId, startedAt DESC)` and `(chatId, status)` for efficient
-  active-run lookups.
+- Indexed on `(chatId, startedAt DESC)` and `(chatId, status)` for efficient active-run lookups.
 
 ### STAGE_TIMING_STAT
-- Singleton-per-node table tracking average execution duration across all runs.
+- Singleton-per-node table tracking average execution duration across all runs (EMA-based).
 - Used by the frontend ETA estimation logic in `chat-runner.ts`.
-- `node` is the primary key (e.g. `"draft_section_1"`, `"generate_mermaid"`).
+- `node` is the primary key (e.g. `"draft_section_1"`, `"ingest_and_map_domain"`).
+
+## Indexes
+
+| Table | Index | Columns | Purpose |
+|---|---|---|---|
+| CHAT | `@@index([userId, updatedAt])` | userId, updatedAt | Fast chat list per user |
+| CHAT_MESSAGE | `@@index([chatId, createdAt])` | chatId, createdAt | Chronological message retrieval |
+| CHAT_RUN | `@@index([chatId, startedAt(sort: Desc)])` | chatId, startedAt DESC | Latest runs first |
+| CHAT_RUN | `@@index([chatId, status])` | chatId, status | Find active runs by chat |
+
+## Relationships
+
+| Parent | Child | Type | Foreign Key | On Delete |
+|---|---|---|---|---|
+| User | Chat | 1:N | userId | Cascade |
+| Chat | ChatMessage | 1:N | chatId | Cascade |
+| Chat | ChatRun | 1:N | chatId | Cascade |
