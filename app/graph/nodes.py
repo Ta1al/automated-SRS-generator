@@ -876,6 +876,17 @@ async def generate_mermaid_diagrams(state: SRSState) -> dict:
 
     logger.info("Generating Mermaid diagrams")
 
+    # Always generate fallback diagrams as the baseline — they are known-valid Mermaid.
+    mermaid_blocks: list[str] = _build_mermaid_diagrams(ingestion)
+    mermaid_errors: list[str] = []
+
+    diagram_type_prefixes = {
+        "usecase": "flowchart TD",
+        "class_diagram": "classDiagram",
+        "er": "erDiagram",
+        "activity": "stateDiagram-v2",
+    }
+
     try:
         response = await _llm_invoke_structured(
             system_prompt=system_prompt,
@@ -885,44 +896,30 @@ async def generate_mermaid_diagrams(state: SRSState) -> dict:
         )
 
         diagram_code = response.model_dump(mode="json")
-        fallback_blocks = _build_mermaid_diagrams(ingestion)
-        mermaid_blocks: list[str] = []
-        mermaid_errors: list[str] = []
-
-        diagram_type_prefixes = {
-            "usecase": "flowchart TD",
-            "class_diagram": "classDiagram",
-            "er": "erDiagram",
-            "activity": "stateDiagram-v2",
-        }
 
         for index, (key, expected_prefix) in enumerate(diagram_type_prefixes.items()):
             code = str(diagram_code.get(key, "")).strip()
             if code.startswith("usecaseDiagram"):
-                # Mermaid has no native usecaseDiagram type; fallback to flowchart.
                 code = ""
             if not code:
-                code = fallback_blocks[index]
-            elif not code.startswith(expected_prefix):
+                continue
+            if not code.startswith(expected_prefix):
                 code = f"{expected_prefix}\n{code}"
 
             is_valid, validation_error = await validate_mermaid_syntax(code)
             if not is_valid:
                 mermaid_errors.append(f"{key}: {validation_error}")
-                code = fallback_blocks[index]
+                continue
 
-            mermaid_blocks.append(code)
-
-        if not mermaid_blocks:
-            mermaid_blocks = fallback_blocks
+            mermaid_blocks[index] = code
 
         logger.info(f"Generated {len(mermaid_blocks)} Mermaid diagrams")
         return {"mermaid_blocks": mermaid_blocks, "mermaid_errors": mermaid_errors}
 
     except Exception as exc:
-        logger.warning(f"Mermaid diagram generation failed: {exc}. Using fallback.")
-        mermaid_blocks = _build_mermaid_diagrams(ingestion)
-        return {"mermaid_blocks": mermaid_blocks, "mermaid_errors": [str(exc)]}
+        logger.warning(f"Mermaid diagram LLM generation failed: {exc}. Using fallback.")
+        mermaid_errors.append(str(exc))
+        return {"mermaid_blocks": mermaid_blocks, "mermaid_errors": mermaid_errors}
 
 
 def _build_mermaid_diagrams(ingestion: dict) -> list[str]:
