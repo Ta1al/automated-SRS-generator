@@ -109,34 +109,15 @@ const SECTION_ORDER_INDEX = new Map(SECTION_ORDER.map((key, index) => [key, inde
 function getSectionOrderIndex(key: string) {
   return SECTION_ORDER_INDEX.get(key) ?? SECTION_ORDER.length;
 }
-// All five section writers run in parallel after elicit_requirements
-const PARALLEL_DRAFT_NODES = new Set([
-  "draft_section_1",
-  "draft_section_2",
-  "draft_section_3_iface",
-  "draft_section_3_fr",
-  "draft_section_3_nfr",
-]);
-
 const NODE_LABELS: Record<string, string> = {
-  retrieve_rag_context: "retrieving standards context",
-  elicit_requirements: "distilling your initial brief",
-  evaluate_completeness: "checking requirement completeness",
-  ask_clarifying_questions: "preparing clarification prompts",
-  classify_requirements: "classifying requirement types",
-  draft_section_3_fr: "drafting functional requirements",
-  draft_section_3_nfr: "drafting non-functional requirements",
-  draft_section_3_iface: "drafting external interface requirements",
-  draft_section_1: "drafting the introduction",
-  draft_section_2: "drafting product overview",
-  draft_section_4: "building the verification matrix",
+  ingest_and_map_domain: "analyzing your requirements",
+  generate_elicitation_plan: "planning the elicitation",
+  generate_single_elicitation_question: "asking clarifying questions",
+  classify_and_store_answers: "processing your answer",
+  draft_from_approved_outline: "drafting SRS sections",
+  generate_mermaid_diagrams: "generating diagrams",
+  finalize_and_export: "assembling the final SRS",
   revise_selected_section: "revising the selected section",
-  generate_mermaid_diagrams: "generating Mermaid diagrams",
-  generate_mermaid: "generating diagrams",
-  validate_mermaid: "validating diagram syntax",
-  correct_mermaid: "repairing diagram syntax",
-  qa_review: "running a quality review",
-  finalize_document: "assembling the final SRS",
 };
 
 function formatSectionTitle(key: string) {
@@ -350,29 +331,21 @@ function getWaitingOnLabel(statuses: BackendStatusEvent[], activeNode: string | 
     return "starting your generation run";
   }
 
-  const finishedNodes = new Set(
-    statuses.filter((item) => item.status === "finished").map((item) => item.node),
-  );
   const latest = statuses[statuses.length - 1];
 
-  if (latest.node === "elicit_requirements") {
-    return "drafting core requirements sections";
-  }
-
-  if (PARALLEL_DRAFT_NODES.has(latest.node)) {
-    const completedCount = [...PARALLEL_DRAFT_NODES].filter((node) => finishedNodes.has(node)).length;
-    return completedCount < PARALLEL_DRAFT_NODES.size
-      ? `drafting sections in parallel (${completedCount}/${PARALLEL_DRAFT_NODES.size})`
-      : NODE_LABELS.draft_section_4;
+  // After classify_and_store_answers the graph may loop back to questions
+  // or proceed to drafting — use a generic label.
+  if (latest.node === "classify_and_store_answers") {
+    return "preparing next step";
   }
 
   const nextNodeMap: Record<string, string> = {
-    retrieve_rag_context: "elicit_requirements",
-    elicit_requirements: "draft_section_1",
-    draft_section_4: "generate_mermaid_diagrams",
-    generate_mermaid_diagrams: "finalize_document",
-    generate_mermaid: "validate_mermaid",
-    validate_mermaid: "finalize_document",
+    ingest_and_map_domain: "generate_elicitation_plan",
+    generate_elicitation_plan: "generate_single_elicitation_question",
+    generate_single_elicitation_question: "classify_and_store_answers",
+    draft_from_approved_outline: "generate_mermaid_diagrams",
+    generate_mermaid_diagrams: "finalize_and_export",
+    revise_selected_section: "finalize_and_export",
   };
 
   const nextNode = nextNodeMap[latest.node];
@@ -1838,10 +1811,10 @@ export function ChatWorkspace({ userEmail }: { userEmail: string }) {
     options?: { generateDiagrams?: boolean; diagramsOnly?: boolean },
   ) {
     const initialNode = options?.diagramsOnly
-      ? "generate_mermaid"
+      ? "generate_mermaid_diagrams"
       : revisionTarget
         ? "revise_selected_section"
-        : "retrieve_rag_context";
+        : "ingest_and_map_domain";
 
     setIsSending(true);
     setIsGeneratingDiagrams(Boolean(options?.diagramsOnly));
