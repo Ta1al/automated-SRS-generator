@@ -363,13 +363,19 @@ def _escape_label(label: str) -> str:
     return l
 
 
+def _item_str(item: Any) -> str:
+    if isinstance(item, dict):
+        return _clean_text(item.get("name")) or _clean_text(item.get("title")) or str(item)
+    return _clean_text(item, str(item))
+
+
 def _build_mermaid_diagrams(ingestion: dict[str, Any]) -> list[str]:
     project_title = _clean_text(ingestion.get("project_title"), "System")
     core_flows = [f for f in _coerce_list(ingestion.get("core_flows", [])) if isinstance(f, dict)]
-    data_entities = _coerce_list(ingestion.get("data_entities", []))
-    components = _coerce_list(ingestion.get("components", []))
-    interfaces = _coerce_list(ingestion.get("external_interfaces", []))
-    actors = _coerce_list(ingestion.get("suggested_actors", []) or ingestion.get("target_users", []))
+    data_entities = [_item_str(e) for e in _coerce_list(ingestion.get("data_entities", []))]
+    components = [_item_str(c) for c in _coerce_list(ingestion.get("components", []))]
+    interfaces = [_item_str(i) for i in _coerce_list(ingestion.get("external_interfaces", []))]
+    actors = [_item_str(a) for a in _coerce_list(ingestion.get("suggested_actors", []) or ingestion.get("target_users", []))]
     if not actors:
         actors = ["User"]
 
