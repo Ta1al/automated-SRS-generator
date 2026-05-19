@@ -62,6 +62,12 @@ SRS_SCOPE_REDIRECT_MESSAGE = (
     "Share your product idea or requirements, and I will continue from there."
 )
 
+_DIAGRAMS_HEADER_RE = re.compile(
+    r"^#{1,6}\s*(?:\d+\.?\s*)?Diagrams\b.*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+_DIAGRAM_FENCE_RE = re.compile(r"```(?:mermaid|plantuml)\b", re.IGNORECASE)
+
 _GUARDRAIL_CLASSIFIER_SYSTEM = """\
 You classify user chat messages for an SRS-generation assistant.
 
@@ -218,44 +224,66 @@ def _append_use_case_tables_to_document(document_text: str, state_values: dict[s
 
 def _append_diagrams_to_document(document_text: str, state_values: dict[str, Any]) -> str:
     """Append PlantUML diagrams to the end of a document body."""
-    if "# 6 Diagrams" in document_text or "## 6. Diagrams" in document_text:
-        return document_text.strip()
+    body = document_text.strip()
+    if not body:
+        return body
 
     diagrams = state_values.get("plantumul_diagrams", {}) or {}
     mermaid_blocks = state_values.get("mermaid_blocks", []) or []
     ingestion = state_values.get("ingestion_summary", {}) or {}
 
     if (not isinstance(diagrams, dict) or not diagrams) and not mermaid_blocks:
-        mermaid_blocks = _fallback_mermaid_diagrams(ingestion)
+        mermaid_blocks = _build_mermaid_diagrams(ingestion)
 
     if (not isinstance(diagrams, dict) or not diagrams) and not mermaid_blocks:
-        return document_text.strip()
+        return body
 
-    lines: list[str] = [document_text.strip(), "# 6 Diagrams"]
+    if _DIAGRAM_FENCE_RE.search(body):
+        return body
+    diagram_lines: list[str] = []
     for diagram_key, diagram_code in diagrams.items():
         cleaned_key = str(diagram_key).replace("_", " ").strip().title() or "Diagram"
         cleaned_code = str(diagram_code or "").strip()
         if not cleaned_code:
             continue
-        lines.append(f"### {cleaned_key}")
-        lines.append("```plantuml")
-        lines.append(cleaned_code)
-        lines.append("```")
+        diagram_lines.append(f"### {cleaned_key}")
+        diagram_lines.append("```plantuml")
+        diagram_lines.append(cleaned_code)
+        diagram_lines.append("```")
 
     if mermaid_blocks:
-        lines.append("### Mermaid")
+        diagram_lines.append("### Mermaid")
         mermaid_labels = ["Use Case Diagram", "Class Diagram", "ER Diagram", "Activity Diagram"]
         for index, mermaid_code in enumerate(mermaid_blocks, start=1):
             cleaned_code = str(mermaid_code or "").strip()
             if not cleaned_code:
                 continue
             label = mermaid_labels[index - 1] if index <= len(mermaid_labels) else f"Mermaid Diagram {index}"
-            lines.append(f"#### {label}")
-            lines.append("```mermaid")
-            lines.append(cleaned_code)
-            lines.append("```")
+            diagram_lines.append(f"#### {label}")
+            diagram_lines.append("```mermaid")
+            diagram_lines.append(cleaned_code)
+            diagram_lines.append("```")
 
-    return "\n\n".join(line for line in lines if line is not None).strip()
+    if not diagram_lines:
+        return body
+
+    header_line_index: int | None = None
+    lines = body.splitlines()
+    for index, line in enumerate(lines):
+        if _DIAGRAMS_HEADER_RE.match(line.strip()):
+            header_line_index = index
+            break
+
+    if header_line_index is None:
+        return "\n\n".join([body, "# 6 Diagrams", *diagram_lines]).strip()
+
+    insert_at = header_line_index + 1
+    insertion: list[str] = []
+    if insert_at < len(lines) and lines[insert_at].strip():
+        insertion.append("")
+    insertion.extend(diagram_lines)
+    lines[insert_at:insert_at] = insertion
+    return "\n".join(lines).strip()
 
 
 def _format_srs_document(document_text: str, state_values: dict[str, Any]) -> str:
@@ -309,92 +337,201 @@ def _format_srs_document(document_text: str, state_values: dict[str, Any]) -> st
     return "\n\n".join(part for part in [*front_matter, body] if str(part).strip()).strip()
 
 
-def _fallback_mermaid_diagrams(ingestion: dict[str, Any]) -> list[str]:
-    project_title = str(ingestion.get("project_title", "System")).strip() or "System"
-    core_flows = ingestion.get("core_flows", []) or []
-    data_entities = ingestion.get("data_entities", []) or []
-    components = ingestion.get("components", []) or []
-    interfaces = ingestion.get("external_interfaces", []) or []
-    actors = ingestion.get("suggested_actors", []) or ingestion.get("target_users", []) or ["User"]
+def _clean_text(value: Any, fallback: str = "") -> str:
+    return str(value).strip() if value else fallback
 
-    primary_flow = "Class Scheduling"
-    secondary_flow = "Check-In Process"
-    if core_flows and isinstance(core_flows[0], dict):
-        primary_flow = str(core_flows[0].get("name", primary_flow)).strip() or primary_flow
-    if len(core_flows) > 1 and isinstance(core_flows[1], dict):
-        secondary_flow = str(core_flows[1].get("name", secondary_flow)).strip() or secondary_flow
 
-    flowchart = (
-        "flowchart TD\n"
-        f'    A["{project_title}"] --> B["{primary_flow}"]\n'
-        f'    A --> C["{secondary_flow}"]\n'
-        '    B --> D["Schedule confirmation"]\n'
-        '    C --> E["Attendance record"]'
-    )
+def _coerce_list(value: Any) -> list[Any]:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str) and value.strip():
+        return [value.strip()]
+    return []
 
-    sequence = (
-        "sequenceDiagram\n"
-        "    actor Member\n"
-        "    participant App\n"
-        "    participant Backend\n"
-        "    Member->>App: Request class booking\n"
-        "    App->>Backend: Validate slot availability\n"
-        "    Backend-->>App: Reservation confirmed\n"
-        "    App-->>Member: Show confirmation"
-    )
 
-    er_lines = [
-        "erDiagram",
-        "    USER ||--o{ ATTENDANCE_RECORD : creates",
-        "    USER ||--o{ PAYMENT_RECORD : makes",
-        "    CLASS ||--o{ ATTENDANCE_RECORD : includes",
-    ]
-    if data_entities:
-        er_lines.append("    CLASS ||--o{ PAYMENT_RECORD : billed_for")
+def _sanitize_id(label: str) -> str:
+    safe = re.sub(r"[^A-Za-z0-9_]", "_", str(label)).strip("_")
+    return safe or "Entity"
 
-    class_lines = [
-        "classDiagram",
-        "    class User",
-        "    class Request",
-        "    class Confirmation",
-        "    User --> Request : submits",
-        "    Request --> Confirmation : returns",
-    ]
-    if len(data_entities) > 1:
-        class_lines.append(f'    class {str(data_entities[0]).replace(" ", "")}')
 
-    state_lines = [
-        "stateDiagram-v2",
-        "    [*] --> Requested",
-        "    Requested --> Validated : input ok",
-        "    Requested --> Rejected : input invalid",
-        "    Validated --> Completed : processed",
-        "    Completed --> [*]",
-    ]
+def _escape_label(label: str) -> str:
+    l = str(label).strip()
+    if not l:
+        return ""
+    if any(c in l for c in "\"()[]{}:;"):
+        return f'"{l}"'
+    return l
 
-    component_summary = [
-        "flowchart TD",
-        f'    A["{project_title}"] --> B["{primary_flow}"]',
-        f'    B --> C["{components[0] if components else "User Interface"}"]',
-        f'    C --> D["{components[1] if len(components) > 1 else "Backend Service"}"]',
-    ]
+
+def _build_mermaid_diagrams(ingestion: dict[str, Any]) -> list[str]:
+    project_title = _clean_text(ingestion.get("project_title"), "System")
+    core_flows = [f for f in _coerce_list(ingestion.get("core_flows", [])) if isinstance(f, dict)]
+    data_entities = _coerce_list(ingestion.get("data_entities", []))
+    components = _coerce_list(ingestion.get("components", []))
+    interfaces = _coerce_list(ingestion.get("external_interfaces", []))
+    actors = _coerce_list(ingestion.get("suggested_actors", []) or ingestion.get("target_users", []))
+    if not actors:
+        actors = ["User"]
+
+    primary_id = _sanitize_id(actors[0])
+    primary_label = _escape_label(actors[0])
+
+    # ── Use case flowchart ──
+    usecase_lines = ["flowchart TD"]
+    usecase_lines.append(f"  {primary_id}[{primary_label}]")
+    if len(actors) > 1:
+        sid = _sanitize_id(actors[1])
+        slabel = _escape_label(actors[1])
+        usecase_lines.append(f"  {sid}[{slabel}]")
+    usecase_lines.append(f'  subgraph System["{_escape_label(project_title)}"]')
+    for i, flow in enumerate(core_flows[:5], start=1):
+        fname = _clean_text(flow.get("name"), f"Flow{i}")
+        usecase_lines.append(f"    WF{i}[{_escape_label(fname)}]")
+    usecase_lines.append("  end")
+    usecase_lines.append(f"  {primary_id} --> WF1")
+    if len(actors) > 1 and len(core_flows) > 1:
+        sid = _sanitize_id(actors[1])
+        usecase_lines.append(f"  {sid} --> WF2")
+    for idx, ext in enumerate(interfaces[:3]):
+        ext_id = f"EXT{idx + 1}"
+        usecase_lines.append(f"  {ext_id}[{_escape_label(ext)}]")
+        usecase_lines.append(f"  System ==> {ext_id}")
+    if len(core_flows) > 2:
+        usecase_lines.append("  WF1 -.->|includes| WF3")
+
+    # ── Sequence diagram ──
+    primary_flow_name = _clean_text(core_flows[0].get("name"), "Primary Workflow") if core_flows else "Primary Workflow"
+    seq_lines = ["sequenceDiagram"]
+    seq_lines.append(f"    actor {primary_id}")
+    seq_lines.append(f"    participant {_sanitize_id(project_title)}_App as {_escape_label(project_title)}")
+    seq_lines.append("    participant Backend")
+    seq_lines.append("    participant Store")
+    seq_lines.append(f"    {primary_id}->>{_sanitize_id(project_title)}_App: Start {primary_flow_name.lower()}")
+    seq_lines.append(f"    {_sanitize_id(project_title)}_App->>Backend: Submit request")
+    seq_lines.append("    Backend->>Store: Validate / persist")
+    seq_lines.append("    Store-->>Backend: Confirmation")
+    seq_lines.append("    Backend-->>" + _sanitize_id(project_title) + "_App: Result")
+    seq_lines.append("    " + _sanitize_id(project_title) + "_App-->>" + primary_id + ": Show outcome")
     if interfaces:
-        component_summary.append(f'    D --> E["{interfaces[0]}"]')
+        seq_id = _sanitize_id(interfaces[0])
+        seq_lines.append(f"    Backend->>{seq_id}: Call external service")
+        seq_lines.append(f"    {seq_id}-->>Backend: Response")
 
-    flowchart_with_roles = [
-        "flowchart TD",
-        f'    A["{actors[0] if actors else "User"}"] --> B["{primary_flow}"]',
-        f'    B --> C["{secondary_flow}"]',
-        f'    C --> D["{project_title} outcome"]',
-    ]
+    # ── ER diagram ──
+    er_lines = ["erDiagram"]
+    if data_entities:
+        for ent in data_entities[:6]:
+            safe_ent = _sanitize_id(ent).upper()
+            er_lines.append(f"  {safe_ent} {{")
+            er_lines.append("    string id PK")
+            er_lines.append("    string name")
+            er_lines.append("    datetime created_at")
+            er_lines.append("    string status")
+            er_lines.append("  }")
+        for i in range(min(len(data_entities), 6) - 1):
+            e1 = _sanitize_id(data_entities[i]).upper()
+            e2 = _sanitize_id(data_entities[i + 1]).upper()
+            er_lines.append(f"  {e1} ||--o{{ {e2} : contains")
+    else:
+        er_lines.append("  USER ||--o{ REQUEST : creates")
+        er_lines.append("  REQUEST ||--|| RESULT : produces")
+        er_lines.append("  USER {")
+        er_lines.append("    string id PK")
+        er_lines.append("    string email")
+        er_lines.append("    datetime registered_at")
+        er_lines.append("  }")
+        er_lines.append("  REQUEST {")
+        er_lines.append("    string id PK")
+        er_lines.append("    string type")
+        er_lines.append("    string status")
+        er_lines.append("  }")
+        er_lines.append("  RESULT {")
+        er_lines.append("    string id PK")
+        er_lines.append("    string outcome")
+        er_lines.append("  }")
+
+    # ── Class diagram ──
+    class_lines = ["classDiagram"]
+    if data_entities:
+        for ent in data_entities[:6]:
+            safe_ent = _sanitize_id(ent)
+            class_lines.append(f"  class {safe_ent} {{")
+            class_lines.append("    +String id")
+            class_lines.append("    +String status")
+            class_lines.append("    +process()")
+            class_lines.append("  }")
+        for i in range(min(len(data_entities), 6) - 1):
+            e1 = _sanitize_id(data_entities[i])
+            e2 = _sanitize_id(data_entities[i + 1])
+            class_lines.append(f"  {e1} \"1\" --> \"*\" {e2}")
+    else:
+        class_lines.append("  class System {")
+        class_lines.append("    +String id")
+        class_lines.append("    +String name")
+        class_lines.append("    +process()")
+        class_lines.append("  }")
+        class_lines.append("  class Request {")
+        class_lines.append("    +String id")
+        class_lines.append("    +String type")
+        class_lines.append("    +validate()")
+        class_lines.append("  }")
+        class_lines.append("  class Response {")
+        class_lines.append("    +String outcome")
+        class_lines.append("  }")
+        class_lines.append("  System --> Request : submits")
+        class_lines.append("  Request --> Response : produces")
+
+    # ── State diagram ──
+    state_lines = ["stateDiagram-v2"]
+    state_lines.append("  [*] --> Idle")
+    if core_flows:
+        flow_name = _clean_text(core_flows[0].get("name"), "Process")
+        flow_steps = _coerce_list(core_flows[0].get("steps", []))
+        state_lines.append(f"  Idle --> Started : {flow_name}")
+        if flow_steps:
+            prev = "Started"
+            for step in flow_steps[:4]:
+                safe_step = _sanitize_id(step)
+                state_lines.append(f"  {prev} --> {safe_step}")
+                prev = safe_step
+            state_lines.append(f"  {prev} --> Completed : success")
+        else:
+            state_lines.append("  Started --> Executing : proceed")
+            state_lines.append("  Executing --> Validating : data ready")
+            state_lines.append("  Validating --> Completed : success")
+        state_lines.append("  Completed --> [*]")
+        state_lines.append("  Executing --> Failed : error")
+        state_lines.append("  Failed --> Idle : retry")
+    else:
+        state_lines.append("  Idle --> Processing : start")
+        state_lines.append("  Processing --> Validating")
+        state_lines.append("  Validating --> Completed : success")
+        state_lines.append("  Validating --> Failed : error")
+        state_lines.append("  Completed --> [*]")
+        state_lines.append("  Failed --> Idle : retry")
+
+    # ── Component/context view (flowchart) ──
+    comp_lines = ["flowchart TD"]
+    comp_lines.append(f'  C0["{_escape_label(project_title)}"]')
+    if components:
+        for i, comp in enumerate(components[:4], start=1):
+            safe_cid = _sanitize_id(comp)
+            comp_lines.append(f'  C{i}[{_escape_label(comp)}]')
+        for i in range(min(len(components), 4)):
+            comp_lines.append(f"  C{i} --> C{i + 1}")
+    last_idx = min(len(components), 4) if components else 1
+    for idx, ext in enumerate(interfaces[:2]):
+        ext_id = f"EXT{idx + 1}"
+        comp_lines.append(f"  {ext_id}[{_escape_label(ext)}]")
+        comp_lines.append(f"  C{last_idx} ==> {ext_id}")
 
     return [
-        "\n".join(flowchart_with_roles),
-        sequence,
+        "\n".join(usecase_lines),
+        "\n".join(seq_lines),
         "\n".join(er_lines),
         "\n".join(class_lines),
         "\n".join(state_lines),
-        "\n".join(component_summary),
+        "\n".join(comp_lines),
     ]
 
 
@@ -647,95 +784,54 @@ async def _is_interrupted(app_state: Any, thread_id: str) -> bool:
 
 # Node display names and typical durations for better UX feedback
 _NODE_DISPLAY_NAMES = {
-    "retrieve_rag_context": "Retrieving regulatory context",
-    "elicit_requirements": "Eliciting requirements from input",
-    "classify_requirements": "Classifying requirements",
-    "validate_and_enrich_requirements": "Validating & enriching requirements",
-    "draft_section_1": "Drafting Introduction",
-    "draft_section_2": "Drafting Product Overview",
-    "draft_section_3_iface": "Drafting External Interfaces",
-    "draft_section_3_fr": "Drafting Functional Requirements",
-    "draft_section_3_nfr": "Drafting Quality Requirements",
-    "draft_section_4": "Drafting Verification Matrix",
-    "evaluate_completeness": "Evaluating completeness",
-    "ask_clarifying_questions": "Waiting for clarification",
-    "generate_mermaid_diagrams": "Generating Mermaid diagrams",
-    "generate_mermaid": "Generating diagrams",
-    "validate_mermaid": "Validating diagrams",
-    "correct_mermaid": "Correcting diagrams",
-    "qa_review": "Running QA review",
+    "ingest_and_map_domain": "Analyzing your requirements",
+    "generate_elicitation_plan": "Planning elicitation questions",
+    "generate_single_elicitation_question": "Asking clarifying questions",
+    "classify_and_store_answers": "Processing your answer",
+    "draft_from_approved_outline": "Drafting SRS sections",
+    "generate_mermaid_diagrams": "Generating diagrams",
+    "finalize_and_export": "Finalizing the SRS document",
     "revise_selected_section": "Revising selected section",
-    "finalize_document": "Finalizing document",
 }
 
 _TYPICAL_DURATION_MS = {
-    "retrieve_rag_context": 2000,
-    "elicit_requirements": 8000,
-    "classify_requirements": 6000,
-    "validate_and_enrich_requirements": 10000,
-    "draft_section_1": 8000,
-    "draft_section_2": 6000,
-    "draft_section_3_iface": 7000,
-    "draft_section_3_fr": 9000,
-    "draft_section_3_nfr": 12000,
-    "draft_section_4": 5000,
-    "evaluate_completeness": 5000,
+    "ingest_and_map_domain": 5000,
+    "generate_elicitation_plan": 3000,
+    "generate_single_elicitation_question": 4000,
+    "classify_and_store_answers": 3000,
+    "draft_from_approved_outline": 15000,
     "generate_mermaid_diagrams": 12000,
-    "generate_mermaid": 15000,
-    "validate_mermaid": 2000,
-    "correct_mermaid": 8000,
-    "qa_review": 8000,
-    "revise_selected_section": 6000,
-    "finalize_document": 3000,
+    "finalize_and_export": 3000,
+    "revise_selected_section": 8000,
 }
 
-_PARALLEL_NODES = {"draft_section_1", "draft_section_2", "draft_section_3_iface", "draft_section_3_fr", "draft_section_3_nfr"}
+_PARALLEL_NODES: set[str] = set()
 
-# Ordered sequence of nodes for progress tracking (excluding ask_clarifying_questions which is conditional)
+# Ordered sequence of actual graph nodes for progress tracking
 _NODE_SEQUENCE_FULL_WITH_DIAGRAMS = [
-    "retrieve_rag_context",
-    "elicit_requirements",
-    "classify_requirements",
-    "validate_and_enrich_requirements",
-    "draft_section_1",  # These 5 run in parallel but count as 1 step
-    "draft_section_2",
-    "draft_section_3_iface",
-    "draft_section_3_fr",
-    "draft_section_3_nfr",
-    "draft_section_4",
-    "evaluate_completeness",
+    "ingest_and_map_domain",
+    "generate_elicitation_plan",
+    "generate_single_elicitation_question",
+    "classify_and_store_answers",
+    "draft_from_approved_outline",
     "generate_mermaid_diagrams",
-    "generate_mermaid",
-    "validate_mermaid",
-    "qa_review",
-    "finalize_document",
+    "finalize_and_export",
 ]
 
 _NODE_SEQUENCE_FULL_NO_DIAGRAMS = [
-    "retrieve_rag_context",
-    "elicit_requirements",
-    "classify_requirements",
-    "validate_and_enrich_requirements",
-    "draft_section_1",  # These 5 run in parallel but count as 1 step
-    "draft_section_2",
-    "draft_section_3_iface",
-    "draft_section_3_fr",
-    "draft_section_3_nfr",
-    "draft_section_4",
-    "evaluate_completeness",
-    "qa_review",
-    "finalize_document",
+    "ingest_and_map_domain",
+    "generate_elicitation_plan",
+    "generate_single_elicitation_question",
+    "classify_and_store_answers",
+    "draft_from_approved_outline",
+    "finalize_and_export",
 ]
 
-_NODE_SEQUENCE_DIAGRAMS_ONLY = [
-    "generate_mermaid",
-    "validate_mermaid",
-    "finalize_document",
-]
+_NODE_SEQUENCE_DIAGRAMS_ONLY = _NODE_SEQUENCE_FULL_WITH_DIAGRAMS
 
 _NODE_SEQUENCE_SECTION_REVISION = [
     "revise_selected_section",
-    "finalize_document",
+    "finalize_and_export",
 ]
 
 
@@ -746,29 +842,17 @@ def _calculate_progress(
     started_nodes: set[str],
     parallel_nodes: set[str],
 ) -> dict[str, int]:
-    """Calculate current step and total steps for progress display.
-    
-    Handles parallel nodes as a single step.
-    """
-    total_steps = len([n for n in node_sequence if n not in parallel_nodes]) + (1 if any(n in parallel_nodes for n in node_sequence) else 0)
-    
+    """Calculate current step and total steps for progress display."""
+    total_steps = len(node_sequence)
     current_step = 0
-    parallel_group_finished = False
-    
+
     for node in node_sequence:
-        if node in parallel_nodes:
-            # Count parallel nodes as a single step when all are finished
-            if node in finished_nodes and not parallel_group_finished:
-                parallel_group_finished = True
-                current_step += 1
-        else:
-            if node in finished_nodes:
-                current_step += 1
-            elif node == current_node or node in started_nodes:
-                # Current node or already started
-                current_step += 1
-                break
-    
+        if node in finished_nodes:
+            current_step += 1
+        elif node == current_node or node in started_nodes:
+            current_step += 1
+            break
+
     return {
         "step": max(1, current_step),
         "total_steps": total_steps,
@@ -783,23 +867,12 @@ def _calculate_estimated_remaining_ms(
 ) -> int:
     """Calculate estimated remaining time based on unfinished nodes."""
     remaining_ms = 0
-    parallel_group_counted = False
-    
+    dm = durations_map or _TYPICAL_DURATION_MS
+
     for node in node_sequence:
         if node not in finished_nodes:
-            if node in parallel_nodes:
-                # Only count the max duration of the parallel group once
-                if not parallel_group_counted:
-                    dm = durations_map or _TYPICAL_DURATION_MS
-                    remaining_ms += max(
-                        dm.get(n, 5000)
-                        for n in parallel_nodes
-                        if n in node_sequence
-                    )
-                    parallel_group_counted = True
-            else:
-                remaining_ms += (durations_map or _TYPICAL_DURATION_MS).get(node, 5000)
-    
+            remaining_ms += dm.get(node, 10000)
+
     return remaining_ms
 
 
