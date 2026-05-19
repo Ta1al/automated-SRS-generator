@@ -22,65 +22,31 @@ type StatusEventRecord = BackendStatusEvent & {
 type TimingMap = Map<string, number>;
 type RunMode = "full" | "diagrams_only" | "section_revision";
 
-const DEFAULT_STAGE_MS = 45000;
+const DEFAULT_STAGE_MS = 10000;
 const ORDERED_STAGES_FULL = [
-  "retrieve_rag_context",
-  "elicit_requirements",
-  "evaluate_completeness",
-  "ask_clarifying_questions",
-  "classify_requirements",
-  "draft_section_1",
-  "draft_section_2",
-  "draft_section_3_iface",
-  "draft_section_3_fr",
-  "draft_section_3_nfr",
-  "draft_section_4",
-  "generate_mermaid",
-  "validate_mermaid",
-  "correct_mermaid",
-  "qa_review",
-  "finalize_document",
+  "ingest_and_map_domain",
+  "generate_elicitation_plan",
+  "generate_single_elicitation_question",
+  "classify_and_store_answers",
+  "draft_from_approved_outline",
+  "generate_mermaid_diagrams",
+  "finalize_and_export",
 ] as const;
 const ORDERED_STAGES_NO_DIAGRAMS = [
-  "retrieve_rag_context",
-  "elicit_requirements",
-  "evaluate_completeness",
-  "ask_clarifying_questions",
-  "classify_requirements",
-  "draft_section_1",
-  "draft_section_2",
-  "draft_section_3_iface",
-  "draft_section_3_fr",
-  "draft_section_3_nfr",
-  "draft_section_4",
-  "qa_review",
-  "finalize_document",
+  "ingest_and_map_domain",
+  "generate_elicitation_plan",
+  "generate_single_elicitation_question",
+  "classify_and_store_answers",
+  "draft_from_approved_outline",
+  "finalize_and_export",
 ] as const;
-const ORDERED_STAGES_DIAGRAMS_ONLY = [
-  "generate_mermaid",
-  "validate_mermaid",
-  "correct_mermaid",
-  "finalize_document",
-] as const;
+const ORDERED_STAGES_DIAGRAMS_ONLY = ORDERED_STAGES_FULL;
 const ORDERED_STAGES_SECTION_REVISION = [
   "revise_selected_section",
-  "finalize_document",
+  "finalize_and_export",
 ] as const;
-const PARALLEL_DRAFT_STAGES = [
-  "draft_section_1",
-  "draft_section_2",
-  "draft_section_3_iface",
-  "draft_section_3_fr",
-  "draft_section_3_nfr",
-] as const;
-const DRAFT_NODE_TO_SECTION_KEY: Record<string, string> = {
-  draft_section_1: "s1",
-  draft_section_2: "s2",
-  draft_section_3_iface: "s3_external",
-  draft_section_3_fr: "s3_functional",
-  draft_section_3_nfr: "s3_nfr",
-  draft_section_4: "s4",
-};
+const PARALLEL_DRAFT_STAGES: readonly string[] = [];
+const DRAFT_NODE_TO_SECTION_KEY: Record<string, string> = {};
 const MESSAGE_GUARD_NODE = "message_guard";
 
 function extractLiveSectionsFromState(state: unknown): Record<string, string> {
@@ -195,10 +161,8 @@ function estimateRemainingMs(params: {
     currentNode,
     currentNodeStarted,
     orderedStages,
-    includeParallelDraftStages,
   } = params;
   const now = Date.now();
-  const parallelSet = new Set(PARALLEL_DRAFT_STAGES);
 
   const getRemainingForNode = (node: string) => {
     if (finishedNodes.has(node)) {
@@ -213,18 +177,9 @@ function estimateRemainingMs(params: {
     return estimate;
   };
 
-  const remainingParallel = includeParallelDraftStages
-    ? PARALLEL_DRAFT_STAGES.filter((node) => !finishedNodes.has(node)).map((node) =>
-        getRemainingForNode(node),
-      )
-    : [];
-
-  let remaining = remainingParallel.length > 0 ? Math.max(...remainingParallel) : 0;
+  let remaining = 0;
 
   for (const node of orderedStages) {
-    if (parallelSet.has(node as (typeof PARALLEL_DRAFT_STAGES)[number])) {
-      continue;
-    }
     remaining += getRemainingForNode(node);
   }
 
@@ -649,25 +604,26 @@ export async function startBackgroundChatRun(params: {
             const nextStat = await updateStageTiming(status.node, durationMs);
             timingMap.set(status.node, nextStat.avgDurationMs);
 
-            // Calculate ETA: prefer backend-provided estimate if available,
-            // otherwise fall back to local calculation
+            // Calculate ETA: prefer local estimate which accumulates finishedNodes
+            // across all streaming sessions; fall back to backend estimate if needed.
             let etaSeconds: number;
-            if (status.estimated_remaining_ms !== undefined && status.estimated_remaining_ms !== null) {
-              // Use backend's more accurate estimate
+            const localEtaSeconds = toRunningEtaSeconds(
+              estimateRemainingMs({
+                timingMap,
+                finishedNodes,
+                currentNode: activeNode === status.node ? null : activeNode,
+                currentNodeStarted:
+                  activeNode === status.node ? null : activeNodeStarted,
+                orderedStages,
+                includeParallelDraftStages,
+              }),
+            );
+            if (localEtaSeconds > 0) {
+              etaSeconds = localEtaSeconds;
+            } else if (status.estimated_remaining_ms !== undefined && status.estimated_remaining_ms !== null) {
               etaSeconds = toRunningEtaSeconds(status.estimated_remaining_ms);
             } else {
-              // Fall back to local estimation based on timing map
-              etaSeconds = toRunningEtaSeconds(
-                estimateRemainingMs({
-                  timingMap,
-                  finishedNodes,
-                  currentNode: activeNode === status.node ? null : activeNode,
-                  currentNodeStarted:
-                    activeNode === status.node ? null : activeNodeStarted,
-                  orderedStages,
-                  includeParallelDraftStages,
-                }),
-              );
+              etaSeconds = localEtaSeconds;
             }
 
             await prisma.chatRun.update({
@@ -742,7 +698,7 @@ export async function startBackgroundChatRun(params: {
 
     if (
       normalizedQuestions.length === 0 &&
-      stateNext.includes("ask_clarifying_questions")
+      (stateNext.includes("generate_single_elicitation_question") || stateNext.includes("ask_clarifying_questions"))
     ) {
       const fallbackQuestions = Array.isArray(latestState?.missing_context)
         ? (latestState?.missing_context as ClarificationQuestion[])
@@ -758,14 +714,9 @@ export async function startBackgroundChatRun(params: {
     const generatedProjectTitle = extractProjectTitleFromState(latestState);
 
     const draftedDocument =
-      finishedNodes.has("finalize_document") ||
-      finishedNodes.has("draft_section_1") ||
-      finishedNodes.has("draft_section_2") ||
-      finishedNodes.has("draft_section_3_iface") ||
-      finishedNodes.has("draft_section_3_fr") ||
-      finishedNodes.has("draft_section_3_nfr") ||
-      finishedNodes.has("draft_section_4");
-    const generatedDiagramsInRun = finishedNodes.has("generate_mermaid");
+      finishedNodes.has("finalize_and_export") ||
+      finishedNodes.has("draft_from_approved_outline");
+    const generatedDiagramsInRun = finishedNodes.has("generate_mermaid_diagrams");
     const revisedSection = finishedNodes.has("revise_selected_section");
 
     let persistedAssistantMessage = "";
