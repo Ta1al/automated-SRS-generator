@@ -157,10 +157,10 @@ def test_number_headings_preserves_lettered_appendices_without_numeric_prefix() 
     assert "# 2 Use Case Tables" in numbered
 
 
-def test_fallback_plantuml_diagrams_produces_multiple_views() -> None:
-    from app.graph.nodes import _fallback_plantuml_diagrams
+def test_build_plantuml_diagrams_produces_multiple_views() -> None:
+    from app.graph.nodes import _build_plantuml_diagrams
 
-    diagrams = _fallback_plantuml_diagrams(
+    diagrams = _build_plantuml_diagrams(
         {
             "project_title": "FitnessStudio Manager",
             "suggested_actors": ["Member", "Coach", "Admin"],
@@ -178,10 +178,10 @@ def test_fallback_plantuml_diagrams_produces_multiple_views() -> None:
     assert "start" in diagrams["activity"]
 
 
-def test_fallback_mermaid_diagrams_produces_richer_bundle() -> None:
-    from app.api.routes import _fallback_mermaid_diagrams
+def test_build_mermaid_diagrams_produces_richer_bundle() -> None:
+    from app.api.routes import _build_mermaid_diagrams
 
-    diagrams = _fallback_mermaid_diagrams(
+    diagrams = _build_mermaid_diagrams(
         {
             "project_title": "FitnessStudio Manager",
             "suggested_actors": ["Member", "Coach"],

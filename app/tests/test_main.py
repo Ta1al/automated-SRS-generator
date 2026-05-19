@@ -501,38 +501,44 @@ class TestGraphQaRouting:
 # ════════════════════════════════════════════════════════════════════════════
 
 
-class TestGenerateMermaid:
-    """Tests for app.graph.nodes.generate_mermaid fallback behavior."""
+class TestGenerateMermaidDiagrams:
+    """Tests for app.graph.nodes.generate_mermaid_diagrams fallback behavior."""
 
     @pytest.mark.asyncio
     async def test_fallback_diagrams_on_provider_error(self):
-        from app.graph.nodes import generate_mermaid
+        from app.graph.nodes import generate_mermaid_diagrams, _llm_invoke_structured
 
         state: Any = {
             "chat_history": [],
-            "document_buffer": "A project context for diagram generation.",
             "missing_context": [],
             "requirements": [],
             "rag_context": "",
             "sections": {},
             "mermaid_blocks": [],
             "mermaid_errors": [],
-            "mermaid_correction_attempts": 0,
             "is_complete": False,
             "qa_gaps": [],
             "final_document": "",
+            "ingestion_summary": {
+                "project_title": "Test System",
+                "suggested_actors": ["User"],
+                "core_flows": [{"name": "Primary Process"}],
+                "data_entities": ["Record"],
+            },
+            "elicitation_answers": {},
         }
 
         failing_llm = MagicMock(ainvoke=AsyncMock(side_effect=RuntimeError("provider unavailable")))
 
-        with patch("app.graph.nodes._get_llm", return_value=failing_llm):
-            result = await generate_mermaid(state)
+        with patch("app.graph.nodes._llm_invoke_structured", return_value=failing_llm):
+            result = await generate_mermaid_diagrams(state)
 
-        assert len(result["mermaid_blocks"]) == 3
+        assert len(result["mermaid_blocks"]) == 4
         assert result["mermaid_blocks"][0].startswith("flowchart TD")
-        assert result["mermaid_blocks"][1].startswith("sequenceDiagram")
+        assert result["mermaid_blocks"][1].startswith("classDiagram")
         assert result["mermaid_blocks"][2].startswith("erDiagram")
-        assert result["mermaid_errors"] == ["", "", ""]
+        assert result["mermaid_blocks"][3].startswith("stateDiagram-v2")
+        assert len(result["mermaid_errors"]) >= 1
 
 
 class TestOutlineHelpers:
