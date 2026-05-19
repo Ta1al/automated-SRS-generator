@@ -54,7 +54,7 @@ def _is_control_command(message_text: str, command: str) -> bool:
     return _normalize_message_text(message_text) == command
 
 
-def _fallback_plantuml_diagrams(ingestion: dict[str, Any]) -> dict[str, str]:
+def _build_plantuml_diagrams(ingestion: dict[str, Any]) -> dict[str, str]:
     def _sanitize_identifier(value: Any, fallback: str) -> str:
         text = re.sub(r"[^A-Za-z0-9_]", "_", str(value or "")).strip("_")
         return text or fallback
@@ -522,7 +522,7 @@ async def generate_single_elicitation_question(state: SRSState) -> dict:
             "is_complete": True,
             "final_document": final_document,
             "project_title": str(ingestion.get("project_title", "")).strip(),
-            "plantumul_diagrams": _fallback_plantuml_diagrams(ingestion),
+            "plantumul_diagrams": _build_plantuml_diagrams(ingestion),
         }
 
     if question_index >= len(question_plan):
@@ -786,6 +786,70 @@ async def revise_selected_section(state: SRSState) -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+def _clean_text(value: Any, fallback: str = "") -> str:
+    return str(value).strip() if value else fallback
+
+
+def _item_str(item: Any) -> str:
+    if isinstance(item, dict):
+        return _clean_text(item.get("name")) or _clean_text(item.get("title")) or str(item)
+    return _clean_text(item, str(item))
+
+
+def _coerce_list(value: Any) -> list[Any]:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str) and value.strip():
+        return [value.strip()]
+    return []
+
+
+def _sanitize_id(label: str) -> str:
+    safe = re.sub(r"[^A-Za-z0-9_]", "_", label).strip("_")
+    return safe or "Entity"
+
+
+def _escape_label(label: str) -> str:
+    l = str(label).strip()
+    if not l:
+        return ""
+    if any(c in l for c in "\"()[]{}:;"):
+        return f'"{l}"'
+    return l
+
+
+def _build_diagram_hints(ingestion: dict[str, Any]) -> str:
+    parts: list[str] = []
+    actors = _coerce_list(ingestion.get("suggested_actors", []) or ingestion.get("target_users", []))
+    flows = [f for f in _coerce_list(ingestion.get("core_flows", [])) if isinstance(f, dict)]
+    entities = _coerce_list(ingestion.get("data_entities", []))
+    components = _coerce_list(ingestion.get("components", []))
+    interfaces = _coerce_list(ingestion.get("external_interfaces", []))
+
+    if actors:
+        parts.append(f"Actors (up to 6): {', '.join(_item_str(a) for a in actors[:6])}")
+    if flows:
+        flow_lines = []
+        for f in flows[:4]:
+            name = _clean_text(f.get("name"), f"Flow {flows.index(f) + 1}")
+            goal = _clean_text(f.get("goal"))
+            steps = _coerce_list(f.get("steps", []))
+            entry = name
+            if goal:
+                entry += f" — {goal}"
+            if steps:
+                entry += f" [{'; '.join(steps[:3])}]"
+            flow_lines.append(entry)
+        parts.append("Key workflows: " + " | ".join(flow_lines))
+    if entities:
+        parts.append(f"Data entities: {', '.join(_item_str(e) for e in entities[:8])}")
+    if components:
+        parts.append(f"System components: {', '.join(_item_str(c) for c in components[:6])}")
+    if interfaces:
+        parts.append(f"External integrations: {', '.join(_item_str(i) for i in interfaces[:6])}")
+    return "\n".join(parts) if parts else "No additional hints available."
+
+
 async def generate_mermaid_diagrams(state: SRSState) -> dict:
     """
     Generate 4 Mermaid diagrams (usecase, class, ER, activity) using the LLM
@@ -801,10 +865,13 @@ async def generate_mermaid_diagrams(state: SRSState) -> dict:
         if content
     )[:3000]
 
+    diagram_hints = _build_diagram_hints(ingestion)
+
     system_prompt = prompts.MERMAID_GENERATION_SYSTEM.format(
         ingestion_summary=json.dumps(ingestion, indent=2),
         elicitation_answers=json.dumps(elicitation, indent=2),
         sections=sections_preview,
+        diagram_hints=diagram_hints,
     )
 
     logger.info("Generating Mermaid diagrams")
@@ -818,7 +885,7 @@ async def generate_mermaid_diagrams(state: SRSState) -> dict:
         )
 
         diagram_code = response.model_dump(mode="json")
-        fallback_blocks = _fallback_mermaid_diagrams_for_node(ingestion)
+        fallback_blocks = _build_mermaid_diagrams(ingestion)
         mermaid_blocks: list[str] = []
         mermaid_errors: list[str] = []
 
@@ -854,93 +921,154 @@ async def generate_mermaid_diagrams(state: SRSState) -> dict:
 
     except Exception as exc:
         logger.warning(f"Mermaid diagram generation failed: {exc}. Using fallback.")
-        mermaid_blocks = _fallback_mermaid_diagrams_for_node(ingestion)
+        mermaid_blocks = _build_mermaid_diagrams(ingestion)
         return {"mermaid_blocks": mermaid_blocks, "mermaid_errors": [str(exc)]}
 
 
-def _fallback_mermaid_diagrams_for_node(ingestion: dict) -> list[str]:
+def _build_mermaid_diagrams(ingestion: dict) -> list[str]:
     """Generate fallback Mermaid diagrams when LLM generation fails."""
-    project_title = str(ingestion.get("project_title", "System")).strip() or "System"
-    actors = [str(a).strip() for a in (ingestion.get("suggested_actors", []) or ingestion.get("target_users", []) or ["User"]) if str(a).strip()]
-    entities = [str(e).strip() for e in (ingestion.get("data_entities", []) or []) if str(e).strip()]
-    flows = [f for f in (ingestion.get("core_flows", []) or []) if isinstance(f, dict)]
-    components = [str(c).strip() for c in (ingestion.get("components", []) or []) if str(c).strip()]
+    project_title = _clean_text(ingestion.get("project_title"), "System")
+    actors = _coerce_list(ingestion.get("suggested_actors", []) or ingestion.get("target_users", []))
+    flows = [f for f in _coerce_list(ingestion.get("core_flows", [])) if isinstance(f, dict)]
+    entities = _coerce_list(ingestion.get("data_entities", []))
+    components = _coerce_list(ingestion.get("components", []))
+    interfaces = _coerce_list(ingestion.get("external_interfaces", []))
 
-    primary_actor = actors[0] if actors else "User"
-    secondary_actor = actors[1] if len(actors) > 1 else "Admin"
+    primary_actor = _escape_label(actors[0]) if actors else '"User"'
+    secondary_actor = _escape_label(actors[1]) if len(actors) > 1 else None
+    primary_id = _sanitize_id(actors[0]) if actors else "User"
+    secondary_id = _sanitize_id(actors[1]) if len(actors) > 1 else None
 
+    # ── Use Case View (flowchart with subgraph) ──
     usecase_lines = ["flowchart TD"]
-    usecase_lines.append(f"  {primary_actor.replace(' ', '_')}[\"{primary_actor}\"]")
-    if secondary_actor:
-        usecase_lines.append(f"  {secondary_actor.replace(' ', '_')}[\"{secondary_actor}\"]")
-    usecase_lines.append(f"  subgraph System[\"{project_title}\"]")
-    for i, flow in enumerate(flows[:4], start=1):
-        flow_name = str(flow.get("name", f"UseCase{i}")).strip()
-        usecase_lines.append(f"    UC{i}[\"{flow_name}\"]")
+    usecase_lines.append(f"  {primary_id}[{primary_actor}]")
+    if secondary_id:
+        usecase_lines.append(f"  {secondary_id}[{secondary_actor}]")
+    usecase_lines.append(f'  subgraph System["{_escape_label(project_title)}"]')
+    for i, flow in enumerate(flows[:5], start=1):
+        flow_name = _clean_text(flow.get("name"), f"Workflow{i}")
+        safe_fid = f"WF{i}"
+        usecase_lines.append(f"    {safe_fid}[{_escape_label(flow_name)}]")
     usecase_lines.append("  end")
     if actors:
-        usecase_lines.append(f"  {actors[0].replace(' ', '_')} --> UC1")
-    if len(actors) > 1 and len(flows) > 1:
-        usecase_lines.append(f"  {actors[1].replace(' ', '_')} --> UC2")
+        usecase_lines.append(f"  {primary_id} --> WF1")
+        if secondary_id and len(flows) > 1:
+            usecase_lines.append(f"  {secondary_id} --> WF2")
+    for idx, ext in enumerate(interfaces[:3], start=97):
+        letter = chr(idx)
+        safe_eid = f"Ext{_sanitize_id(ext)[:8]}"
+        usecase_lines.append(f"  {safe_eid}[{_escape_label(ext)}]")
+        usecase_lines.append(f"  System ==> {safe_eid}")
+    if len(flows) > 2:
+        usecase_lines.append(f"  WF1 -.->|includes| WF3")
+    if len(flows) > 3:
+        usecase_lines.append(f"  WF2 -.->|extends| WF4")
 
+    # ── Class Diagram ──
     class_lines = ["classDiagram"]
     if entities:
-        for entity in entities[:5]:
-            safe_name = entity.replace(" ", "").replace("-", "_")
+        for entity in entities[:6]:
+            safe_name = _sanitize_id(entity)
             class_lines.append(f"  class {safe_name} {{")
             class_lines.append("    +String id")
+            class_lines.append("    +String status")
+            class_lines.append("    +DateTime createdAt")
             class_lines.append("  }")
-        for i in range(min(len(entities), 5) - 1):
-            e1 = entities[i].replace(" ", "").replace("-", "_")
-            e2 = entities[i + 1].replace(" ", "").replace("-", "_")
-            class_lines.append(f"  {e1} --> {e2}")
+        for i in range(min(len(entities), 6) - 1):
+            e1 = _sanitize_id(entities[i])
+            e2 = _sanitize_id(entities[i + 1])
+            class_lines.append(f"  {e1} \"1\" --> \"*\" {e2}")
     else:
         class_lines.append("  class System {")
         class_lines.append("    +String id")
+        class_lines.append("    +String name")
         class_lines.append("    +process()")
         class_lines.append("  }")
         class_lines.append("  class Request {")
+        class_lines.append("    +String id")
         class_lines.append("    +String type")
         class_lines.append("    +validate()")
         class_lines.append("  }")
-        class_lines.append("  System --> Request")
+        class_lines.append("  class Response {")
+        class_lines.append("    +String outcome")
+        class_lines.append("    +String timestamp")
+        class_lines.append("  }")
+        class_lines.append("  System --> Request : submits")
+        class_lines.append("  Request --> Response : produces")
+    comp_blocks = [c for c in components[:3] if c and c.lower() != entity.lower() for entity in (entities or [""])]
+    for c in comp_blocks:
+        safe_cid = _sanitize_id(c)
+        class_lines.append(f"  class {safe_cid} {{")
+        class_lines.append("    +handle()")
+        class_lines.append("  }")
+    if comp_blocks and entities:
+        class_lines.append(f"  {_sanitize_id(entities[0])} --> {_sanitize_id(comp_blocks[0])} : uses")
 
+    # ── ER Diagram ──
     er_lines = ["erDiagram"]
     if entities:
-        for entity in entities[:5]:
-            safe_name = entity.upper().replace(" ", "_").replace("-", "_")
+        for entity in entities[:6]:
+            safe_name = _sanitize_id(entity).upper()
             er_lines.append(f"  {safe_name} {{")
-            er_lines.append("    string id")
+            er_lines.append("    string id PK")
             er_lines.append("    string name")
+            er_lines.append("    datetime created_at")
+            er_lines.append("    string status")
             er_lines.append("  }")
-        for i in range(min(len(entities), 5) - 1):
-            e1 = entities[i].upper().replace(" ", "_").replace("-", "_")
-            e2 = entities[i + 1].upper().replace(" ", "_").replace("-", "_")
-            er_lines.append(f"  {e1} ||--o{{ {e2} : references")
+        for i in range(min(len(entities), 6) - 1):
+            e1 = _sanitize_id(entities[i]).upper()
+            e2 = _sanitize_id(entities[i + 1]).upper()
+            er_lines.append(f"  {e1} ||--o{{ {e2} : contains")
+        if len(entities) > 2:
+            e0 = _sanitize_id(entities[0]).upper()
+            e2 = _sanitize_id(entities[2]).upper()
+            er_lines.append(f"  {e0} ||--|| {e2} : manages")
     else:
         er_lines.append("  USER ||--o{ REQUEST : creates")
         er_lines.append("  REQUEST ||--|| RESULT : produces")
         er_lines.append("  USER {")
-        er_lines.append("    string id")
+        er_lines.append("    string id PK")
         er_lines.append("    string email")
+        er_lines.append("    datetime registered_at")
         er_lines.append("  }")
         er_lines.append("  REQUEST {")
-        er_lines.append("    string id")
+        er_lines.append("    string id PK")
         er_lines.append("    string type")
+        er_lines.append("    string status")
+        er_lines.append("  }")
+        er_lines.append("  RESULT {")
+        er_lines.append("    string id PK")
+        er_lines.append("    string outcome")
         er_lines.append("  }")
 
+    # ── Activity / State Diagram ──
     activity_lines = ["stateDiagram-v2"]
     activity_lines.append("  [*] --> Idle")
     if flows:
-        first_flow = str(flows[0].get("name", "Process")).strip()
-        activity_lines.append(f"  Idle --> Processing : {first_flow}")
+        first_flow_name = _clean_text(flows[0].get("name"), "Process")
+        first_flow_steps = _coerce_list(flows[0].get("steps", []))
+        activity_lines.append(f"  Idle --> Started : {first_flow_name}")
+        if first_flow_steps:
+            prev_state = "Started"
+            for step in first_flow_steps[:4]:
+                safe_step = _sanitize_id(step)
+                activity_lines.append(f"  {prev_state} --> {safe_step}")
+                prev_state = safe_step
+            activity_lines.append(f"  {prev_state} --> Completed : success")
+        else:
+            activity_lines.append("  Started --> Executing : proceed")
+            activity_lines.append("  Executing --> Validating : data ready")
+            activity_lines.append("  Validating --> Completed : success")
+        activity_lines.append("  Completed --> [*]")
+        activity_lines.append("  Executing --> Failed : error")
+        activity_lines.append("  Failed --> Idle : retry")
     else:
         activity_lines.append("  Idle --> Processing : start")
-    activity_lines.append("  Processing --> Validating : data ready")
-    activity_lines.append("  Validating --> Completed : success")
-    activity_lines.append("  Validating --> Failed : error")
-    activity_lines.append("  Failed --> Idle : retry")
-    activity_lines.append("  Completed --> [*]")
+        activity_lines.append("  Processing --> Validating")
+        activity_lines.append("  Validating --> Completed : success")
+        activity_lines.append("  Validating --> Failed : error")
+        activity_lines.append("  Completed --> [*]")
+        activity_lines.append("  Failed --> Idle : retry")
 
     return [
         "\n".join(usecase_lines),
@@ -992,6 +1120,6 @@ async def finalize_and_export(state: SRSState) -> dict:
         "is_complete": True,
         "final_document": final_document.strip(),
         "project_title": project_title,
-        "plantumul_diagrams": state.get("plantumul_diagrams", {}) or _fallback_plantuml_diagrams(ingestion),
+        "plantumul_diagrams": state.get("plantumul_diagrams", {}) or _build_plantuml_diagrams(ingestion),
         "chat_history": new_messages,
     }
