@@ -995,7 +995,8 @@ def _build_mermaid_diagrams(ingestion: dict) -> list[str]:
         class_lines.append("  }")
         class_lines.append("  System --> Request : submits")
         class_lines.append("  Request --> Response : produces")
-    comp_blocks = [c for c in components[:3] if c and c.lower() != entity.lower() for entity in (entities or [""])]
+    entity_names_lower = {e.lower() for e in (entities or [""]) if e}
+    comp_blocks = [c for c in components[:3] if c and c.lower() not in entity_names_lower]
     for c in comp_blocks:
         safe_cid = _sanitize_id(c)
         class_lines.append(f"  class {safe_cid} {{")
