@@ -928,11 +928,11 @@ async def generate_mermaid_diagrams(state: SRSState) -> dict:
 def _build_mermaid_diagrams(ingestion: dict) -> list[str]:
     """Generate fallback Mermaid diagrams when LLM generation fails."""
     project_title = _clean_text(ingestion.get("project_title"), "System")
-    actors = _coerce_list(ingestion.get("suggested_actors", []) or ingestion.get("target_users", []))
+    actors = [_item_str(a) for a in _coerce_list(ingestion.get("suggested_actors", []) or ingestion.get("target_users", []))]
     flows = [f for f in _coerce_list(ingestion.get("core_flows", [])) if isinstance(f, dict)]
-    entities = _coerce_list(ingestion.get("data_entities", []))
-    components = _coerce_list(ingestion.get("components", []))
-    interfaces = _coerce_list(ingestion.get("external_interfaces", []))
+    entities = [_item_str(e) for e in _coerce_list(ingestion.get("data_entities", []))]
+    components = [_item_str(c) for c in _coerce_list(ingestion.get("components", []))]
+    interfaces = [_item_str(i) for i in _coerce_list(ingestion.get("external_interfaces", []))]
 
     primary_actor = _escape_label(actors[0]) if actors else '"User"'
     secondary_actor = _escape_label(actors[1]) if len(actors) > 1 else None
