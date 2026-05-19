@@ -650,6 +650,9 @@ Elicitation answers:
 SRS sections:
 {sections}
 
+Diagram hints (derived from ingestion/sections):
+{diagram_hints}
+
 Generate exactly 4 Mermaid diagrams in this order:
 
 1. **Use Case View** (`flowchart TD`) - Show primary actors and their use cases with a system boundary-style subgraph.
@@ -657,15 +660,25 @@ Generate exactly 4 Mermaid diagrams in this order:
 3. **ER Diagram** (`erDiagram`) - Show entity-relationship model with key entities, attributes, and relationships using crow's foot notation.
 4. **Activity Diagram** (`stateDiagram-v2`) - Show the main workflow or business process flow with states and transitions.
 
+Quality rules:
+- Use actual actors, flows, entities, components, and integrations from the context.
+- Keep labels consistent across diagrams (same actor/entity names in all diagrams).
+- Prefer specific domain terms over generic placeholders; only use generic labels if no concrete data exists.
+- Include at least 3 use cases, 3 entities, and 4 steps when data allows.
+- Use external interfaces as external nodes in the use case view when provided.
+- For class + ER diagrams, include 2-4 attributes per entity (id, status, createdAt, etc.) inferred from the domain.
+- For activity, use the primary core flow steps and include a success and failure path when reasonable.
+
 Mermaid syntax rules:
 - For usecase view: use `flowchart TD`, represent actors and use cases as labeled nodes, and wrap use cases in `subgraph System["..."]`
 - For class: use `classDiagram`, `class Name {{ +attribute type method() }}`, `<|--` for inheritance, `-->` for association
 - For er: use `erDiagram`, `ENTITY ||--o{{ OTHER : relationship`, entity attributes in braces
 - For activity/state: use `stateDiagram-v2`, `[*] --> State`, `State --> [*]`, `State --> Other : trigger`
+- Use safe node IDs (letters, digits, underscore); put human labels in quotes when needed.
 
 Rules:
 - Base diagrams on actual project data (actors, entities, workflows, components)
-- Keep diagrams concise but meaningful (5-10 elements each)
+- Keep diagrams concise but meaningful (6-12 elements each)
 - Use proper Mermaid syntax that will parse correctly
 - Use double quotes around labels with special characters
 - Avoid empty states or dangling relationships
