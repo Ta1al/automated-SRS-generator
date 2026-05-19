@@ -30,7 +30,7 @@ from app.formatting import assemble_document_from_sections
 from app.graph import prompts
 from app.graph.state import SRSState, IngestionSummary, ClarificationQuestion
 from app.rag.vectorstore import retrieve
-from app.validation.mermaid import validate_mermaid_syntax
+from app.validation.mermaid import validate_mermaid_syntax, _VALID_TYPES
 
 logger = logging.getLogger(__name__)
 
@@ -903,8 +903,22 @@ async def generate_mermaid_diagrams(state: SRSState) -> dict:
                 code = ""
             if not code:
                 continue
+
+            # If the LLM used the wrong diagram type, skip the upgrade
+            # rather than prepending the correct prefix (which produces
+            # invalid mixed-type Mermaid that mmdc may not catch).
             if not code.startswith(expected_prefix):
-                code = f"{expected_prefix}\n{code}"
+                mermaid_errors.append(f"{key}: wrong diagram type (expected {expected_prefix!r})")
+                continue
+
+            # Ensure the first line is the ONLY diagram type declaration.
+            # A second diagram type embedded later (e.g.
+            # "stateDiagram-v2\nflowchart TD\n...") is invalid Mermaid
+            # that mmdc sometimes accepts but the frontend renders poorly.
+            rest = code[len(expected_prefix):].lstrip()
+            if _VALID_TYPES.search(rest):
+                mermaid_errors.append(f"{key}: embedded second diagram type in LLM output")
+                continue
 
             is_valid, validation_error = await validate_mermaid_syntax(code)
             if not is_valid:
