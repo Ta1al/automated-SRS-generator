@@ -121,4 +121,8 @@ body {
     transition-duration: 1ms !important;
     scroll-behavior: auto !important;
   }
+  [role="status"] .animate-spin,
+  [role="status"] .animate-pulse {
+    animation-duration: inherit !important;
+  }
 }

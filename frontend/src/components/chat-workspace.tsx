@@ -1149,7 +1149,7 @@ function ReceivingBubble({
       role="status"
     >
       <div className="flex items-start gap-3">
-        <span className="mt-0.5 h-4 w-4 animate-spin rounded-full border-2 border-[color:var(--outline-variant)]/50 border-t-[color:var(--primary)]" />
+        <span className="mt-0.5 h-5 w-5 animate-spin rounded-full border-[3px] border-[color:var(--outline-variant)]/20 border-t-[color:var(--primary)] border-r-[color:var(--primary)]" />
         <div className="flex-1">
           <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[color:var(--on-surface-variant)]">
             SRS Generation in Progress
