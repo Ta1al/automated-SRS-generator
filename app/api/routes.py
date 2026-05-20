@@ -786,6 +786,105 @@ async def _is_interrupted(app_state: Any, thread_id: str) -> bool:
         return False
 
 
+# ── Completed-graph intent classifier ──────────────────────────────────────────
+
+_COMPLETED_GRAPH_INTENT_SYSTEM = """\
+You classify user messages for an SRS (Software Requirements Specification) assistant
+that has ALREADY completed a draft SRS document.
+
+The user is now sending a FOLLOW-UP message to the existing SRS.
+
+Return ONLY valid JSON in this schema:
+{
+    "intent": "revision_request|conversational|new_idea",
+    "target_section": "<section key or empty string>",
+    "reason": "short explanation"
+}
+
+Classification rules:
+- revision_request: user asks to change, refine, expand, or fix a specific part of the existing SRS. Set target_section to the most relevant section key ("s1", "s2", "s3_functional", "s3_external", "s3_nfr", "s4") or "" if unclear.
+- conversational: user gives feedback ("looks good", "thanks"), asks a general question about the SRS, or engages in casual discussion — NO changes requested.
+- new_idea: user describes a completely new product or feature that requires starting over or a major new elicitation cycle.
+
+Do not include markdown or extra keys.
+"""
+
+
+async def _classify_completed_graph_intent(
+    message: str,
+    existing_sections: dict[str, str],
+) -> tuple[str, str]:
+    """Classify a non-resume message on a completed graph into intent + target.
+
+    Returns (intent, target_section_key).
+    """
+    normalized = " ".join(message.split()).strip()
+    if not normalized:
+        return "conversational", ""
+
+    section_preview = "\n".join(
+        f"{key}: {(content or '')[:200]}"
+        for key, content in existing_sections.items()
+        if content
+    )[:1500]
+
+    try:
+        llm = _get_guardrail_llm()
+        response = await llm.ainvoke([
+            SystemMessage(content=_COMPLETED_GRAPH_INTENT_SYSTEM),
+            HumanMessage(
+                content=f"Existing sections:\n{section_preview}\n\nUser message:\n{normalized}"
+            ),
+        ])
+        payload = _extract_json_dict(_guardrail_ai_text(response))
+        if payload:
+            intent = str(payload.get("intent", "")).strip().lower()
+            target = str(payload.get("target_section", "")).strip()
+            if intent in {"revision_request", "conversational", "new_idea"}:
+                return intent, target
+    except Exception:
+        logger.warning("Completed-graph intent classifier failed; defaulting to revision_request")
+
+    return "revision_request", ""
+
+
+async def _generate_conversational_response(
+    message: str,
+    existing_sections: dict[str, str],
+    chat_history_summary: str,
+) -> str:
+    """Generate a direct conversational response without running the graph."""
+    section_list = "\n".join(
+        f"{key}: {(content or '')[:300]}"
+        for key, content in existing_sections.items()
+        if content
+    )[:2000]
+
+    prompt = f"""\
+You are a helpful SRS assistant. The user has an existing SRS draft and is chatting with you.
+Respond conversationally and concisely. Do NOT regenerate the SRS.
+
+Existing sections:
+{section_list}
+
+Chat history summary:
+{chat_history_summary}
+
+User message: {message}
+
+Respond naturally — acknowledge, answer questions about the SRS, or provide guidance.
+Keep it brief (1-3 sentences)."""
+    try:
+        llm = _get_guardrail_llm()
+        response = await llm.ainvoke([
+            SystemMessage(content="You are a helpful SRS assistant. Respond concisely."),
+            HumanMessage(content=prompt),
+        ])
+        return _guardrail_ai_text(response)
+    except Exception:
+        return "Got it! Let me know if you'd like to make any changes to the SRS."
+
+
 # ── SSE event generator ───────────────────────────────────────────────────────
 
 # Node display names and typical durations for better UX feedback
@@ -837,6 +936,17 @@ _NODE_SEQUENCE_DIAGRAMS_ONLY = _NODE_SEQUENCE_FULL_WITH_DIAGRAMS
 
 _NODE_SEQUENCE_SECTION_REVISION = [
     "revise_selected_section",
+    "finalize_and_export",
+]
+
+# Shorter sequences used when sections are pre-seeded and elicitation is skipped
+_NODE_SEQUENCE_SKIP_TO_DRAFT = [
+    "draft_from_approved_outline",
+    "generate_mermaid_diagrams",
+    "finalize_and_export",
+]
+_NODE_SEQUENCE_SKIP_TO_DRAFT_NO_DIAGRAMS = [
+    "draft_from_approved_outline",
     "finalize_and_export",
 ]
 
@@ -909,11 +1019,38 @@ async def _stream_graph(
     graph = app_state.graph
     config = {"configurable": {"thread_id": thread_id}}
     
+    # Pre-fetch prior state once (used for both sequence selection and inputs)
+    prior_has_all_sections = False
+    prior_ingestion_summary: dict = {}
+    prior_sections: dict = section_seed or {}
+    prior_elicitation_answers: dict = {}
+    prior_plantuml: dict = {}
+    prior_mermaid: list = []
+    if not is_resume:
+        try:
+            prior_state = await graph.aget_state(config)
+            if prior_state and prior_state.values:
+                pv = prior_state.values
+                if pv.get("sections"):
+                    prior_sections = pv.get("sections", {})
+                if pv.get("ingestion_summary"):
+                    prior_ingestion_summary = pv.get("ingestion_summary", {})
+                if pv.get("elicitation_answers"):
+                    prior_elicitation_answers = pv.get("elicitation_answers", {})
+                prior_plantuml = pv.get("plantumul_diagrams", {}) or {}
+                prior_mermaid = pv.get("mermaid_blocks", []) or []
+                if isinstance(prior_sections, dict):
+                    prior_has_all_sections = len([k for k in ["s1", "s2", "s3_functional", "s3_external", "s3_nfr", "s4"] if prior_sections.get(k)]) >= 6
+        except Exception:
+            pass
+    
     # Determine which node sequence we're using based on mode and generate_diagrams
     if mode == "diagrams_only":
         node_sequence = _NODE_SEQUENCE_DIAGRAMS_ONLY
     elif mode == "section_revision":
         node_sequence = _NODE_SEQUENCE_SECTION_REVISION
+    elif not is_resume and not revision_mode and prior_has_all_sections:
+        node_sequence = _NODE_SEQUENCE_SKIP_TO_DRAFT if generate_diagrams else _NODE_SEQUENCE_SKIP_TO_DRAFT_NO_DIAGRAMS
     else:
         # For "full" mode, choose between diagrams and no-diagrams sequence
         node_sequence = _NODE_SEQUENCE_FULL_WITH_DIAGRAMS if generate_diagrams else _NODE_SEQUENCE_FULL_NO_DIAGRAMS
@@ -932,21 +1069,23 @@ async def _stream_graph(
             # Resume the paused graph with the user's answer
             inputs: Any = Command(resume={"message": message})
         else:
-            # Fresh invocation
+            # Fresh invocation — preserve prior state so the graph does not
+            # lose existing sections, elicitation answers, or diagrams.
+
             inputs = {
                 "chat_history": [HumanMessage(content=message)],
                 "current_phase": "ingestion",
                 "pending_group_index": 0,
-                "elicitation_answers": {},
+                "elicitation_answers": prior_elicitation_answers,
                 "document_buffer": "",
                 "missing_context": [],
-                "ingestion_summary": {},
+                "ingestion_summary": prior_ingestion_summary,
                 "revision_targets": [],
                 "requirements": [],
                 "rag_context": "",
-                "sections": section_seed or {},
-                "plantumul_diagrams": {},
-                "mermaid_blocks": [],
+                "sections": prior_sections,
+                "plantumul_diagrams": prior_plantuml,
+                "mermaid_blocks": prior_mermaid,
                 "mermaid_errors": [],
                 "mermaid_correction_attempts": 0,
                 "generate_diagrams": generate_diagrams,
@@ -1229,6 +1368,67 @@ async def interact(
         with suppress(asyncio.CancelledError):
             await guardrail_task
 
+    # ── Completed-graph intent detection ─────────────────────────────────────
+    # If not resuming and the graph already has a completed SRS draft, classify
+    # the user's intent so we can respond conversationally or route to revision
+    # instead of blindly restarting the full pipeline.
+    conversational_response: str | None = None
+    revised_mode = body.mode
+    revised_revision_mode = body.revision_mode
+    revised_target_key = body.revision_target_section_key
+    revised_target_title = body.revision_target_title
+    revised_target_content = body.revision_target_content
+    has_completed_state = False
+    existing_sections: dict[str, str] = {}
+
+    if not is_resume:
+        try:
+            prior_state = await app_state.graph.aget_state({"configurable": {"thread_id": thread_id}})
+            if prior_state and prior_state.values:
+                existing_sections = prior_state.values.get("sections", {}) or {}
+                if isinstance(existing_sections, dict):
+                    section_keys = list(existing_sections.keys())
+                    has_completed_state = len([k for k in ["s1", "s2", "s3_functional", "s3_external", "s3_nfr", "s4"] if existing_sections.get(k)]) >= 6
+        except Exception:
+            pass
+
+        if has_completed_state:
+            intent, target = await _classify_completed_graph_intent(body.message, existing_sections)
+
+            if intent == "conversational":
+                past_msgs = ""
+                try:
+                    from langchain_core.messages import BaseMessage
+                    prior_state = await app_state.graph.aget_state({"configurable": {"thread_id": thread_id}})
+                    if prior_state and prior_state.values:
+                        hist = prior_state.values.get("chat_history", [])
+                        if isinstance(hist, list):
+                            past_msgs = "\n".join(
+                                f"{m.__class__.__name__}: {m.content[:200]}"
+                                for m in hist[-6:]
+                                if isinstance(m, BaseMessage)
+                            )
+                except Exception:
+                    pass
+                conversational_response = await _generate_conversational_response(
+                    body.message, existing_sections, past_msgs,
+                )
+                logger.info(
+                    "Interact conversational response for thread=%s intent=%s",
+                    thread_id, intent,
+                )
+
+            elif intent == "revision_request" and target in existing_sections:
+                revised_mode = "section_revision"
+                revised_revision_mode = True
+                revised_target_key = target
+                revised_target_content = existing_sections[target]
+                revised_target_title = target
+                logger.info(
+                    "Interact auto-revision for thread=%s target=%s",
+                    thread_id, target,
+                )
+
     if not is_resume and guardrail_task is not None:
         is_relevant, redirect_message, classifier_source = await guardrail_task
         if not is_relevant:
@@ -1251,18 +1451,25 @@ async def interact(
             }
             return
 
+        if conversational_response:
+            yield {
+                "event": "token",
+                "data": json.dumps({"content": conversational_response, "node": "message_guard"}),
+            }
+            return
+
         async for event in _stream_graph(
             app_state,
             thread_id,
             body.message,
             is_resume,
-            body.mode,
+            revised_mode,
             body.generate_diagrams,
             body.section_seed,
-            body.revision_mode,
-            body.revision_target_section_key,
-            body.revision_target_title,
-            body.revision_target_content,
+            revised_revision_mode,
+            revised_target_key,
+            revised_target_title,
+            revised_target_content,
         ):
             if await request.is_disconnected():
                 logger.info("Client disconnected mid-stream for thread %s", thread_id)
