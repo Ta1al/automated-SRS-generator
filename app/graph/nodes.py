@@ -523,6 +523,9 @@ async def generate_single_elicitation_question(state: SRSState) -> dict:
             "final_document": final_document,
             "project_title": str(ingestion.get("project_title", "")).strip(),
             "plantumul_diagrams": _build_plantuml_diagrams(ingestion),
+            "pending_group_index": 4,
+            "elicitation_question_plan": [],
+            "elicitation_question_index": 0,
         }
 
     if question_index >= len(question_plan):
