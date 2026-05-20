@@ -572,9 +572,9 @@ If user says "finalize", "done", "looks good", etc., set ready_to_finalize to tr
 """
 
 REGENERATION_SYSTEM = """\
-You are a technical writer revising a specific SRS section based on user feedback.
+You are a technical writer revising section {section_key} ({target_title}) of an SRS document based on user feedback.
 
-Original section:
+Original section content:
 {original_section}
 
 User feedback/request:
@@ -590,8 +590,14 @@ Your task: Revise the section to address the user's feedback while maintaining:
 - IEEE 830 structure and conventions
 - Consistency with other sections
 - Atomic, testable requirements
+- The same subsection numbering structure as the original
 
-Return only the revised Markdown content for the section.
+For each subsection, provide:
+- "number": subsection number (e.g. "1.1", "2.3", "A.1")
+- "title": subsection title (e.g. "Purpose", "Scope")
+- "content": full Markdown text for that subsection, excluding the heading
+
+Return a JSON object with a "subsections" array containing all subsections.
 """
 
 

@@ -747,6 +747,8 @@ async def revise_selected_section(state: SRSState) -> dict:
     logger.info(f"Revising section {section_key}: {target_title}")
 
     system_prompt = prompts.REGENERATION_SYSTEM.format(
+        section_key=section_key,
+        target_title=target_title,
         original_section=original_content,
         feedback=feedback,
         ingestion_summary=json.dumps(ingestion, indent=2),
@@ -754,18 +756,18 @@ async def revise_selected_section(state: SRSState) -> dict:
         chat_history=chat_history_str,
     )
 
-    revised_content = await _llm_invoke_text(
+    result = await _llm_invoke_structured(
         system_prompt=system_prompt,
+        output_model=DraftSectionModel,
         temperature=0.5,
     )
 
-    revised_content = revised_content.strip()
-    if not revised_content:
-        logger.warning("Revision returned empty content; keeping original")
-        return {}
-
     sections = dict(state.get("sections", {}))
-    sections[section_key] = revised_content
+    section_structures = dict(state.get("section_structures", {}))
+
+    markdown = _assemble_section_markdown(section_key, result.subsections)
+    sections[section_key] = markdown
+    section_structures[section_key] = [s.model_dump() for s in result.subsections]
 
     confirmation = (
         f"**✓ Section Revised: {target_title}**\n\n"
@@ -779,6 +781,7 @@ async def revise_selected_section(state: SRSState) -> dict:
 
     return {
         "sections": sections,
+        "section_structures": section_structures,
         "current_phase": "drafting",
         "chat_history": new_messages,
     }

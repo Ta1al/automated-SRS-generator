@@ -221,8 +221,20 @@ def _append_diagrams_to_document(document_text: str, state_values: dict[str, Any
     if (not isinstance(diagrams, dict) or not diagrams) and not mermaid_blocks:
         return body
 
-    if _DIAGRAM_FENCE_RE.search(body):
-        return body
+    # Only skip if diagram fences appear AFTER an existing "Diagrams" heading.
+    # Searching the whole body for stray fences (e.g. inside LLM-drafted sections)
+    # would skip ALL state diagrams, leaving only whatever the LLM happened to embed.
+    lines = body.splitlines()
+    diagrams_header_idx: int | None = None
+    for i, line in enumerate(lines):
+        if _DIAGRAMS_HEADER_RE.match(line.strip()):
+            diagrams_header_idx = i
+            break
+    if diagrams_header_idx is not None:
+        remaining = "\n".join(lines[diagrams_header_idx:])
+        if _DIAGRAM_FENCE_RE.search(remaining):
+            return body
+
     diagram_lines: list[str] = []
     for diagram_key, diagram_code in diagrams.items():
         cleaned_key = str(diagram_key).replace("_", " ").strip().title() or "Diagram"
@@ -250,17 +262,11 @@ def _append_diagrams_to_document(document_text: str, state_values: dict[str, Any
     if not diagram_lines:
         return body
 
-    header_line_index: int | None = None
-    lines = body.splitlines()
-    for index, line in enumerate(lines):
-        if _DIAGRAMS_HEADER_RE.match(line.strip()):
-            header_line_index = index
-            break
-
-    if header_line_index is None:
+    # Reuse the header index found above (or None if no Diagrams heading existed)
+    if diagrams_header_idx is None:
         return "\n\n".join([body, "# 6 Diagrams", *diagram_lines]).strip()
 
-    insert_at = header_line_index + 1
+    insert_at = diagrams_header_idx + 1
     insertion: list[str] = []
     if insert_at < len(lines) and lines[insert_at].strip():
         insertion.append("")
@@ -514,13 +520,13 @@ def _build_mermaid_diagrams(ingestion: dict[str, Any]) -> list[str]:
         comp_lines.append(f"  {ext_id}[{_escape_label(ext)}]")
         comp_lines.append(f"  C{last_idx} ==> {ext_id}")
 
+    # Order matches the labels in _append_diagrams_to_document:
+    #   ["Use Case Diagram", "Class Diagram", "ER Diagram", "Activity Diagram"]
     return [
-        "\n".join(usecase_lines),
-        "\n".join(seq_lines),
-        "\n".join(er_lines),
-        "\n".join(class_lines),
-        "\n".join(state_lines),
-        "\n".join(comp_lines),
+        "\n".join(usecase_lines),  # Use Case Diagram (flowchart TD)
+        "\n".join(class_lines),    # Class Diagram (classDiagram)
+        "\n".join(er_lines),       # ER Diagram (erDiagram)
+        "\n".join(state_lines),    # Activity Diagram (stateDiagram-v2)
     ]
 
 
@@ -1393,7 +1399,15 @@ async def interact(
                 revised_revision_mode = True
                 revised_target_key = target
                 revised_target_content = existing_sections[target]
-                revised_target_title = target
+                _section_titles = {
+                    "s1": "Section 1 · Introduction",
+                    "s2": "Section 2 · Overall Description",
+                    "s3_functional": "Section 3.1 · Functional Requirements",
+                    "s3_external": "Section 3.2 · External Interface Requirements",
+                    "s3_nfr": "Section 3.3 · Non-Functional Requirements",
+                    "s4": "Section 4 · Appendices",
+                }
+                revised_target_title = _section_titles.get(target, target)
                 logger.info(
                     "Interact auto-revision for thread=%s target=%s",
                     thread_id, target,

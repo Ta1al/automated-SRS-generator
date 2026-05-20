@@ -192,9 +192,8 @@ def test_build_mermaid_diagrams_produces_richer_bundle() -> None:
         }
     )
 
-    assert len(diagrams) >= 5
+    assert len(diagrams) == 4
     assert any(block.startswith("flowchart TD") for block in diagrams)
-    assert any(block.startswith("sequenceDiagram") for block in diagrams)
     assert any(block.startswith("erDiagram") for block in diagrams)
     assert any(block.startswith("classDiagram") for block in diagrams)
     assert any(block.startswith("stateDiagram-v2") for block in diagrams)
