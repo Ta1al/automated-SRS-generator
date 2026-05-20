@@ -60,6 +60,15 @@ def _route_from_start(state: SRSState) -> Literal["ingest_and_map_domain", "revi
     return "ingest_and_map_domain"
 
 
+def _route_after_draft(
+    state: SRSState,
+) -> Literal["generate_mermaid_diagrams", "finalize_and_export"]:
+    """After drafting, route to diagrams iff generate_diagrams is True."""
+    if state.get("generate_diagrams", True):
+        return "generate_mermaid_diagrams"
+    return "finalize_and_export"
+
+
 def _route_after_storing_answer(
     state: SRSState,
 ) -> Literal["generate_single_elicitation_question", "generate_elicitation_plan", "draft_from_approved_outline"]:
@@ -163,8 +172,15 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None) -> StateGraph:
     # revise_selected_section → finalize_and_export
     graph.add_edge("revise_selected_section", "finalize_and_export")
 
-    # draft_from_approved_outline → generate_mermaid_diagrams
-    graph.add_edge("draft_from_approved_outline", "generate_mermaid_diagrams")
+    # draft_from_approved_outline → [diagrams] or → finalize_and_export
+    graph.add_conditional_edges(
+        "draft_from_approved_outline",
+        _route_after_draft,
+        {
+            "generate_mermaid_diagrams": "generate_mermaid_diagrams",
+            "finalize_and_export": "finalize_and_export",
+        },
+    )
 
     # generate_mermaid_diagrams → finalize_and_export
     graph.add_edge("generate_mermaid_diagrams", "finalize_and_export")
