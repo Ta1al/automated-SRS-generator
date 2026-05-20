@@ -30,7 +30,7 @@ from app.formatting import assemble_document_from_sections
 from app.graph import prompts
 from app.graph.state import SRSState, IngestionSummary, ClarificationQuestion
 from app.rag.vectorstore import retrieve
-from app.validation.mermaid import validate_mermaid_syntax, _VALID_TYPES
+from app.validation.mermaid import validate_mermaid_syntax
 
 logger = logging.getLogger(__name__)
 
@@ -911,14 +911,18 @@ async def generate_mermaid_diagrams(state: SRSState) -> dict:
                 mermaid_errors.append(f"{key}: wrong diagram type (expected {expected_prefix!r})")
                 continue
 
-            # Ensure the first line is the ONLY diagram type declaration.
-            # A second diagram type embedded later (e.g.
-            # "stateDiagram-v2\nflowchart TD\n...") is invalid Mermaid
-            # that mmdc sometimes accepts but the frontend renders poorly.
-            rest = code[len(expected_prefix):].lstrip()
-            if _VALID_TYPES.search(rest):
-                mermaid_errors.append(f"{key}: embedded second diagram type in LLM output")
-                continue
+            # Reject stateDiagram-v2 code that uses invalid `[State]` bracket
+            # syntax (e.g. `[Start] --> [User Places Order]`).  Mermaid state
+            # diagrams require `[*]` for start/end or bare state names; bracket
+            # notation is only valid in flowcharts.  mmdc does not catch this.
+            if key == "activity":
+                _has_invalid_bracket = any(
+                    line.strip().startswith("[") and not line.strip().startswith("[*]")
+                    for line in code.splitlines()
+                )
+                if _has_invalid_bracket:
+                    mermaid_errors.append(f"{key}: invalid bracket state syntax in LLM output")
+                    continue
 
             is_valid, validation_error = await validate_mermaid_syntax(code)
             if not is_valid:
