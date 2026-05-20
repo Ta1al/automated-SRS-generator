@@ -44,10 +44,19 @@ def _route_after_single_question(
     return "classify_and_store_answers"
 
 
-def _route_from_start(state: SRSState) -> Literal["ingest_and_map_domain", "revise_selected_section"]:
+def _route_from_start(state: SRSState) -> Literal["ingest_and_map_domain", "revise_selected_section", "draft_from_approved_outline"]:
     """Route to ingestion (full run) or direct to section revision."""
     if state.get("revision_mode", False):
         return "revise_selected_section"
+
+    # If all sections already exist (pre-seeded from a prior run), skip ingestion
+    # and go straight to drafting — avoids re-parsing the user's old message as a
+    # new product idea when they are just continuing the conversation.
+    sections = state.get("sections", {})
+    if isinstance(sections, dict):
+        existing = [key for key in ["s1", "s2", "s3_functional", "s3_external", "s3_nfr", "s4"] if sections.get(key)]
+        if len(existing) >= 6:
+            return "draft_from_approved_outline"
     return "ingest_and_map_domain"
 
 
@@ -55,6 +64,9 @@ def _route_after_storing_answer(
     state: SRSState,
 ) -> Literal["generate_single_elicitation_question", "generate_elicitation_plan", "draft_from_approved_outline"]:
     """After storing answer, check if more questions in plan, more groups, or done."""
+    if state.get("is_complete", False):
+        return "draft_from_approved_outline"
+
     question_index = state.get("elicitation_question_index", 0)
     question_plan = state.get("elicitation_question_plan", [])
     group_index = state.get("pending_group_index", 0)
@@ -113,13 +125,14 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None) -> StateGraph:
     # Add edges
     # ────────────────────────────────────────────────────────────────────────
 
-    # START → [conditional: revision or ingestion]
+    # START → [conditional: revision, ingestion, or skip to drafting]
     graph.add_conditional_edges(
         START,
         _route_from_start,
         {
             "ingest_and_map_domain": "ingest_and_map_domain",
             "revise_selected_section": "revise_selected_section",
+            "draft_from_approved_outline": "draft_from_approved_outline",
         },
     )
 
